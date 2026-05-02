@@ -1,7 +1,6 @@
 # Harbor
 
 ## Offline-First Communication and Intentional Productivity Platform
-
 ---
 
 ## Executive Summary
