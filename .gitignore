@@ -1,6 +1,7 @@
 .metadata
 *.tmp
 *.swp
+/a.out
 
 # Windows thumbnail db
 Thumbs.db
