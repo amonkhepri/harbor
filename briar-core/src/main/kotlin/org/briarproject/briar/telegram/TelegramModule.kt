@@ -29,7 +29,7 @@ class TelegramModule {
 	): TelegramAuthSession =
 		if (featureFlags.shouldEnableTelegramConnector()) {
 			TelegramAuthSessionImpl(
-				StubTelegramTdlibLoginClient(
+				ReflectiveTelegramTdlibLoginClient(
 					File(databaseConfig.databaseDirectory, "tdlib"),
 				),
 			)

@@ -60,7 +60,7 @@ class NoOpTelegramTdlibLoginClient : TelegramTdlibLoginClient {
 	override fun close(): TelegramAuthState = TelegramAuthState.CLOSED
 }
 
-class StubTelegramTdlibLoginClient @JvmOverloads constructor(
+class ReflectiveTelegramTdlibLoginClient @JvmOverloads constructor(
 	private val tdlibDirectory: File = File("harbor-telegram"),
 ) : TelegramTdlibLoginClient {
 
@@ -414,7 +414,7 @@ class StubTelegramTdlibLoginClient @JvmOverloads constructor(
 			Class.forName(
 					"org.drinkless.tdlib.Client",
 					false,
-					StubTelegramTdlibLoginClient::class.java.classLoader,
+					ReflectiveTelegramTdlibLoginClient::class.java.classLoader,
 			)
 			true
 		} catch (_: ClassNotFoundException) {
