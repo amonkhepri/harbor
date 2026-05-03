@@ -4,7 +4,10 @@ import android.content.Context;
 import android.os.Bundle;
 import android.view.View;
 
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
+
 import org.briarproject.briar.R;
+import org.briarproject.briar.api.telegram.TelegramConnector;
 import org.briarproject.nullsafety.MethodsNotNullByDefault;
 import org.briarproject.nullsafety.ParametersNotNullByDefault;
 
@@ -20,12 +23,15 @@ import androidx.annotation.RequiresApi;
 import androidx.fragment.app.FragmentActivity;
 import androidx.lifecycle.LifecycleOwner;
 import androidx.lifecycle.ViewModelProvider;
+import androidx.preference.EditTextPreference;
 import androidx.preference.ListPreference;
+import androidx.preference.Preference;
 import androidx.preference.PreferenceFragmentCompat;
 import androidx.preference.SwitchPreferenceCompat;
 
 import static android.Manifest.permission.BLUETOOTH_CONNECT;
 import static android.os.Build.VERSION.SDK_INT;
+import static org.briarproject.bramble.util.StringUtils.isNullOrEmpty;
 import static org.briarproject.briar.android.AppModule.getAndroidComponent;
 import static org.briarproject.briar.android.settings.SettingsActivity.enableAndPersist;
 import static org.briarproject.briar.android.util.PermissionUtils.areBluetoothPermissionsGranted;
@@ -46,9 +52,16 @@ public class ConnectionsFragment extends PreferenceFragmentCompat {
 			"pref_key_tor_mobile_data";
 	static final String PREF_KEY_TOR_ONLY_WHEN_CHARGING =
 			"pref_key_tor_only_when_charging";
+	static final String PREF_KEY_TELEGRAM_STATUS = "pref_key_telegram_status";
+	static final String PREF_KEY_TELEGRAM_LINKED_IDENTITY =
+			"pref_key_telegram_linked_identity";
+	static final String PREF_KEY_TELEGRAM_VERIFICATION = "pref_key_telegram_verification";
 
 	@Inject
 	ViewModelProvider.Factory viewModelFactory;
+
+	@Inject
+	TelegramConnector telegramConnector;
 
 	private SettingsViewModel viewModel;
 	private ConnectionsManager connectionsManager;
@@ -59,6 +72,10 @@ public class ConnectionsFragment extends PreferenceFragmentCompat {
 	private ListPreference torNetwork;
 	private SwitchPreferenceCompat torMobile;
 	private SwitchPreferenceCompat torOnlyWhenCharging;
+	private Preference telegramStatus;
+	private EditTextPreference telegramLinkedIdentity;
+	private Preference telegramVerification;
+	private String telegramAuthenticationPlaceholderCompletedIdentity;
 
 	@RequiresApi(31)
 	private final ActivityResultLauncher<String[]> requestPermissionLauncher =
@@ -84,8 +101,39 @@ public class ConnectionsFragment extends PreferenceFragmentCompat {
 		torNetwork = findPreference(PREF_KEY_TOR_NETWORK);
 		torMobile = findPreference(PREF_KEY_TOR_MOBILE_DATA);
 		torOnlyWhenCharging = findPreference(PREF_KEY_TOR_ONLY_WHEN_CHARGING);
+		telegramStatus = findPreference(PREF_KEY_TELEGRAM_STATUS);
+		telegramLinkedIdentity =
+				findPreference(PREF_KEY_TELEGRAM_LINKED_IDENTITY);
+		telegramVerification = findPreference(PREF_KEY_TELEGRAM_VERIFICATION);
 
 		torNetwork.setSummaryProvider(viewModel.torSummaryProvider);
+		telegramStatus.setVisible(telegramConnector.isEnabled());
+		telegramStatus.setSelectable(telegramConnector.isEnabled());
+		telegramStatus.setSummary(requireSettingsActivity()
+				.isTelegramConnectorReady()
+				? R.string.telegram_connector_settings_ready_summary
+				: R.string.telegram_connector_settings_summary);
+		telegramStatus.setOnPreferenceClickListener(preference -> {
+			showTelegramSetupDialog(requireSettingsActivity()
+					.isTelegramConnectorReady(),
+					telegramLinkedIdentity.getText());
+			return true;
+		});
+		telegramLinkedIdentity.setVisible(telegramConnector.isEnabled());
+		telegramLinkedIdentity.setPreferenceDataStore(viewModel.settingsStore);
+		telegramLinkedIdentity.setSummaryProvider(preference -> {
+			String linkedIdentity = telegramLinkedIdentity.getText();
+			if (!isNullOrEmpty(linkedIdentity)) return linkedIdentity;
+			return getString(requireSettingsActivity().isTelegramConnectorReady()
+					? R.string.telegram_connector_identity_empty_summary
+					: R.string.telegram_connector_identity_locked_summary);
+		});
+		telegramVerification.setVisible(telegramConnector.isEnabled());
+		telegramVerification.setOnPreferenceClickListener(preference -> {
+			showTelegramVerificationDialog(telegramLinkedIdentity.getText());
+			return true;
+		});
+		updateTelegramVerificationState(telegramLinkedIdentity.getText());
 
 		if (SDK_INT >= 31) {
 			enableBluetooth.setOnPreferenceChangeListener((p, value) -> {
@@ -144,6 +192,21 @@ public class ConnectionsFragment extends PreferenceFragmentCompat {
 			torOnlyWhenCharging.setChecked(enabled);
 			enableAndPersist(torOnlyWhenCharging);
 		});
+		viewModel.getTelegramLinkedIdentity().observe(lifecycleOwner,
+				value -> {
+					telegramLinkedIdentity.setText(value);
+					telegramLinkedIdentity.setPersistent(true);
+					telegramLinkedIdentity.setEnabled(requireSettingsActivity()
+							.isTelegramConnectorReady());
+					telegramVerification.setEnabled(requireSettingsActivity().isTelegramConnectorReady()
+							&& !isNullOrEmpty(value));
+					clearTelegramVerificationCompletionIfIdentityChanged(value);
+					updateTelegramVerificationState(value);
+					if (requireSettingsActivity().consumeOpenTelegramSetup()) {
+						showTelegramSetupDialog(requireSettingsActivity()
+								.isTelegramConnectorReady(), value);
+					}
+				});
 	}
 
 	@Override
@@ -166,5 +229,108 @@ public class ConnectionsFragment extends PreferenceFragmentCompat {
 					R.string.permission_bluetooth_title,
 					R.string.permission_bluetooth_denied_body);
 		}
+	}
+
+	private void showTelegramSetupDialog(boolean ready,
+			@Nullable String linkedIdentity) {
+		CharSequence message = getString(
+				R.string.telegram_connector_setup_unavailable_message);
+		if (ready) {
+			message = isNullOrEmpty(linkedIdentity)
+					? getString(R.string.telegram_connector_setup_ready_message)
+					: getString(
+							R.string.telegram_connector_setup_configured_message,
+							linkedIdentity);
+		}
+		MaterialAlertDialogBuilder builder =
+				new MaterialAlertDialogBuilder(requireContext(),
+						R.style.BriarDialogTheme)
+						.setTitle(R.string.telegram_connector_settings_title)
+						.setMessage(message);
+		builder.setPositiveButton(ready
+				? R.string.telegram_connector_setup_continue_button
+				: R.string.ok,
+				(dialog, which) -> {
+					if (ready) showTelegramIdentityEditor();
+				});
+		if (ready) builder.setNegativeButton(R.string.cancel, null);
+		builder.show();
+	}
+
+	private void showTelegramIdentityEditor() {
+		telegramLinkedIdentity.performClick();
+	}
+
+	private void showTelegramVerificationDialog(@Nullable String linkedIdentity) {
+		if (isNullOrEmpty(linkedIdentity)) return;
+		boolean alreadyReviewed = hasCompletedTelegramVerification(linkedIdentity);
+		new MaterialAlertDialogBuilder(requireContext(),
+				R.style.BriarDialogTheme)
+				.setTitle(R.string.telegram_connector_verification_title)
+				.setMessage(getString(
+						alreadyReviewed
+								? R.string.telegram_connector_verification_dialog_completed_message
+								: R.string.telegram_connector_verification_dialog_message,
+						linkedIdentity))
+				.setPositiveButton(
+						R.string.telegram_connector_verification_continue_button,
+						(dialog, which) ->
+								showTelegramAuthenticationPlaceholder(linkedIdentity))
+				.setNegativeButton(R.string.cancel, null)
+				.show();
+	}
+
+	private void updateTelegramVerificationState(@Nullable String linkedIdentity) {
+		if (!requireSettingsActivity().isTelegramConnectorReady()) {
+			telegramVerification.setSummary(
+					R.string.telegram_connector_verification_locked_summary);
+			return;
+		}
+		if (isNullOrEmpty(linkedIdentity)) {
+			telegramVerification.setSummary(
+					R.string.telegram_connector_verification_needs_identity_summary);
+			return;
+		}
+		if (hasCompletedTelegramVerification(linkedIdentity)) {
+			telegramVerification.setSummary(getString(
+					R.string.telegram_connector_verification_completed_summary,
+					linkedIdentity));
+			return;
+		}
+		telegramVerification.setSummary(getString(
+				R.string.telegram_connector_verification_ready_summary,
+				linkedIdentity));
+	}
+
+	private void clearTelegramVerificationCompletionIfIdentityChanged(
+			@Nullable String linkedIdentity) {
+		if (isNullOrEmpty(telegramAuthenticationPlaceholderCompletedIdentity)) return;
+		if (!telegramAuthenticationPlaceholderCompletedIdentity.equals(linkedIdentity)) {
+			telegramAuthenticationPlaceholderCompletedIdentity = null;
+		}
+	}
+
+	private boolean hasCompletedTelegramVerification(
+			@Nullable String linkedIdentity) {
+		return !isNullOrEmpty(linkedIdentity)
+				&& linkedIdentity.equals(telegramAuthenticationPlaceholderCompletedIdentity);
+	}
+
+	private void showTelegramAuthenticationPlaceholder(String linkedIdentity) {
+		new MaterialAlertDialogBuilder(requireContext(),
+				R.style.BriarDialogTheme)
+				.setTitle(R.string.telegram_connector_auth_placeholder_title)
+				.setMessage(getString(
+						R.string.telegram_connector_auth_placeholder_message,
+						linkedIdentity))
+				.setPositiveButton(R.string.ok, (dialog, which) -> {
+					telegramAuthenticationPlaceholderCompletedIdentity = linkedIdentity;
+					updateTelegramVerificationState(linkedIdentity);
+				})
+				.show();
+	}
+
+	private SettingsActivity requireSettingsActivity() {
+		return (SettingsActivity) requireActivity();
 	}
 }

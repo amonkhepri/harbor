@@ -3,6 +3,7 @@ package org.briarproject.briar.android.login;
 import android.annotation.SuppressLint;
 import android.content.Intent;
 import android.os.Bundle;
+import android.widget.Toast;
 
 import org.briarproject.briar.R;
 import org.briarproject.briar.android.BriarService;
@@ -18,25 +19,34 @@ import javax.inject.Inject;
 
 import androidx.annotation.Nullable;
 import androidx.lifecycle.ViewModelProvider;
+import androidx.fragment.app.Fragment;
 
 import static android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK;
 import static android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP;
 import static android.content.Intent.FLAG_ACTIVITY_NEW_TASK;
 import static android.content.Intent.FLAG_ACTIVITY_TASK_ON_HOME;
+import static android.widget.Toast.LENGTH_LONG;
 import static org.briarproject.briar.android.login.StartupViewModel.State.SIGNED_IN;
 import static org.briarproject.briar.android.login.StartupViewModel.State.SIGNED_OUT;
 import static org.briarproject.briar.android.login.StartupViewModel.State.STARTED;
 import static org.briarproject.briar.android.login.StartupViewModel.State.STARTING;
+import static org.briarproject.briar.android.login.StartupViewModel.State.TELEGRAM_LOGIN;
 
 @MethodsNotNullByDefault
 @ParametersNotNullByDefault
 public class StartupActivity extends BaseActivity implements
 		BaseFragmentListener {
 
+	private static final String KEY_STAGED_TELEGRAM_LOGIN_IDENTITY =
+			"stagedTelegramLoginIdentity";
+	public static final String EXTRA_STAGED_TELEGRAM_LOGIN_IDENTITY =
+			"briar.STAGED_TELEGRAM_LOGIN_IDENTITY";
+
 	@Inject
 	ViewModelProvider.Factory viewModelFactory;
 
 	private StartupViewModel viewModel;
+	private String stagedTelegramLoginIdentity = "";
 
 	@Override
 	public void injectActivity(ActivityComponent component) {
@@ -52,6 +62,10 @@ public class StartupActivity extends BaseActivity implements
 		overridePendingTransition(R.anim.fade_in, R.anim.fade_out);
 
 		setContentView(R.layout.activity_fragment_container);
+		if (state != null) {
+			stagedTelegramLoginIdentity = state.getString(
+					KEY_STAGED_TELEGRAM_LOGIN_IDENTITY, "");
+		}
 
 		if (!viewModel.accountExists()) {
 			// TODO ideally we would not have to delete the account again
@@ -65,7 +79,23 @@ public class StartupActivity extends BaseActivity implements
 		viewModel.getAccountDeleted().observeEvent(this, deleted -> {
 			if (deleted) onAccountDeleted();
 		});
+		viewModel.getTelegramLinkedIdentityStaged().observeEvent(this,
+				identifier -> {
+					stagedTelegramLoginIdentity = identifier;
+					Toast.makeText(this,
+							getString(
+									R.string.telegram_connector_login_handoff_staged,
+									identifier),
+							LENGTH_LONG).show();
+				});
 		viewModel.getState().observe(this, this::onStateChanged);
+	}
+
+	@Override
+	protected void onSaveInstanceState(Bundle state) {
+		super.onSaveInstanceState(state);
+		state.putString(KEY_STAGED_TELEGRAM_LOGIN_IDENTITY,
+				stagedTelegramLoginIdentity);
 	}
 
 	@Override
@@ -77,6 +107,14 @@ public class StartupActivity extends BaseActivity implements
 	@Override
 	@SuppressLint("MissingSuperCall")
 	public void onBackPressed() {
+		if (viewModel.getState().getValue() == TELEGRAM_LOGIN) {
+			if (viewModel.isShowingTelegramLoginConfirmation()) {
+				viewModel.showTelegramLoginIdentifierStep();
+				return;
+			}
+			viewModel.showPasswordFragment();
+			return;
+		}
 		// Move task and activity to the background instead of showing another
 		// password prompt.
 		// onActivityResult() won't be called in BriarActivity
@@ -87,12 +125,23 @@ public class StartupActivity extends BaseActivity implements
 		if (state == SIGNED_OUT) {
 			// Configuration changes such as screen rotation
 			// can cause this to get called again.
-			showInitialFragment(new PasswordFragment());
+			showPasswordFragment();
+		} else if (state == TELEGRAM_LOGIN) {
+			showTelegramLoginPlaceholder();
 		} else if (state == SIGNED_IN || state == STARTING) {
 			startService(new Intent(this, BriarService.class));
 			showNextFragment(new OpenDatabaseFragment());
 		} else if (state == STARTED) {
-			setResult(RESULT_OK);
+			Intent result = new Intent();
+			if (stagedTelegramLoginIdentity.isEmpty()) {
+				stagedTelegramLoginIdentity =
+						viewModel.getLastTelegramLinkedIdentityStaged();
+			}
+			if (!stagedTelegramLoginIdentity.isEmpty()) {
+				result.putExtra(EXTRA_STAGED_TELEGRAM_LOGIN_IDENTITY,
+						stagedTelegramLoginIdentity);
+			}
+			setResult(RESULT_OK, result);
 			supportFinishAfterTransition();
 			overridePendingTransition(R.anim.screen_new_in,
 					R.anim.screen_old_out);
@@ -106,6 +155,24 @@ public class StartupActivity extends BaseActivity implements
 		i.addFlags(FLAG_ACTIVITY_NEW_TASK | FLAG_ACTIVITY_CLEAR_TOP |
 				FLAG_ACTIVITY_CLEAR_TASK | FLAG_ACTIVITY_TASK_ON_HOME);
 		startActivity(i);
+	}
+
+	private void showPasswordFragment() {
+		Fragment current = getSupportFragmentManager()
+				.findFragmentById(R.id.fragmentContainer);
+		if (current instanceof PasswordFragment) return;
+
+		if (getSupportFragmentManager().findFragmentByTag(PasswordFragment.TAG)
+				!= null &&
+				getSupportFragmentManager().getBackStackEntryCount() > 0) {
+			getSupportFragmentManager().popBackStack();
+		} else {
+			showInitialFragment(new PasswordFragment());
+		}
+	}
+
+	private void showTelegramLoginPlaceholder() {
+		showNextFragment(TelegramLoginPlaceholderFragment.newInstance());
 	}
 
 	@Override
