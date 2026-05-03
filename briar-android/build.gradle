@@ -44,6 +44,12 @@ configurations.configureEach { config ->
 android {
 	compileSdk 35
 	buildToolsVersion '35.0.0'
+	buildFeatures {
+		compose true
+	}
+	composeOptions {
+		kotlinCompilerExtensionVersion '1.5.15'
+	}
 	packagingOptions {
 		jniLibs {
 			keepDebugSymbols += ['**/*.so']
@@ -199,6 +205,8 @@ dependencies {
 	testImplementation 'androidx.fragment:fragment-testing:1.4.0'
 	testImplementation "androidx.arch.core:core-testing:2.1.0"
 	testImplementation "androidx.test.espresso:espresso-core:3.5.0"
+	testImplementation platform("androidx.compose:compose-bom:$composeBomVersion")
+	testImplementation 'androidx.compose.ui:ui-test-junit4'
 	testImplementation 'org.robolectric:robolectric:4.8.2' // newer versions have SecureRandom issue
 	testImplementation 'org.mockito:mockito-core:5.1.1'
 	testImplementation "junit:junit:$junit_version"
@@ -207,6 +215,9 @@ dependencies {
 	testImplementation "org.jmock:jmock-imposters:$jmock_version"
 
 	testAnnotationProcessor "com.google.dagger:dagger-compiler:$dagger_version"
+
+	debugImplementation platform("androidx.compose:compose-bom:$composeBomVersion")
+	debugImplementation 'androidx.compose.ui:ui-test-manifest'
 
 	androidTestImplementation project(path: ':bramble-api', configuration: 'testOutput')
 
