@@ -52,6 +52,7 @@ import androidx.annotation.DrawableRes;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.annotation.StringRes;
+import androidx.appcompat.app.ActionBar;
 import androidx.appcompat.app.ActionBarDrawerToggle;
 import androidx.appcompat.widget.Toolbar;
 import androidx.core.app.ActivityCompat;
@@ -191,6 +192,12 @@ public class NavDrawerActivity extends BriarActivity implements
 			// do not call this again when there's existing state
 			onNewIntent(getIntent());
 		}
+	}
+
+	@Override
+	protected void onTelegramLinkedIdentityAvailable(
+			@Nullable String linkedIdentity) {
+		showTelegramLinkedIdentitySubtitle(linkedIdentity);
 	}
 
 	private void observeTransportsOnboarding() {
