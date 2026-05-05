@@ -28,3 +28,7 @@ build/
 captures
 *.iml
 projectFilesBackup/
+
+# Local third-party sources (must remain untracked)
+/third_party/td/
+/third_party/tdlib/
