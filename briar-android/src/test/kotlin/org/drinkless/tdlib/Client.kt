@@ -31,7 +31,7 @@ class Client private constructor(
 					resultHandler?.onResult(TdApi.Error())
 					return
 				}
-				resultHandler?.onResult(TdApi.Ok())
+				emitResult(resultHandler, TdApi.Ok(), phoneNumberResultDelayMs)
 				emitAuthorizationState(TdApi.AuthorizationStateWaitCode())
 			}
 			is TdApi.CheckAuthenticationCode -> {
@@ -83,10 +83,27 @@ class Client private constructor(
 		}.start()
 	}
 
+	private fun emitResult(resultHandler: ResultHandler?, result: Any, delayMs: Long) {
+		if (resultHandler == null) return
+		if (delayMs <= 0L) {
+			resultHandler.onResult(result)
+			return
+		}
+		Thread {
+			try {
+				Thread.sleep(delayMs)
+			} catch (e: InterruptedException) {
+				Thread.currentThread().interrupt()
+			}
+			resultHandler.onResult(result)
+		}.start()
+	}
+
 	companion object {
 		private val sentRequestNames = mutableListOf<String>()
 		private val authorizationUpdateDelaySequenceMs = mutableListOf<Long>()
 		private var authorizationUpdateDelayMs = 0L
+		private var phoneNumberResultDelayMs = 0L
 		private var lastPhoneNumber = ""
 		private var lastDatabaseDirectory = ""
 		private var lastFilesDirectory = ""
@@ -103,6 +120,7 @@ class Client private constructor(
 			sentRequestNames.clear()
 			authorizationUpdateDelaySequenceMs.clear()
 			authorizationUpdateDelayMs = 0L
+			phoneNumberResultDelayMs = 0L
 			lastPhoneNumber = ""
 			lastDatabaseDirectory = ""
 			lastFilesDirectory = ""
@@ -117,6 +135,11 @@ class Client private constructor(
 		fun setAuthorizationUpdateDelaySequenceMs(vararg delayMs: Long) {
 			authorizationUpdateDelaySequenceMs.clear()
 			authorizationUpdateDelaySequenceMs += delayMs.toList()
+		}
+
+		@JvmStatic
+		fun setPhoneNumberResultDelayMs(delayMs: Long) {
+			phoneNumberResultDelayMs = delayMs
 		}
 
 		@JvmStatic

@@ -62,11 +62,8 @@ class NoOpTelegramTdlibLoginClient : TelegramTdlibLoginClient {
 
 class ReflectiveTelegramTdlibLoginClient @JvmOverloads constructor(
 	private val tdlibDirectory: File = File("harbor-telegram"),
+	private val authorizationUpdateTimeoutMs: Long = 10_000L,
 ) : TelegramTdlibLoginClient {
-
-	private companion object {
-		private const val AUTHORIZATION_UPDATE_TIMEOUT_MS = 1_000L
-	}
 
 	private class PendingAuthorizationUpdate {
 		val authorizationStateClassName = AtomicReference("")
@@ -213,7 +210,7 @@ class ReflectiveTelegramTdlibLoginClient @JvmOverloads constructor(
 		pendingAuthorizationUpdate: PendingAuthorizationUpdate,
 	): String {
 		if (tdlibClient == null || !pendingAuthorizationUpdate.updateReceived.await(
-					AUTHORIZATION_UPDATE_TIMEOUT_MS,
+					authorizationUpdateTimeoutMs,
 					TimeUnit.MILLISECONDS,
 			)) {
 			closeTdlibClient()
@@ -341,7 +338,7 @@ class ReflectiveTelegramTdlibLoginClient @JvmOverloads constructor(
 		}
 		tdlibClient!!.javaClass.getMethod("send", functionClass, resultHandlerClass)
 				.invoke(tdlibClient, request, resultHandler)
-		if (!resultReceived.await(AUTHORIZATION_UPDATE_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
+		if (!resultReceived.await(authorizationUpdateTimeoutMs, TimeUnit.MILLISECONDS)) {
 			closeTdlibClient()
 		}
 		return resultClassName.get() == "Error"

@@ -70,7 +70,9 @@ class ReflectiveTelegramTdlibLoginClientTest {
 	@Test
 	fun testStartReturnsRecoverableErrorWhenInitialAuthorizationUpdateExceedsTimeout() {
 		Client.setAuthorizationUpdateDelayMs(1_200L)
-		val client = ReflectiveTelegramTdlibLoginClient()
+		val client = ReflectiveTelegramTdlibLoginClient(
+			authorizationUpdateTimeoutMs = 1_000L,
+		)
 
 		val startTime = System.currentTimeMillis()
 		assertEquals(TelegramAuthState.RECOVERABLE_ERROR, client.start())
@@ -109,9 +111,34 @@ class ReflectiveTelegramTdlibLoginClientTest {
 	}
 
 	@Test
+	fun testSubmitIdentifierAllowsDelayedPhoneNumberResult() {
+		Client.setPhoneNumberResultDelayMs(1_200L)
+		val client = ReflectiveTelegramTdlibLoginClient()
+
+		assertEquals(TelegramAuthState.IDENTIFIER_ENTRY, client.start())
+		val startTime = System.currentTimeMillis()
+		assertEquals(
+			TelegramAuthState.CODE_ENTRY,
+			client.submitIdentifier("+123456789"),
+		)
+		val elapsed = System.currentTimeMillis() - startTime
+		assertTrue("Expected delayed phone result, got ${elapsed}ms", elapsed >= 1_100L)
+		assertEquals(RecoverableErrorDetail.NONE, client.getRecoverableErrorDetail())
+		assertEquals(
+			listOf("SetTdlibParameters", "SetAuthenticationPhoneNumber"),
+			Client.getSentRequestNames(),
+		)
+		assertEquals("+123456789", Client.getLastPhoneNumber())
+
+		client.close()
+	}
+
+	@Test
 	fun testSubmitIdentifierReturnsRecoverableErrorWhenCodeUpdateExceedsTimeout() {
 		Client.setAuthorizationUpdateDelaySequenceMs(0L, 0L, 1_200L)
-		val client = ReflectiveTelegramTdlibLoginClient()
+		val client = ReflectiveTelegramTdlibLoginClient(
+			authorizationUpdateTimeoutMs = 1_000L,
+		)
 
 		assertEquals(TelegramAuthState.IDENTIFIER_ENTRY, client.start())
 		val startTime = System.currentTimeMillis()
@@ -235,7 +262,9 @@ class ReflectiveTelegramTdlibLoginClientTest {
 	@Test
 	fun testSubmitCodeReturnsRecoverableErrorWhenReadyUpdateExceedsTimeout() {
 		Client.setAuthorizationUpdateDelaySequenceMs(0L, 0L, 0L, 1_200L)
-		val client = ReflectiveTelegramTdlibLoginClient()
+		val client = ReflectiveTelegramTdlibLoginClient(
+			authorizationUpdateTimeoutMs = 1_000L,
+		)
 
 		assertEquals(TelegramAuthState.IDENTIFIER_ENTRY, client.start())
 		assertEquals(
@@ -296,7 +325,9 @@ class ReflectiveTelegramTdlibLoginClientTest {
 	@Test
 	fun testSubmitCodeReturnsRecoverableErrorWhenPasswordUpdateExceedsTimeout() {
 		Client.setAuthorizationUpdateDelaySequenceMs(0L, 0L, 0L, 1_200L)
-		val client = ReflectiveTelegramTdlibLoginClient()
+		val client = ReflectiveTelegramTdlibLoginClient(
+			authorizationUpdateTimeoutMs = 1_000L,
+		)
 
 		assertEquals(TelegramAuthState.IDENTIFIER_ENTRY, client.start())
 		assertEquals(
@@ -506,7 +537,9 @@ class ReflectiveTelegramTdlibLoginClientTest {
 	@Test
 	fun testSubmitPasswordReturnsRecoverableErrorWhenReadyUpdateExceedsTimeout() {
 		Client.setAuthorizationUpdateDelaySequenceMs(0L, 0L, 0L, 0L, 1_200L)
-		val client = ReflectiveTelegramTdlibLoginClient()
+		val client = ReflectiveTelegramTdlibLoginClient(
+			authorizationUpdateTimeoutMs = 1_000L,
+		)
 
 		assertEquals(TelegramAuthState.IDENTIFIER_ENTRY, client.start())
 		assertEquals(
