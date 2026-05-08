@@ -123,5 +123,7 @@ internal class HeadlessModule(private val appDir: File) {
         override fun shouldEnableForumsInCore() = true
         override fun shouldEnableBlogsInCore() = true
         override fun shouldEnableTelegramConnector() = false
+        override fun getTelegramApiId() = 0
+        override fun getTelegramApiHash() = ""
     }
 }

@@ -44,6 +44,16 @@ public class TestFeatureFlagModule {
 			public boolean shouldEnableTelegramConnector() {
 				return false;
 			}
+
+			@Override
+			public int getTelegramApiId() {
+				return 0;
+			}
+
+			@Override
+			public String getTelegramApiHash() {
+				return "";
+			}
 		};
 	}
 }

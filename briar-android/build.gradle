@@ -24,6 +24,17 @@ def tdlibJniLibsDir = new File(tdlibDir, 'libs')
 def telegramConnectorEnabled =
 		(project.findProperty('harbor.telegramConnector.enabled') ?: 'false')
 				.toString().toBoolean()
+def telegramApiId =
+		(project.findProperty('harbor.telegram.apiId') ?:
+				System.getenv('HARBOR_TELEGRAM_API_ID') ?: '0').toString()
+if (!(telegramApiId ==~ /[0-9]+/)) {
+	throw new GradleException('harbor.telegram.apiId must be a non-negative integer')
+}
+def telegramApiHash =
+		(project.findProperty('harbor.telegram.apiHash') ?:
+				System.getenv('HARBOR_TELEGRAM_API_HASH') ?: '').toString()
+def telegramApiHashLiteral =
+		"\"" + telegramApiHash.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
 def kotlinMetadataBuildTypeConfigs = [
 		'apiDependenciesMetadata',
@@ -66,6 +77,8 @@ android {
 		buildConfigField "String", "TorVersion", "\"$tor_version\""
 		buildConfigField "boolean", "TELEGRAM_CONNECTOR_ENABLED",
 			"${telegramConnectorEnabled}"
+		buildConfigField "int", "TELEGRAM_API_ID", "${telegramApiId}"
+		buildConfigField "String", "TELEGRAM_API_HASH", telegramApiHashLiteral
 
 		vectorDrawables.useSupportLibrary = true
 		buildConfigField "String", "GitHash",

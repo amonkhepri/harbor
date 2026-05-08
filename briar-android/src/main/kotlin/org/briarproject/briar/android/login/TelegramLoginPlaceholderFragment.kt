@@ -390,6 +390,8 @@ private fun loginMessage(
 	return when (errorDetail) {
 		RecoverableErrorDetail.MISSING_TDLIB ->
 			R.string.telegram_connector_login_tdlib_missing_message
+		RecoverableErrorDetail.MISSING_API_CREDENTIALS ->
+			R.string.telegram_connector_login_api_credentials_missing_message
 		RecoverableErrorDetail.INVALID_IDENTIFIER ->
 			R.string.telegram_connector_login_identifier_invalid_message
 		RecoverableErrorDetail.INVALID_CODE ->

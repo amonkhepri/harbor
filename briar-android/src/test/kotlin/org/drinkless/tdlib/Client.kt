@@ -22,6 +22,12 @@ class Client private constructor(
 			is TdApi.SetTdlibParameters -> {
 				lastDatabaseDirectory = request.databaseDirectory.orEmpty()
 				lastFilesDirectory = request.filesDirectory.orEmpty()
+				lastApiId = request.apiId
+				lastApiHash = request.apiHash.orEmpty()
+				if (tdlibParametersError) {
+					resultHandler?.onResult(TdApi.Error())
+					return
+				}
 				resultHandler?.onResult(TdApi.Ok())
 				emitAuthorizationState(TdApi.AuthorizationStateWaitPhoneNumber())
 			}
@@ -107,6 +113,9 @@ class Client private constructor(
 		private var lastPhoneNumber = ""
 		private var lastDatabaseDirectory = ""
 		private var lastFilesDirectory = ""
+		private var lastApiId = 0
+		private var lastApiHash = ""
+		private var tdlibParametersError = false
 
 		@JvmStatic
 		fun create(
@@ -124,6 +133,9 @@ class Client private constructor(
 			lastPhoneNumber = ""
 			lastDatabaseDirectory = ""
 			lastFilesDirectory = ""
+			lastApiId = 0
+			lastApiHash = ""
+			tdlibParametersError = false
 		}
 
 		@JvmStatic
@@ -143,6 +155,11 @@ class Client private constructor(
 		}
 
 		@JvmStatic
+		fun setTdlibParametersError(enabled: Boolean) {
+			tdlibParametersError = enabled
+		}
+
+		@JvmStatic
 		fun getSentRequestNames(): List<String> = sentRequestNames.toList()
 
 		@JvmStatic
@@ -153,6 +170,12 @@ class Client private constructor(
 
 		@JvmStatic
 		fun getLastFilesDirectory(): String = lastFilesDirectory
+
+		@JvmStatic
+		fun getLastApiId(): Int = lastApiId
+
+		@JvmStatic
+		fun getLastApiHash(): String = lastApiHash
 
 		private fun getAuthorizationUpdateDelayMs(): Long =
 			if (authorizationUpdateDelaySequenceMs.isNotEmpty()) {

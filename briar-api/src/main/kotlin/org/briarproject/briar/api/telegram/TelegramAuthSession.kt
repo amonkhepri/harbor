@@ -4,6 +4,7 @@ interface TelegramAuthSession {
 	enum class RecoverableErrorDetail {
 		NONE,
 		MISSING_TDLIB,
+		MISSING_API_CREDENTIALS,
 		INVALID_IDENTIFIER,
 		INVALID_CODE,
 		INVALID_PASSWORD

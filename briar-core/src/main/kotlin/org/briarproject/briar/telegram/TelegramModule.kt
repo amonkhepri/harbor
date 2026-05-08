@@ -31,6 +31,8 @@ class TelegramModule {
 			TelegramAuthSessionImpl(
 				ReflectiveTelegramTdlibLoginClient(
 					File(databaseConfig.databaseDirectory, "tdlib"),
+					featureFlags.getTelegramApiId(),
+					featureFlags.getTelegramApiHash(),
 				),
 			)
 		} else {

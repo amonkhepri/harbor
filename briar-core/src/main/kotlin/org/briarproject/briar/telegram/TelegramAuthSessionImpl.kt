@@ -62,6 +62,8 @@ class NoOpTelegramTdlibLoginClient : TelegramTdlibLoginClient {
 
 class ReflectiveTelegramTdlibLoginClient @JvmOverloads constructor(
 	private val tdlibDirectory: File = File("harbor-telegram"),
+	private val apiId: Int = 0,
+	private val apiHash: String = "",
 	private val authorizationUpdateTimeoutMs: Long = 10_000L,
 ) : TelegramTdlibLoginClient {
 
@@ -97,7 +99,9 @@ class ReflectiveTelegramTdlibLoginClient @JvmOverloads constructor(
 		try {
 			if (lastAuthorizationStateClassName == "AuthorizationStateWaitTdlibParameters") {
 				val tdlibParametersUpdate = prepareAuthorizationUpdate()
-				send(createSetTdlibParametersRequest())
+				if (sendReturnsError(createSetTdlibParametersRequest())) {
+					return recoverableError(RecoverableErrorDetail.MISSING_API_CREDENTIALS)
+				}
 				if (awaitPreparedAuthorizationStateClassName(tdlibParametersUpdate) !=
 						"AuthorizationStateWaitPhoneNumber") {
 					return recoverableError(RecoverableErrorDetail.NONE)
@@ -270,8 +274,8 @@ class ReflectiveTelegramTdlibLoginClient @JvmOverloads constructor(
 		setFieldIfPresent(request, "useChatInfoDatabase", true)
 		setFieldIfPresent(request, "useMessageDatabase", true)
 		setFieldIfPresent(request, "useSecretChats", true)
-		setFieldIfPresent(request, "apiId", 94575)
-		setFieldIfPresent(request, "apiHash", "a3406de8d171bb422bb6ddf3bbd800e2")
+		setFieldIfPresent(request, "apiId", apiId)
+		setFieldIfPresent(request, "apiHash", apiHash)
 		setFieldIfPresent(request, "systemLanguageCode", "en")
 		setFieldIfPresent(request, "deviceModel", "Harbor Android")
 		setFieldIfPresent(request, "systemVersion", "Android")

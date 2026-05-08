@@ -57,6 +57,43 @@ class ReflectiveTelegramTdlibLoginClientTest {
 	}
 
 	@Test
+	fun testSubmitIdentifierUsesConfiguredApiCredentials() {
+		val client = ReflectiveTelegramTdlibLoginClient(
+			apiId = 12345,
+			apiHash = "test-api-hash",
+		)
+
+		assertEquals(TelegramAuthState.IDENTIFIER_ENTRY, client.start())
+		assertEquals(
+			TelegramAuthState.CODE_ENTRY,
+			client.submitIdentifier("+123456789"),
+		)
+		assertEquals(12345, Client.getLastApiId())
+		assertEquals("test-api-hash", Client.getLastApiHash())
+
+		client.close()
+	}
+
+	@Test
+	fun testSubmitIdentifierReturnsMissingCredentialsWhenTdlibRejectsParameters() {
+		Client.setTdlibParametersError(true)
+		val client = ReflectiveTelegramTdlibLoginClient()
+
+		assertEquals(TelegramAuthState.IDENTIFIER_ENTRY, client.start())
+		assertEquals(
+			TelegramAuthState.RECOVERABLE_ERROR,
+			client.submitIdentifier("+123456789"),
+		)
+		assertEquals(
+			RecoverableErrorDetail.MISSING_API_CREDENTIALS,
+			client.getRecoverableErrorDetail(),
+		)
+		assertEquals(listOf("SetTdlibParameters"), Client.getSentRequestNames())
+
+		client.close()
+	}
+
+	@Test
 	fun testStartWaitsForBriefDelayedAuthorizationUpdate() {
 		Client.setAuthorizationUpdateDelayMs(300L)
 		val client = ReflectiveTelegramTdlibLoginClient()
