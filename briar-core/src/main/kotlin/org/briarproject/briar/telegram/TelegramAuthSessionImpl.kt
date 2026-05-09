@@ -98,6 +98,9 @@ class ReflectiveTelegramTdlibLoginClient @JvmOverloads constructor(
 		}
 		try {
 			if (lastAuthorizationStateClassName == "AuthorizationStateWaitTdlibParameters") {
+				if (apiId <= 0 || !hasText(apiHash)) {
+					return recoverableError(RecoverableErrorDetail.MISSING_API_CREDENTIALS)
+				}
 				val tdlibParametersUpdate = prepareAuthorizationUpdate()
 				if (sendReturnsError(createSetTdlibParametersRequest())) {
 					return recoverableError(RecoverableErrorDetail.MISSING_API_CREDENTIALS)

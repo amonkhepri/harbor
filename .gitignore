@@ -16,6 +16,13 @@ Thumbs.db
 
 # Local configuration file (sdk path, etc)
 local.properties
+secrets.properties
+.env
+.env.*
+
+# Telegram/TDLib local runtime state
+harbor-telegram/
+**/harbor-telegram/
 
 # Android Studio
 .idea/*
