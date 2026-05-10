@@ -64,7 +64,7 @@ class ReflectiveTelegramTdlibLoginClient @JvmOverloads constructor(
 	private val tdlibDirectory: File = File("harbor-telegram"),
 	private val apiId: Int = 0,
 	private val apiHash: String = "",
-	private val authorizationUpdateTimeoutMs: Long = 10_000L,
+	private val authorizationUpdateTimeoutMs: Long = 30_000L,
 ) : TelegramTdlibLoginClient {
 
 	private class PendingAuthorizationUpdate {
