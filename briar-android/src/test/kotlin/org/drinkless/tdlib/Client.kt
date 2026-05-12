@@ -13,7 +13,7 @@ class Client private constructor(
 	}
 
 	init {
-		emitAuthorizationState(TdApi.AuthorizationStateWaitTdlibParameters())
+		emitAuthorizationState(initialAuthorizationState)
 	}
 
 	fun send(request: TdApi.Function, resultHandler: ResultHandler?) {
@@ -29,7 +29,7 @@ class Client private constructor(
 					return
 				}
 				resultHandler?.onResult(TdApi.Ok())
-				emitAuthorizationState(TdApi.AuthorizationStateWaitPhoneNumber())
+				emitAuthorizationState(authorizationStateAfterTdlibParameters)
 			}
 			is TdApi.SetAuthenticationPhoneNumber -> {
 				lastPhoneNumber = request.phoneNumber
@@ -59,6 +59,26 @@ class Client private constructor(
 				}
 				resultHandler?.onResult(TdApi.Ok())
 				emitAuthorizationState(TdApi.AuthorizationStateReady())
+			}
+			is TdApi.GetChats -> {
+				val chatIds = chatsById.keys.take(request.limit).toLongArray()
+				resultHandler?.onResult(TdApi.Chats().also {
+					it.totalCount = chatIds.size
+					it.chatIds = chatIds
+				})
+			}
+			is TdApi.GetChat -> {
+				resultHandler?.onResult(chatsById[request.chatId] ?: TdApi.Error())
+			}
+			is TdApi.GetChatHistory -> {
+				val messages = messagesByChatId[request.chatId]
+						.orEmpty()
+						.take(request.limit)
+						.toTypedArray()
+				resultHandler?.onResult(TdApi.Messages().also {
+					it.totalCount = messages.size
+					it.messages = messages
+				})
 			}
 			is TdApi.Close -> {
 				resultHandler?.onResult(TdApi.Ok())
@@ -116,6 +136,12 @@ class Client private constructor(
 		private var lastApiId = 0
 		private var lastApiHash = ""
 		private var tdlibParametersError = false
+		private var initialAuthorizationState: Any =
+			TdApi.AuthorizationStateWaitTdlibParameters()
+		private var authorizationStateAfterTdlibParameters: Any =
+			TdApi.AuthorizationStateWaitPhoneNumber()
+		private val chatsById = linkedMapOf<Long, TdApi.Chat>()
+		private val messagesByChatId = mutableMapOf<Long, List<TdApi.Message?>>()
 
 		@JvmStatic
 		fun create(
@@ -136,6 +162,11 @@ class Client private constructor(
 			lastApiId = 0
 			lastApiHash = ""
 			tdlibParametersError = false
+			initialAuthorizationState = TdApi.AuthorizationStateWaitTdlibParameters()
+			authorizationStateAfterTdlibParameters =
+				TdApi.AuthorizationStateWaitPhoneNumber()
+			chatsById.clear()
+			messagesByChatId.clear()
 		}
 
 		@JvmStatic
@@ -157,6 +188,27 @@ class Client private constructor(
 		@JvmStatic
 		fun setTdlibParametersError(enabled: Boolean) {
 			tdlibParametersError = enabled
+		}
+
+		@JvmStatic
+		fun setInitialAuthorizationState(authorizationState: Any) {
+			initialAuthorizationState = authorizationState
+		}
+
+		@JvmStatic
+		fun setAuthorizationStateAfterTdlibParameters(authorizationState: Any) {
+			authorizationStateAfterTdlibParameters = authorizationState
+		}
+
+		@JvmStatic
+		fun setChats(vararg chats: TdApi.Chat) {
+			chatsById.clear()
+			chats.forEach { chatsById[it.id] = it }
+		}
+
+		@JvmStatic
+		fun setMessages(chatId: Long, vararg messages: TdApi.Message?) {
+			messagesByChatId[chatId] = messages.toList()
 		}
 
 		@JvmStatic

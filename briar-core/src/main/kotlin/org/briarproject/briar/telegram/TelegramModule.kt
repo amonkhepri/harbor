@@ -14,9 +14,18 @@ class TelegramModule {
 
 	@Provides
 	@Singleton
-	fun provideTelegramConnector(featureFlags: FeatureFlags): TelegramConnector =
+	fun provideTelegramConnector(
+		featureFlags: FeatureFlags,
+		databaseConfig: DatabaseConfig,
+	): TelegramConnector =
 		if (featureFlags.shouldEnableTelegramConnector()) {
-			StubTelegramConnector()
+			StubTelegramConnector(
+				ReflectiveTelegramTdlibMessageClient(
+					File(databaseConfig.databaseDirectory, "tdlib"),
+					featureFlags.getTelegramApiId(),
+					featureFlags.getTelegramApiHash(),
+				),
+			)
 		} else {
 			NoOpTelegramConnector()
 		}

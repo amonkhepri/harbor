@@ -2,6 +2,12 @@ package org.briarproject.briar.telegram
 
 import org.briarproject.briar.api.telegram.TelegramChat
 import org.briarproject.briar.api.telegram.TelegramMessage
+import java.io.File
+import java.lang.reflect.Method
+import java.lang.reflect.Proxy
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 
 interface TelegramTdlibMessageClient {
 	fun getRecentChats(limit: Int): List<TelegramChat>
@@ -13,4 +19,310 @@ class NoOpTelegramTdlibMessageClient : TelegramTdlibMessageClient {
 
 	override fun getRecentMessages(chatId: Long, limit: Int): List<TelegramMessage> =
 		emptyList()
+}
+
+class ReflectiveTelegramTdlibMessageClient @JvmOverloads constructor(
+	private val tdlibDirectory: File = File("harbor-telegram"),
+	private val apiId: Int = 0,
+	private val apiHash: String = "",
+	private val requestTimeoutMs: Long = 30_000L,
+) : TelegramTdlibMessageClient {
+
+	private class PendingAuthorizationUpdate {
+		val authorizationStateClassName = AtomicReference("")
+		val updateReceived = CountDownLatch(1)
+	}
+
+	override fun getRecentChats(limit: Int): List<TelegramChat> {
+		val safeLimit = safeLimit(limit)
+		if (safeLimit == 0) return emptyList()
+		return withReadyClient(emptyList()) { client ->
+			val chatIds = sendAndAwait(client, createGetChatsRequest(safeLimit))
+					?.let { getLongArrayField(it, "chatIds") }
+					?: LongArray(0)
+			chatIds.take(safeLimit).mapNotNull { chatId ->
+				sendAndAwait(client, createGetChatRequest(chatId))?.let { mapChat(it) }
+			}
+		}
+	}
+
+	override fun getRecentMessages(chatId: Long, limit: Int): List<TelegramMessage> {
+		val safeLimit = safeLimit(limit)
+		if (chatId == 0L || safeLimit == 0) return emptyList()
+		return withReadyClient(emptyList()) { client ->
+			val messages = sendAndAwait(client, createGetChatHistoryRequest(chatId, safeLimit))
+					?.let { getObjectArrayField(it, "messages") }
+					?: emptyArray<Any>()
+			messages.mapNotNull { mapTextMessage(it) }
+					.take(safeLimit)
+		}
+	}
+
+	private fun <T> withReadyClient(fallback: T, read: (Any) -> T): T {
+		if (!tdlibClientClassExists()) return fallback
+		var client: Any? = null
+		return try {
+			val pendingAuthorizationUpdate = AtomicReference<PendingAuthorizationUpdate?>()
+			val firstUpdate = prepareAuthorizationUpdate(pendingAuthorizationUpdate)
+			client = createTdlibClient(pendingAuthorizationUpdate)
+			var authorizationState = awaitPreparedAuthorizationStateClassName(firstUpdate)
+			if (authorizationState == "AuthorizationStateWaitTdlibParameters") {
+				if (apiId <= 0 || !hasText(apiHash)) return fallback
+				val readyUpdate = prepareAuthorizationUpdate(pendingAuthorizationUpdate)
+				if (sendReturnsError(client, createSetTdlibParametersRequest())) return fallback
+				authorizationState = awaitPreparedAuthorizationStateClassName(readyUpdate)
+			}
+			if (authorizationState != "AuthorizationStateReady") return fallback
+			read(client)
+		} catch (e: ReflectiveOperationException) {
+			fallback
+		} catch (e: LinkageError) {
+			fallback
+		} catch (e: InterruptedException) {
+			Thread.currentThread().interrupt()
+			fallback
+		} finally {
+			client?.let { closeTdlibClient(it) }
+		}
+	}
+
+	private fun prepareAuthorizationUpdate(
+		pendingAuthorizationUpdate: AtomicReference<PendingAuthorizationUpdate?>,
+	): PendingAuthorizationUpdate {
+		return PendingAuthorizationUpdate().also {
+			pendingAuthorizationUpdate.set(it)
+		}
+	}
+
+	@Throws(InterruptedException::class)
+	private fun awaitPreparedAuthorizationStateClassName(
+		pendingAuthorizationUpdate: PendingAuthorizationUpdate,
+	): String =
+		if (pendingAuthorizationUpdate.updateReceived.await(
+					requestTimeoutMs,
+					TimeUnit.MILLISECONDS,
+			)) {
+			pendingAuthorizationUpdate.authorizationStateClassName.get()
+		} else {
+			""
+		}
+
+	@Throws(ReflectiveOperationException::class)
+	private fun createTdlibClient(
+		pendingAuthorizationUpdate: AtomicReference<PendingAuthorizationUpdate?>,
+	): Any {
+		val clientClass = Class.forName("org.drinkless.tdlib.Client")
+		val resultHandlerClass = Class.forName("org.drinkless.tdlib.Client\$ResultHandler")
+		val exceptionHandlerClass = Class.forName("org.drinkless.tdlib.Client\$ExceptionHandler")
+		val updateHandler = Proxy.newProxyInstance(
+				resultHandlerClass.classLoader,
+				arrayOf(resultHandlerClass),
+			) { _, method, args ->
+			if (method.name == "onResult" && args != null && args.size == 1) {
+				val className = getAuthorizationStateClassName(args[0])
+				val pendingUpdate = pendingAuthorizationUpdate.get()
+				if (className.isNotEmpty() && pendingUpdate != null &&
+						pendingUpdate.authorizationStateClassName.compareAndSet("", className)) {
+					pendingUpdate.updateReceived.countDown()
+				}
+			}
+			null
+		}
+		val create = clientClass.getMethod(
+				"create",
+				resultHandlerClass,
+				exceptionHandlerClass,
+				exceptionHandlerClass,
+		)
+		return create.invoke(null, updateHandler, null, null)
+	}
+
+	@Throws(ReflectiveOperationException::class)
+	private fun createGetChatsRequest(limit: Int): Any {
+		return createTdApiObject("GetChats").also {
+			setFieldIfPresent(it, "chatList", null)
+			setFieldIfPresent(it, "limit", limit)
+		}
+	}
+
+	@Throws(ReflectiveOperationException::class)
+	private fun createGetChatRequest(chatId: Long): Any {
+		return createTdApiObject("GetChat").also {
+			setFieldIfPresent(it, "chatId", chatId)
+		}
+	}
+
+	@Throws(ReflectiveOperationException::class)
+	private fun createGetChatHistoryRequest(chatId: Long, limit: Int): Any {
+		return createTdApiObject("GetChatHistory").also {
+			setFieldIfPresent(it, "chatId", chatId)
+			setFieldIfPresent(it, "fromMessageId", 0L)
+			setFieldIfPresent(it, "offset", 0)
+			setFieldIfPresent(it, "limit", limit)
+			setFieldIfPresent(it, "onlyLocal", false)
+		}
+	}
+
+	@Throws(ReflectiveOperationException::class)
+	private fun createSetTdlibParametersRequest(): Any {
+		val databaseDirectory = File(tdlibDirectory, "database")
+		val filesDirectory = File(tdlibDirectory, "files")
+		databaseDirectory.mkdirs()
+		filesDirectory.mkdirs()
+		val request = createTdApiObject("SetTdlibParameters")
+		setFieldIfPresent(request, "useTestDc", false)
+		setFieldIfPresent(request, "databaseDirectory", databaseDirectory.path)
+		setFieldIfPresent(request, "filesDirectory", filesDirectory.path)
+		setFieldIfPresent(request, "databaseEncryptionKey", ByteArray(0))
+		setFieldIfPresent(request, "useFileDatabase", true)
+		setFieldIfPresent(request, "useChatInfoDatabase", true)
+		setFieldIfPresent(request, "useMessageDatabase", true)
+		setFieldIfPresent(request, "useSecretChats", true)
+		setFieldIfPresent(request, "apiId", apiId)
+		setFieldIfPresent(request, "apiHash", apiHash)
+		setFieldIfPresent(request, "systemLanguageCode", "en")
+		setFieldIfPresent(request, "deviceModel", "Harbor Android")
+		setFieldIfPresent(request, "systemVersion", "Android")
+		setFieldIfPresent(request, "applicationVersion", "Harbor")
+		return request
+	}
+
+	@Throws(ReflectiveOperationException::class)
+	private fun createTdApiObject(className: String): Any =
+		Class.forName("org.drinkless.tdlib.TdApi\$$className")
+				.getConstructor()
+				.newInstance()
+
+	@Throws(ReflectiveOperationException::class)
+	private fun setFieldIfPresent(target: Any, name: String, value: Any?) {
+		try {
+			target.javaClass.getField(name).set(target, value)
+		} catch (_: NoSuchFieldException) {
+		}
+	}
+
+	@Throws(ReflectiveOperationException::class, InterruptedException::class)
+	private fun sendAndAwait(client: Any, request: Any): Any? {
+		val result = AtomicReference<Any?>()
+		val resultReceived = CountDownLatch(1)
+		val functionClass = Class.forName("org.drinkless.tdlib.TdApi\$Function")
+		val resultHandlerClass = Class.forName("org.drinkless.tdlib.Client\$ResultHandler")
+		val resultHandler = Proxy.newProxyInstance(
+				resultHandlerClass.classLoader,
+				arrayOf(resultHandlerClass),
+			) { _, method, args ->
+			if (method.name == "onResult" && args != null && args.size == 1 &&
+					result.compareAndSet(null, args[0])) {
+				resultReceived.countDown()
+			}
+			null
+		}
+		client.javaClass.getMethod("send", functionClass, resultHandlerClass)
+				.invoke(client, request, resultHandler)
+		if (!resultReceived.await(requestTimeoutMs, TimeUnit.MILLISECONDS)) return null
+		return result.get().takeUnless { it?.javaClass?.simpleName == "Error" }
+	}
+
+	@Throws(ReflectiveOperationException::class, InterruptedException::class)
+	private fun sendReturnsError(client: Any, request: Any): Boolean =
+		sendAndAwait(client, request) == null
+
+	@Throws(ReflectiveOperationException::class)
+	private fun getAuthorizationStateClassName(update: Any?): String {
+		if (update?.javaClass?.simpleName != "UpdateAuthorizationState") {
+			return ""
+		}
+		val authorizationState = update.javaClass.getField("authorizationState").get(update)
+		return authorizationState?.javaClass?.simpleName ?: ""
+	}
+
+	@Throws(ReflectiveOperationException::class)
+	private fun mapChat(chat: Any): TelegramChat? {
+		if (chat.javaClass.simpleName != "Chat") return null
+		val lastMessage = getObjectField(chat, "lastMessage")
+		return TelegramChat(
+				id = getLongField(chat, "id"),
+				title = getStringField(chat, "title"),
+				lastMessageDateSeconds = lastMessage?.let { getIntField(it, "date") } ?: 0,
+		)
+	}
+
+	@Throws(ReflectiveOperationException::class)
+	private fun mapTextMessage(message: Any?): TelegramMessage? {
+		if (message == null || message.javaClass.simpleName != "Message") return null
+		val content = getObjectField(message, "content")
+		if (content?.javaClass?.simpleName != "MessageText") return null
+		val formattedText = getObjectField(content, "text")
+		return TelegramMessage(
+				chatId = getLongField(message, "chatId"),
+				messageId = getLongField(message, "id"),
+				dateSeconds = getIntField(message, "date"),
+				isOutgoing = getBooleanField(message, "isOutgoing"),
+				text = formattedText?.let { getStringField(it, "text") }.orEmpty(),
+		)
+	}
+
+	@Throws(ReflectiveOperationException::class)
+	private fun getObjectField(target: Any, name: String): Any? =
+		target.javaClass.getField(name).get(target)
+
+	@Throws(ReflectiveOperationException::class)
+	private fun getStringField(target: Any, name: String): String =
+		getObjectField(target, name) as? String ?: ""
+
+	@Throws(ReflectiveOperationException::class)
+	private fun getLongField(target: Any, name: String): Long =
+		getObjectField(target, name) as? Long ?: 0L
+
+	@Throws(ReflectiveOperationException::class)
+	private fun getIntField(target: Any, name: String): Int =
+		getObjectField(target, name) as? Int ?: 0
+
+	@Throws(ReflectiveOperationException::class)
+	private fun getBooleanField(target: Any, name: String): Boolean =
+		getObjectField(target, name) as? Boolean ?: false
+
+	@Throws(ReflectiveOperationException::class)
+	private fun getLongArrayField(target: Any, name: String): LongArray =
+		getObjectField(target, name) as? LongArray ?: LongArray(0)
+
+	@Throws(ReflectiveOperationException::class)
+	private fun getObjectArrayField(target: Any, name: String): Array<*> =
+		getObjectField(target, name) as? Array<*> ?: emptyArray<Any>()
+
+	private fun closeTdlibClient(client: Any) {
+		try {
+			val functionClass = Class.forName("org.drinkless.tdlib.TdApi\$Function")
+			val resultHandlerClass = Class.forName("org.drinkless.tdlib.Client\$ResultHandler")
+			val send: Method = client.javaClass.getMethod("send", functionClass, resultHandlerClass)
+			val closeRequest = createTdApiObject("Close")
+			send.invoke(client, closeRequest, null)
+		} catch (_: ReflectiveOperationException) {
+		} catch (_: LinkageError) {
+		}
+	}
+
+	private fun tdlibClientClassExists(): Boolean {
+		return try {
+			Class.forName(
+					"org.drinkless.tdlib.Client",
+					false,
+					ReflectiveTelegramTdlibMessageClient::class.java.classLoader,
+			)
+			true
+		} catch (_: ClassNotFoundException) {
+			false
+		} catch (_: LinkageError) {
+			false
+		}
+	}
+
+	private fun safeLimit(limit: Int): Int =
+		limit.coerceIn(0, MAX_TDLIB_MESSAGE_LIMIT)
+
+	private fun hasText(value: String): Boolean = value.trim().isNotEmpty()
+
+	private companion object {
+		const val MAX_TDLIB_MESSAGE_LIMIT = 100
+	}
 }
