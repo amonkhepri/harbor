@@ -149,6 +149,44 @@ class TelegramConnectorMessageTest {
 		assertEquals(0, snapshot.sampledMessageCount)
 	}
 
+	@Test
+	fun testMessageIngestDiagnosticsSamplesMessagesAcrossChats() {
+		class MultiChatClient(
+			val chatList: List<TelegramChat>,
+			val messagesByChat: Map<Long, List<TelegramMessage>>,
+		) : TelegramTdlibMessageClient {
+			val messageChatIds = mutableListOf<Long>()
+			val messageLimits = mutableListOf<Int>()
+			override fun getRecentChats(limit: Int): List<TelegramChat> =
+				chatList.take(limit)
+			override fun getRecentMessages(chatId: Long, limit: Int): List<TelegramMessage> {
+				messageChatIds.add(chatId)
+				messageLimits.add(limit)
+				return messagesByChat.getOrDefault(chatId, emptyList())
+			}
+		}
+
+		val emptyChat = TelegramChat(1L, "", 0)
+		val textChat = TelegramChat(10L, "", 1_700_000_000)
+		val client = MultiChatClient(
+				listOf(emptyChat, textChat),
+				mapOf(textChat.id to listOf(
+						TelegramMessage(10L, 20L, 1_700_000_001, false, "")
+				)),
+		)
+		val connector = StubTelegramConnector(client)
+
+		val snapshot = TelegramMessageIngestDiagnostics(connector)
+				.readSnapshot(chatLimit = 2, messageLimit = 3)
+
+		assertEquals(TelegramMessageIngestStatus.MESSAGE_COUNT_AVAILABLE, snapshot.status)
+		assertEquals(2, snapshot.recentChatCount)
+		assertEquals(1, snapshot.sampledMessageCount)
+		// should call getRecentMessages for both chats
+		assertTrue(client.messageChatIds.contains(emptyChat.id))
+		assertTrue(client.messageChatIds.contains(textChat.id))
+	}
+
 	private class FakeTelegramTdlibMessageClient(
 		val chats: List<TelegramChat> = listOf(TelegramChat(10L, "", 1_700_000_000)),
 		val messages: List<TelegramMessage> = listOf(

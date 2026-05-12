@@ -1,6 +1,7 @@
 package org.briarproject.briar.telegram
 
 import org.briarproject.briar.api.telegram.TelegramConnector
+import org.briarproject.briar.api.telegram.TelegramMessage
 import org.briarproject.briar.api.telegram.TelegramMessageIngestSnapshot
 import org.briarproject.briar.api.telegram.TelegramMessageIngestStatus
 
@@ -26,15 +27,22 @@ class TelegramMessageIngestDiagnostics(
 					sampledMessageCount = 0,
 			)
 		}
-		val messages = connector.getRecentMessages(chats.first().id, messageLimit)
+		val budget = messageLimit.coerceAtLeast(1)
+		val perChatLimit = (budget / chats.size).coerceAtLeast(1)
+		val sampledMessages = mutableListOf<TelegramMessage>()
+		for (chat in chats) {
+			if (sampledMessages.size >= budget) break
+			val chatMessages = connector.getRecentMessages(chat.id, perChatLimit)
+			sampledMessages.addAll(chatMessages.take(budget - sampledMessages.size))
+		}
 		return TelegramMessageIngestSnapshot(
-				status = if (messages.isEmpty()) {
+				status = if (sampledMessages.isEmpty()) {
 					TelegramMessageIngestStatus.CHAT_COUNT_ONLY
 				} else {
 					TelegramMessageIngestStatus.MESSAGE_COUNT_AVAILABLE
 				},
 				recentChatCount = chats.size,
-				sampledMessageCount = messages.size,
+				sampledMessageCount = sampledMessages.size,
 		)
 	}
 }
