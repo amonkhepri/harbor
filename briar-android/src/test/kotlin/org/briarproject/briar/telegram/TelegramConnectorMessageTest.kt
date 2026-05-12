@@ -2,6 +2,7 @@ package org.briarproject.briar.telegram
 
 import org.briarproject.briar.api.telegram.TelegramChat
 import org.briarproject.briar.api.telegram.TelegramMessage
+import org.briarproject.briar.api.telegram.TelegramMessageIngestStatus
 import org.drinkless.tdlib.Client
 import org.drinkless.tdlib.TdApi
 import org.junit.Assert.assertEquals
@@ -105,17 +106,61 @@ class TelegramConnectorMessageTest {
 		)
 	}
 
-	private class FakeTelegramTdlibMessageClient : TelegramTdlibMessageClient {
-		val chats = listOf(TelegramChat(10L, "", 1_700_000_000))
-		val messages = listOf(
-			TelegramMessage(
-				chatId = 10L,
-				messageId = 20L,
-				dateSeconds = 1_700_000_001,
-				isOutgoing = false,
-				text = "",
-			),
+	@Test
+	fun testMessageIngestDiagnosticsReturnsDisabledSnapshot() {
+		val snapshot = TelegramMessageIngestDiagnostics(NoOpTelegramConnector())
+				.readSnapshot(chatLimit = 5, messageLimit = 5)
+
+		assertEquals(TelegramMessageIngestStatus.DISABLED, snapshot.status)
+		assertEquals(0, snapshot.recentChatCount)
+		assertEquals(0, snapshot.sampledMessageCount)
+	}
+
+	@Test
+	fun testMessageIngestDiagnosticsReportsCountsOnly() {
+		val client = FakeTelegramTdlibMessageClient()
+		val connector = StubTelegramConnector(client)
+
+		val snapshot = TelegramMessageIngestDiagnostics(connector)
+				.readSnapshot(chatLimit = 3, messageLimit = 3)
+
+		assertEquals(TelegramMessageIngestStatus.MESSAGE_COUNT_AVAILABLE, snapshot.status)
+		assertEquals(1, snapshot.recentChatCount)
+		assertEquals(1, snapshot.sampledMessageCount)
+		assertEquals(3, client.lastChatLimit)
+		assertEquals(10L, client.lastMessageChatId)
+		assertEquals(3, client.lastMessageLimit)
+	}
+
+	@Test
+	fun testMessageIngestDiagnosticsTreatsNotReadyAsNoContent() {
+		val connector = StubTelegramConnector(
+				FakeTelegramTdlibMessageClient(
+						chats = emptyList(),
+						messages = emptyList(),
+				),
 		)
+
+		val snapshot = TelegramMessageIngestDiagnostics(connector)
+				.readSnapshot(chatLimit = 3, messageLimit = 3)
+
+		assertEquals(TelegramMessageIngestStatus.NO_CONTENT, snapshot.status)
+		assertEquals(0, snapshot.recentChatCount)
+		assertEquals(0, snapshot.sampledMessageCount)
+	}
+
+	private class FakeTelegramTdlibMessageClient(
+		val chats: List<TelegramChat> = listOf(TelegramChat(10L, "", 1_700_000_000)),
+		val messages: List<TelegramMessage> = listOf(
+				TelegramMessage(
+						chatId = 10L,
+						messageId = 20L,
+						dateSeconds = 1_700_000_001,
+						isOutgoing = false,
+						text = "",
+				),
+		),
+	) : TelegramTdlibMessageClient {
 		var lastChatLimit = 0
 		var lastMessageChatId = 0L
 		var lastMessageLimit = 0
