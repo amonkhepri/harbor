@@ -18,10 +18,13 @@ import org.briarproject.briar.android.contact.add.remote.AddContactActivity;
 import org.briarproject.briar.android.contact.add.remote.PendingContactListActivity;
 import org.briarproject.briar.android.conversation.ConversationActivity;
 import org.briarproject.briar.android.fragment.BaseFragment;
+import org.briarproject.briar.android.telegram.TelegramConversationActivity;
 import org.briarproject.briar.android.util.BriarSnackbarBuilder;
 import org.briarproject.briar.android.view.BriarRecyclerView;
 import org.briarproject.nullsafety.MethodsNotNullByDefault;
 import org.briarproject.nullsafety.ParametersNotNullByDefault;
+
+import java.util.List;
 
 import javax.annotation.Nullable;
 import javax.inject.Inject;
@@ -33,13 +36,14 @@ import io.github.kobakei.materialfabspeeddial.FabSpeedDial;
 import io.github.kobakei.materialfabspeeddial.FabSpeedDial.OnMenuItemClickListener;
 
 import static com.google.android.material.snackbar.BaseTransientBottomBar.LENGTH_INDEFINITE;
+import static java.util.Collections.emptyList;
 import static org.briarproject.briar.android.conversation.ConversationActivity.CONTACT_ID;
 
 @MethodsNotNullByDefault
 @ParametersNotNullByDefault
 public class ContactListFragment extends BaseFragment
 		implements OnMenuItemClickListener,
-		OnContactClickListener<ContactListItem> {
+		OnInboxThreadClickListener {
 
 	public static final String TAG = ContactListFragment.class.getName();
 
@@ -47,9 +51,11 @@ public class ContactListFragment extends BaseFragment
 	ViewModelProvider.Factory viewModelFactory;
 
 	private ContactListViewModel viewModel;
-	private final ContactListAdapter adapter = new ContactListAdapter(this);
+	private final InboxThreadAdapter adapter = new InboxThreadAdapter(this);
 	private BriarRecyclerView list;
 	private FabSpeedDial speedDial;
+	private List<ContactListItem> briarItems = emptyList();
+	private List<TelegramInboxThreadItem> telegramItems = emptyList();
 
 	/**
 	 * The Snackbar is non-null when shown and null otherwise.
@@ -100,8 +106,14 @@ public class ContactListFragment extends BaseFragment
 		viewModel.getContactListItems()
 				.observe(getViewLifecycleOwner(), result -> {
 					result.onError(this::handleException).onSuccess(items -> {
-						adapter.submitList(items);
+						briarItems = items;
+						submitInboxItems();
 					});
+				});
+		viewModel.getTelegramThreadItems()
+				.observe(getViewLifecycleOwner(), items -> {
+					telegramItems = items;
+					submitInboxItems();
 				});
 		viewModel.getHasPendingContacts()
 				.observe(getViewLifecycleOwner(), hasPending -> {
@@ -113,10 +125,18 @@ public class ContactListFragment extends BaseFragment
 	}
 
 	@Override
-	public void onItemClick(View view, ContactListItem item) {
+	public void onBriarItemClick(View view, ContactListItem item) {
 		Intent i = new Intent(getActivity(), ConversationActivity.class);
 		ContactId contactId = item.getContact().getId();
 		i.putExtra(CONTACT_ID, contactId.getInt());
+		startActivity(i);
+	}
+
+	@Override
+	public void onTelegramItemClick(View view, TelegramInboxThreadItem item) {
+		Intent i = new Intent(getActivity(), TelegramConversationActivity.class);
+		i.putExtra(TelegramConversationActivity.CHAT_ID, item.getChatId());
+		i.putExtra(TelegramConversationActivity.CHAT_TITLE, item.getTitle());
 		startActivity(i);
 	}
 
@@ -138,6 +158,7 @@ public class ContactListFragment extends BaseFragment
 		viewModel.clearAllContactNotifications();
 		viewModel.clearAllContactAddedNotifications();
 		viewModel.loadContacts();
+		viewModel.loadTelegramThreads();
 		viewModel.checkForPendingContacts();
 		list.startPeriodicUpdate();
 	}
@@ -172,5 +193,9 @@ public class ContactListFragment extends BaseFragment
 	private void showPendingContactList() {
 		Intent i = new Intent(getContext(), PendingContactListActivity.class);
 		startActivity(i);
+	}
+
+	private void submitInboxItems() {
+		adapter.submitList(InboxThreadMerger.merge(briarItems, telegramItems));
 	}
 }

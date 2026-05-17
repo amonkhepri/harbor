@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+	xmlns:app="http://schemas.android.com/apk/res-auto"
+	xmlns:tools="http://schemas.android.com/tools"
+	android:layout_width="match_parent"
+	android:layout_height="wrap_content"
+	android:background="?attr/selectableItemBackground"
+	android:clickable="true"
+	android:focusable="true">
+
+	<ImageView
+		android:id="@+id/telegramThreadIcon"
+		android:layout_width="@dimen/listitem_picture_size"
+		android:layout_height="@dimen/listitem_picture_size"
+		android:layout_margin="@dimen/listitem_horizontal_margin"
+		android:background="@drawable/bg_telegram_thread_icon"
+		android:padding="@dimen/margin_medium"
+		android:src="@drawable/ic_telegram"
+		app:layout_constraintBottom_toTopOf="@+id/divider"
+		app:layout_constraintStart_toStartOf="parent"
+		app:layout_constraintTop_toTopOf="parent"
+		tools:ignore="ContentDescription" />
+
+	<com.vanniktech.emoji.EmojiTextView
+		android:id="@+id/telegramThreadTitle"
+		android:layout_width="0dp"
+		android:layout_height="wrap_content"
+		android:layout_marginStart="@dimen/margin_medium"
+		android:layout_marginTop="@dimen/listitem_vertical_margin"
+		android:paddingStart="@dimen/margin_medium"
+		android:paddingEnd="@dimen/margin_medium"
+		android:textColor="?android:attr/textColorPrimary"
+		android:textSize="@dimen/text_size_medium"
+		app:layout_constraintEnd_toStartOf="@+id/telegramThreadDate"
+		app:layout_constraintStart_toEndOf="@+id/telegramThreadIcon"
+		app:layout_constraintTop_toTopOf="parent"
+		tools:text="Telegram chat" />
+
+	<TextView
+		android:id="@+id/telegramThreadDate"
+		android:layout_width="wrap_content"
+		android:layout_height="wrap_content"
+		android:layout_marginEnd="@dimen/listitem_horizontal_margin"
+		android:textColor="?android:attr/textColorSecondary"
+		android:textSize="@dimen/text_size_small"
+		app:layout_constraintBaseline_toBaselineOf="@+id/telegramThreadTitle"
+		app:layout_constraintEnd_toEndOf="parent"
+		tools:text="Dec 24" />
+
+	<TextView
+		android:id="@+id/telegramThreadBadge"
+		android:layout_width="wrap_content"
+		android:layout_height="wrap_content"
+		android:layout_marginStart="@dimen/margin_medium"
+		android:layout_marginBottom="10dp"
+		android:background="@drawable/bg_telegram_thread_badge"
+		android:paddingStart="@dimen/margin_medium"
+		android:paddingTop="@dimen/margin_tiny"
+		android:paddingEnd="@dimen/margin_medium"
+		android:paddingBottom="@dimen/margin_tiny"
+		android:text="@string/telegram_origin_label"
+		android:textColor="@color/briar_blue_600_new"
+		android:textSize="@dimen/text_size_small"
+		app:layout_constraintBottom_toTopOf="@+id/divider"
+		app:layout_constraintStart_toEndOf="@+id/telegramThreadIcon"
+		app:layout_constraintTop_toBottomOf="@+id/telegramThreadTitle" />
+
+	<View
+		android:id="@+id/divider"
+		style="@style/Divider.ContactList"
+		android:layout_width="0dp"
+		app:layout_constraintBottom_toBottomOf="parent"
+		app:layout_constraintEnd_toEndOf="parent"
+		app:layout_constraintStart_toStartOf="@+id/telegramThreadTitle" />
+
+</androidx.constraintlayout.widget.ConstraintLayout>

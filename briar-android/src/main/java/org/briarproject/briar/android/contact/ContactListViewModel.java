@@ -16,22 +16,33 @@ import org.briarproject.bramble.api.system.AndroidExecutor;
 import org.briarproject.briar.api.android.AndroidNotificationManager;
 import org.briarproject.briar.api.conversation.ConversationManager;
 import org.briarproject.briar.api.identity.AuthorManager;
+import org.briarproject.briar.api.telegram.TelegramChat;
+import org.briarproject.briar.api.telegram.TelegramConnector;
 import org.briarproject.nullsafety.NotNullByDefault;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.util.concurrent.Executor;
 
 import javax.inject.Inject;
 
 import androidx.lifecycle.LiveData;
 import androidx.lifecycle.MutableLiveData;
+import org.briarproject.bramble.api.lifecycle.IoExecutor;
 
 @NotNullByDefault
 class ContactListViewModel extends ContactsViewModel {
 
 	private final AndroidNotificationManager notificationManager;
+	private final TelegramConnector telegramConnector;
+	@IoExecutor
+	private final Executor ioExecutor;
 
 	private final MutableLiveData<Boolean> hasPendingContacts =
 			new MutableLiveData<>();
+	private final MutableLiveData<List<TelegramInboxThreadItem>>
+			telegramThreadItems = new MutableLiveData<>(Collections.emptyList());
 
 	@Inject
 	ContactListViewModel(Application application,
@@ -41,11 +52,15 @@ class ContactListViewModel extends ContactsViewModel {
 			AuthorManager authorManager,
 			ConversationManager conversationManager,
 			ConnectionRegistry connectionRegistry, EventBus eventBus,
-			AndroidNotificationManager notificationManager) {
+			AndroidNotificationManager notificationManager,
+			TelegramConnector telegramConnector,
+			@IoExecutor Executor ioExecutor) {
 		super(application, dbExecutor, lifecycleManager, db, androidExecutor,
 				contactManager, authorManager, conversationManager,
 				connectionRegistry, eventBus);
 		this.notificationManager = notificationManager;
+		this.telegramConnector = telegramConnector;
+		this.ioExecutor = ioExecutor;
 	}
 
 	@Override
@@ -59,6 +74,10 @@ class ContactListViewModel extends ContactsViewModel {
 
 	LiveData<Boolean> getHasPendingContacts() {
 		return hasPendingContacts;
+	}
+
+	LiveData<List<TelegramInboxThreadItem>> getTelegramThreadItems() {
+		return telegramThreadItems;
 	}
 
 	void checkForPendingContacts() {
@@ -79,6 +98,26 @@ class ContactListViewModel extends ContactsViewModel {
 
 	void clearAllContactAddedNotifications() {
 		notificationManager.clearAllContactAddedNotifications();
+	}
+
+	void loadTelegramThreads() {
+		if (!telegramConnector.isEnabled()) {
+			telegramThreadItems.setValue(Collections.emptyList());
+			return;
+		}
+		ioExecutor.execute(() -> {
+			try {
+				List<TelegramChat> chats = telegramConnector.getRecentChats(20);
+				List<TelegramInboxThreadItem> items =
+						new ArrayList<>(chats.size());
+				for (TelegramChat chat : chats) {
+					items.add(new TelegramInboxThreadItem(chat));
+				}
+				telegramThreadItems.postValue(items);
+			} catch (RuntimeException e) {
+				telegramThreadItems.postValue(Collections.emptyList());
+			}
+		});
 	}
 
 }

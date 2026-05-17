@@ -162,6 +162,16 @@
 		</activity>
 
 		<activity
+			android:name="org.briarproject.briar.android.telegram.TelegramConversationActivity"
+			android:exported="false"
+			android:label="@string/telegram_conversation_title"
+			android:parentActivityName="org.briarproject.briar.android.navdrawer.NavDrawerActivity">
+			<meta-data
+				android:name="android.support.PARENT_ACTIVITY"
+				android:value="org.briarproject.briar.android.navdrawer.NavDrawerActivity" />
+		</activity>
+
+		<activity
 			android:name=".android.conversation.ImageActivity"
 			android:exported="false"
 			android:parentActivityName="org.briarproject.briar.android.conversation.ConversationActivity"
