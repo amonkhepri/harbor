@@ -12,6 +12,12 @@ import javax.inject.Singleton
 @Module
 class TelegramModule {
 
+	private fun tdlibDirectory(databaseConfig: DatabaseConfig): File {
+		val databaseDirectory = databaseConfig.databaseDirectory
+		val appPrivateRoot = databaseDirectory.parentFile ?: databaseDirectory
+		return File(appPrivateRoot, "tdlib")
+	}
+
 	@Provides
 	@Singleton
 	fun provideTelegramConnector(
@@ -21,7 +27,7 @@ class TelegramModule {
 		if (featureFlags.shouldEnableTelegramConnector()) {
 			StubTelegramConnector(
 				ReflectiveTelegramTdlibMessageClient(
-					File(databaseConfig.databaseDirectory, "tdlib"),
+					tdlibDirectory(databaseConfig),
 					featureFlags.getTelegramApiId(),
 					featureFlags.getTelegramApiHash(),
 				),
@@ -39,7 +45,7 @@ class TelegramModule {
 		if (featureFlags.shouldEnableTelegramConnector()) {
 			TelegramAuthSessionImpl(
 				ReflectiveTelegramTdlibLoginClient(
-					File(databaseConfig.databaseDirectory, "tdlib"),
+					tdlibDirectory(databaseConfig),
 					featureFlags.getTelegramApiId(),
 					featureFlags.getTelegramApiHash(),
 				),
