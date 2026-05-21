@@ -4,7 +4,9 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import androidx.compose.foundation.background
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -18,8 +20,12 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.ColorScheme
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -33,6 +39,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
@@ -87,7 +94,7 @@ class TelegramLoginPlaceholderFragment : BaseFragment() {
 			ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed,
 		)
 		setContent {
-			MaterialTheme {
+			TelegramLoginTheme {
 				TelegramLoginScreen(viewModel)
 			}
 		}
@@ -132,6 +139,7 @@ internal fun TelegramLoginScreen(viewModel: StartupViewModel) {
 	Column(
 		modifier = Modifier
 			.fillMaxSize()
+			.background(MaterialTheme.colorScheme.background)
 			.verticalScroll(rememberScrollState())
 			.padding(24.dp),
 		horizontalAlignment = Alignment.CenterHorizontally,
@@ -150,12 +158,14 @@ internal fun TelegramLoginScreen(viewModel: StartupViewModel) {
 			Text(
 				text = stringResource(R.string.telegram_connector_login_title),
 				style = MaterialTheme.typography.headlineSmall,
+				color = MaterialTheme.colorScheme.onBackground,
 				textAlign = TextAlign.Center,
 			)
 			Spacer(Modifier.height(16.dp))
 			Text(
 				text = stringResource(loginMessage(authState, errorDetail)),
 				style = MaterialTheme.typography.bodyLarge,
+				color = MaterialTheme.colorScheme.onBackground,
 				textAlign = TextAlign.Center,
 				modifier = Modifier.fillMaxWidth(),
 			)
@@ -240,6 +250,7 @@ private fun IdentifierStep(
 				Text(stringResource(R.string.telegram_connector_login_identifier_hint))
 			},
 			singleLine = true,
+			colors = telegramTextFieldColors(),
 			modifier = Modifier
 				.fillMaxWidth()
 				.testTag(TELEGRAM_LOGIN_IDENTIFIER_TAG),
@@ -276,6 +287,7 @@ private fun CodeStep(
 				Text(stringResource(R.string.telegram_connector_login_code_hint))
 			},
 			singleLine = true,
+			colors = telegramTextFieldColors(),
 			keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
 			modifier = Modifier
 				.fillMaxWidth()
@@ -313,6 +325,7 @@ private fun PasswordStep(
 				Text(stringResource(R.string.telegram_connector_login_password_hint))
 			},
 			singleLine = true,
+			colors = telegramTextFieldColors(),
 			visualTransformation = PasswordVisualTransformation(),
 			keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
 			modifier = Modifier
@@ -350,6 +363,7 @@ private fun ConfirmationStep(
 				identifier,
 			),
 			style = MaterialTheme.typography.bodyLarge,
+			color = MaterialTheme.colorScheme.onBackground,
 			textAlign = TextAlign.Center,
 			modifier = Modifier.fillMaxWidth(),
 		)
@@ -379,6 +393,73 @@ private fun ConfirmationStep(
 		}
 	}
 }
+
+@Composable
+private fun TelegramLoginTheme(content: @Composable () -> Unit) {
+	MaterialTheme(
+		colorScheme = telegramLoginColorScheme(),
+		content = content,
+	)
+}
+
+@Composable
+private fun telegramLoginColorScheme(): ColorScheme {
+	val primary = colorResource(R.color.md_theme_primary)
+	val onPrimary = colorResource(R.color.md_theme_onPrimary)
+	val background = colorResource(R.color.window_background)
+	val onBackground = colorResource(R.color.md_theme_onBackground)
+	val surface = colorResource(R.color.card_background)
+	val onSurface = colorResource(R.color.md_theme_onSurface)
+	val surfaceVariant = colorResource(R.color.md_theme_surfaceDim)
+	val outline = colorResource(R.color.divider)
+	val error = colorResource(R.color.md_theme_error)
+
+	return if (isSystemInDarkTheme()) {
+		darkColorScheme(
+			primary = primary,
+			onPrimary = onPrimary,
+			background = background,
+			onBackground = onBackground,
+			surface = surface,
+			onSurface = onSurface,
+			surfaceVariant = surfaceVariant,
+			onSurfaceVariant = onSurface,
+			outline = outline,
+			error = error,
+		)
+	} else {
+		lightColorScheme(
+			primary = primary,
+			onPrimary = onPrimary,
+			background = background,
+			onBackground = onBackground,
+			surface = surface,
+			onSurface = onSurface,
+			surfaceVariant = surfaceVariant,
+			onSurfaceVariant = onSurface,
+			outline = outline,
+			error = error,
+		)
+	}
+}
+
+@Composable
+private fun telegramTextFieldColors() = OutlinedTextFieldDefaults.colors(
+	focusedTextColor = MaterialTheme.colorScheme.onSurface,
+	unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+	disabledTextColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
+	focusedContainerColor = MaterialTheme.colorScheme.surface,
+	unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+	disabledContainerColor = MaterialTheme.colorScheme.surface,
+	cursorColor = MaterialTheme.colorScheme.primary,
+	focusedBorderColor = MaterialTheme.colorScheme.primary,
+	unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+	disabledBorderColor = MaterialTheme.colorScheme.outline,
+	focusedLabelColor = MaterialTheme.colorScheme.primary,
+	unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+	disabledLabelColor =
+		MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f),
+)
 
 private fun loginMessage(
 	authState: TelegramAuthState,
