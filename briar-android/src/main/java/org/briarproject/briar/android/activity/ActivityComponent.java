@@ -83,6 +83,7 @@ import org.briarproject.briar.android.sharing.ShareForumActivity;
 import org.briarproject.briar.android.sharing.ShareForumFragment;
 import org.briarproject.briar.android.sharing.SharingModule;
 import org.briarproject.briar.android.splash.SplashScreenActivity;
+import org.briarproject.briar.android.telegram.TelegramConversationActivity;
 import org.briarproject.briar.android.test.TestDataActivity;
 
 import dagger.Component;
@@ -115,6 +116,8 @@ public interface ActivityComponent {
 	void inject(AddNearbyContactActivity activity);
 
 	void inject(ConversationActivity activity);
+
+	void inject(TelegramConversationActivity activity);
 
 	void inject(ImageActivity activity);
 

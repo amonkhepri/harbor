@@ -3,8 +3,8 @@ package org.briarproject.briar.android.telegram;
 import android.os.Bundle;
 import android.view.MenuItem;
 
+import org.briarproject.bramble.api.lifecycle.IoExecutor;
 import org.briarproject.briar.R;
-import org.briarproject.briar.android.BriarApplication;
 import org.briarproject.briar.android.activity.ActivityComponent;
 import org.briarproject.briar.android.activity.BriarActivity;
 import org.briarproject.briar.android.view.BriarRecyclerView;
@@ -14,10 +14,10 @@ import org.briarproject.nullsafety.ParametersNotNullByDefault;
 
 import java.util.Collections;
 import java.util.List;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.Executor;
 
 import javax.annotation.Nullable;
+import javax.inject.Inject;
 
 import androidx.appcompat.app.ActionBar;
 import androidx.recyclerview.widget.LinearLayoutManager;
@@ -31,16 +31,21 @@ public class TelegramConversationActivity extends BriarActivity {
 
 	private static final int MESSAGE_LIMIT = 50;
 
-	private final ExecutorService executor = Executors.newSingleThreadExecutor();
 	private final TelegramConversationAdapter adapter =
 			new TelegramConversationAdapter();
+
+	@Inject
+	TelegramConnector telegramConnector;
+	@Inject
+	@IoExecutor
+	Executor ioExecutor;
 
 	private BriarRecyclerView list;
 	private long chatId;
 
 	@Override
 	public void injectActivity(ActivityComponent component) {
-		// no injected activity dependencies for this read-only surface
+		component.inject(this);
 	}
 
 	@Override
@@ -67,12 +72,6 @@ public class TelegramConversationActivity extends BriarActivity {
 	}
 
 	@Override
-	protected void onDestroy() {
-		executor.shutdownNow();
-		super.onDestroy();
-	}
-
-	@Override
 	public boolean onOptionsItemSelected(MenuItem item) {
 		if (item.getItemId() == android.R.id.home) {
 			onBackPressed();
@@ -82,18 +81,16 @@ public class TelegramConversationActivity extends BriarActivity {
 	}
 
 	private void loadMessages() {
-		executor.execute(() -> {
-			TelegramConnector connector = ((BriarApplication) getApplication())
-					.getApplicationComponent()
-					.telegramConnector();
-			if (!connector.isEnabled()) {
+		ioExecutor.execute(() -> {
+			if (!telegramConnector.isEnabled()) {
 				runOnUiThread(() -> adapter.submitList(Collections.emptyList()));
 				return;
 			}
 			try {
 				List<TelegramConversationUiMessage> messages =
 						TelegramConversationMapper.toUiMessages(
-								connector.getRecentMessages(chatId, MESSAGE_LIMIT)
+								telegramConnector.getRecentMessages(chatId,
+										MESSAGE_LIMIT)
 						);
 				runOnUiThread(() -> adapter.submitList(messages));
 			} catch (RuntimeException e) {
