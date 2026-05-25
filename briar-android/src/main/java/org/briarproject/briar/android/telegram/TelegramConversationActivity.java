@@ -83,7 +83,8 @@ public class TelegramConversationActivity extends BriarActivity {
 	private void loadMessages() {
 		ioExecutor.execute(() -> {
 			if (!telegramConnector.isEnabled()) {
-				runOnUiThread(() -> adapter.submitList(Collections.emptyList()));
+				showMessages(Collections.emptyList(),
+						emptyTextForState(false, false));
 				return;
 			}
 			try {
@@ -92,11 +93,25 @@ public class TelegramConversationActivity extends BriarActivity {
 								telegramConnector.getRecentMessages(chatId,
 										MESSAGE_LIMIT)
 						);
-				runOnUiThread(() -> adapter.submitList(messages));
+				showMessages(messages, emptyTextForState(true, false));
 			} catch (RuntimeException e) {
-				runOnUiThread(
-						() -> adapter.submitList(Collections.emptyList()));
+				showMessages(Collections.emptyList(),
+						emptyTextForState(true, true));
 			}
 		});
+	}
+
+	private void showMessages(List<TelegramConversationUiMessage> messages,
+			int emptyTextRes) {
+		runOnUiThread(() -> {
+			list.setEmptyText(emptyTextRes);
+			adapter.submitList(messages);
+		});
+	}
+
+	static int emptyTextForState(boolean connectorEnabled, boolean loadFailed) {
+		if (!connectorEnabled) return R.string.telegram_conversation_disabled;
+		if (loadFailed) return R.string.telegram_conversation_load_failed;
+		return R.string.telegram_conversation_empty;
 	}
 }
