@@ -79,7 +79,38 @@ class TelegramConnectorMessageTest {
 				client.getRecentMessages(10L, 3),
 		)
 		assertEquals(
-				listOf("GetChats", "GetChat", "Close", "GetChatHistory", "Close"),
+				listOf(
+						"GetChats",
+						"GetChat",
+						"Close",
+						"GetChatHistory",
+						"GetChatHistory",
+						"Close",
+				),
+				Client.getSentRequestNames(),
+		)
+	}
+
+	@Test
+	fun testReflectiveClientPaginatesPartialHistoryPages() {
+		Client.resetTestState()
+		Client.setInitialAuthorizationState(TdApi.AuthorizationStateReady())
+		Client.setMaxHistoryPageSize(2)
+		Client.setMessages(
+				10L,
+				textMessage(10L, 40L, 1_700_000_004, isOutgoing = false, body = "latest"),
+				textMessage(10L, 30L, 1_700_000_003, isOutgoing = false, body = "middle"),
+				textMessage(10L, 20L, 1_700_000_002, isOutgoing = true, body = "older"),
+				textMessage(10L, 10L, 1_700_000_001, isOutgoing = false, body = "oldest"),
+		)
+		val client = ReflectiveTelegramTdlibMessageClient(requestTimeoutMs = 1_000L)
+
+		val messages = client.getRecentMessages(10L, 4)
+
+		assertEquals(listOf(40L, 30L, 20L, 10L), messages.map { it.messageId })
+		assertEquals(listOf("latest", "middle", "older", "oldest"), messages.map { it.text })
+		assertEquals(
+				listOf("GetChatHistory", "GetChatHistory", "GetChatHistory", "Close"),
 				Client.getSentRequestNames(),
 		)
 	}
@@ -227,6 +258,7 @@ class TelegramConnectorMessageTest {
 		messageId: Long,
 		dateSeconds: Int,
 		isOutgoing: Boolean,
+		body: String = "",
 	): TdApi.Message =
 		TdApi.Message().also {
 			it.chatId = chatId
@@ -235,7 +267,7 @@ class TelegramConnectorMessageTest {
 			it.isOutgoing = isOutgoing
 			it.content = TdApi.MessageText().also { content ->
 				content.text = TdApi.FormattedText().also { text ->
-					text.text = ""
+					text.text = body
 				}
 			}
 		}

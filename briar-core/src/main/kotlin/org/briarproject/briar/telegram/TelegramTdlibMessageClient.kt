@@ -5,6 +5,7 @@ import org.briarproject.briar.api.telegram.TelegramMessage
 import java.io.File
 import java.lang.reflect.Method
 import java.lang.reflect.Proxy
+import java.util.LinkedHashSet
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
@@ -50,11 +51,34 @@ class ReflectiveTelegramTdlibMessageClient @JvmOverloads constructor(
 		val safeLimit = safeLimit(limit)
 		if (chatId == 0L || safeLimit == 0) return emptyList()
 		return withReadyClient(emptyList()) { client ->
-			val messages = sendAndAwait(client, createGetChatHistoryRequest(chatId, safeLimit))
-					?.let { getObjectArrayField(it, "messages") }
-					?: emptyArray<Any>()
-			messages.mapNotNull { mapTextMessage(it) }
-					.take(safeLimit)
+			val messages = mutableListOf<TelegramMessage>()
+			val seenMessageIds = LinkedHashSet<Long>()
+			var fromMessageId = 0L
+			var requestCount = 0
+			while (messages.size < safeLimit && requestCount < MAX_TDLIB_HISTORY_REQUESTS) {
+				val rawMessages = sendAndAwait(
+						client,
+						createGetChatHistoryRequest(chatId, fromMessageId, safeLimit),
+				)?.let { getObjectArrayField(it, "messages") }
+						?: emptyArray<Any>()
+				if (rawMessages.isEmpty()) break
+				var newRawMessage = false
+				for (rawMessage in rawMessages) {
+					val messageId = getMessageId(rawMessage) ?: continue
+					if (!seenMessageIds.add(messageId)) continue
+					newRawMessage = true
+					val message = mapTextMessage(rawMessage) ?: continue
+					if (messages.size < safeLimit) messages += message
+				}
+				requestCount++
+				val nextFromMessageId = rawMessages.mapNotNull { getMessageId(it) }.lastOrNull()
+				if (!newRawMessage || nextFromMessageId == null ||
+						nextFromMessageId == fromMessageId) {
+					break
+				}
+				fromMessageId = nextFromMessageId
+			}
+			messages
 		}
 	}
 
@@ -153,10 +177,14 @@ class ReflectiveTelegramTdlibMessageClient @JvmOverloads constructor(
 	}
 
 	@Throws(ReflectiveOperationException::class)
-	private fun createGetChatHistoryRequest(chatId: Long, limit: Int): Any {
+	private fun createGetChatHistoryRequest(
+		chatId: Long,
+		fromMessageId: Long,
+		limit: Int,
+	): Any {
 		return createTdApiObject("GetChatHistory").also {
 			setFieldIfPresent(it, "chatId", chatId)
-			setFieldIfPresent(it, "fromMessageId", 0L)
+			setFieldIfPresent(it, "fromMessageId", fromMessageId)
 			setFieldIfPresent(it, "offset", 0)
 			setFieldIfPresent(it, "limit", limit)
 			setFieldIfPresent(it, "onlyLocal", false)
@@ -263,6 +291,12 @@ class ReflectiveTelegramTdlibMessageClient @JvmOverloads constructor(
 	}
 
 	@Throws(ReflectiveOperationException::class)
+	private fun getMessageId(message: Any?): Long? {
+		if (message == null || message.javaClass.simpleName != "Message") return null
+		return getLongField(message, "id").takeIf { it != 0L }
+	}
+
+	@Throws(ReflectiveOperationException::class)
 	private fun getObjectField(target: Any, name: String): Any? =
 		target.javaClass.getField(name).get(target)
 
@@ -324,5 +358,6 @@ class ReflectiveTelegramTdlibMessageClient @JvmOverloads constructor(
 
 	private companion object {
 		const val MAX_TDLIB_MESSAGE_LIMIT = 100
+		const val MAX_TDLIB_HISTORY_REQUESTS = 5
 	}
 }

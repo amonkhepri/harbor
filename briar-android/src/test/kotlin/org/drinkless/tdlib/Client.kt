@@ -73,7 +73,9 @@ class Client private constructor(
 			is TdApi.GetChatHistory -> {
 				val messages = messagesByChatId[request.chatId]
 						.orEmpty()
+						.drop(historyStartIndex(request))
 						.take(request.limit)
+						.take(maxHistoryPageSize)
 						.toTypedArray()
 				resultHandler?.onResult(TdApi.Messages().also {
 					it.totalCount = messages.size
@@ -85,8 +87,8 @@ class Client private constructor(
 				emitAuthorizationState(TdApi.AuthorizationStateClosed())
 			}
 			else -> resultHandler?.onResult(TdApi.Ok())
-		}
 	}
+}
 
 	private fun emitAuthorizationState(authorizationState: Any) {
 		val delayMs = getAuthorizationUpdateDelayMs()
@@ -142,6 +144,7 @@ class Client private constructor(
 			TdApi.AuthorizationStateWaitPhoneNumber()
 		private val chatsById = linkedMapOf<Long, TdApi.Chat>()
 		private val messagesByChatId = mutableMapOf<Long, List<TdApi.Message?>>()
+		private var maxHistoryPageSize = Int.MAX_VALUE
 
 		@JvmStatic
 		fun create(
@@ -167,6 +170,7 @@ class Client private constructor(
 				TdApi.AuthorizationStateWaitPhoneNumber()
 			chatsById.clear()
 			messagesByChatId.clear()
+			maxHistoryPageSize = Int.MAX_VALUE
 		}
 
 		@JvmStatic
@@ -212,6 +216,11 @@ class Client private constructor(
 		}
 
 		@JvmStatic
+		fun setMaxHistoryPageSize(limit: Int) {
+			maxHistoryPageSize = limit.coerceAtLeast(1)
+		}
+
+		@JvmStatic
 		fun getSentRequestNames(): List<String> = sentRequestNames.toList()
 
 		@JvmStatic
@@ -235,5 +244,13 @@ class Client private constructor(
 			} else {
 				authorizationUpdateDelayMs
 			}
+
+		private fun historyStartIndex(request: TdApi.GetChatHistory): Int {
+			if (request.fromMessageId == 0L) return 0
+			val messages = messagesByChatId[request.chatId].orEmpty()
+			val index = messages.indexOfFirst { it?.id == request.fromMessageId }
+			if (index == -1) return messages.size
+			return (index + request.offset).coerceIn(0, messages.size)
+		}
 	}
 }
