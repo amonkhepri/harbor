@@ -164,6 +164,7 @@
 	<string name="telegram_conversation_disabled">Telegram connector unavailable in this build</string>
 	<string name="telegram_conversation_account_unavailable">Telegram account unavailable</string>
 	<string name="telegram_conversation_load_failed">Telegram messages could not be loaded</string>
+	<string name="telegram_conversation_refresh">Refresh Telegram messages</string>
 
 	<!-- Notifications -->
 	<string name="reminder_notification_title">Signed out of Harbor</string>

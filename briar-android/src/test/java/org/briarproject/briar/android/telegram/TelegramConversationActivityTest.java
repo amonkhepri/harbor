@@ -4,6 +4,8 @@ import org.briarproject.briar.R;
 import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 public class TelegramConversationActivityTest {
 
@@ -21,5 +23,15 @@ public class TelegramConversationActivityTest {
 		assertEquals(R.string.telegram_conversation_empty,
 				TelegramConversationActivity.emptyTextForState(true, true,
 						false));
+	}
+
+	@Test
+	public void testManualRefreshActionIsRecognized() {
+		assertTrue(TelegramConversationActivity.isManualRefreshAction(
+				R.id.action_refresh_telegram_conversation));
+		assertFalse(TelegramConversationActivity.isManualRefreshAction(
+				android.R.id.home));
+		assertFalse(TelegramConversationActivity.isManualRefreshAction(
+				R.id.action_delete_all_messages));
 	}
 }

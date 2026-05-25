@@ -1,6 +1,8 @@
 package org.briarproject.briar.android.telegram;
 
 import android.os.Bundle;
+import android.view.Menu;
+import android.view.MenuInflater;
 import android.view.MenuItem;
 
 import org.briarproject.bramble.api.lifecycle.IoExecutor;
@@ -72,9 +74,20 @@ public class TelegramConversationActivity extends BriarActivity {
 	}
 
 	@Override
+	public boolean onCreateOptionsMenu(Menu menu) {
+		MenuInflater inflater = getMenuInflater();
+		inflater.inflate(R.menu.telegram_conversation_actions, menu);
+		return super.onCreateOptionsMenu(menu);
+	}
+
+	@Override
 	public boolean onOptionsItemSelected(MenuItem item) {
-		if (item.getItemId() == android.R.id.home) {
+		int itemId = item.getItemId();
+		if (itemId == android.R.id.home) {
 			onBackPressed();
+			return true;
+		} else if (isManualRefreshAction(itemId)) {
+			loadMessages();
 			return true;
 		}
 		return super.onOptionsItemSelected(item);
@@ -124,5 +137,9 @@ public class TelegramConversationActivity extends BriarActivity {
 		if (!authorized) return R.string.telegram_conversation_account_unavailable;
 		if (loadFailed) return R.string.telegram_conversation_load_failed;
 		return R.string.telegram_conversation_empty;
+	}
+
+	static boolean isManualRefreshAction(int itemId) {
+		return itemId == R.id.action_refresh_telegram_conversation;
 	}
 }
