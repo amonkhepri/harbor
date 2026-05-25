@@ -111,9 +111,17 @@ class ContactListViewModel extends ContactsViewModel {
 				List<TelegramInboxThreadItem> items =
 						new ArrayList<>(chats.size());
 				for (TelegramChat chat : chats) {
-					items.add(new TelegramInboxThreadItem(chat));
+					items.add(new TelegramInboxThreadItem(chat.getId(),
+							chat.getTitle(),
+							chat.getLastMessageDateSeconds() * 1000L));
 				}
 				telegramThreadItems.postValue(items);
+				List<TelegramInboxThreadItem> previewItems =
+						new ArrayList<>(chats.size());
+				for (TelegramChat chat : chats) {
+					previewItems.add(new TelegramInboxThreadItem(chat));
+				}
+				telegramThreadItems.postValue(previewItems);
 			} catch (RuntimeException e) {
 				telegramThreadItems.postValue(Collections.emptyList());
 			}

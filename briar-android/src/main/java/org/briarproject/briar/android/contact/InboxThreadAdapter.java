@@ -80,7 +80,9 @@ final class InboxThreadAdapter extends
 				TelegramInboxThreadItem t2 = (TelegramInboxThreadItem) i2;
 				return t1.getLatestActivityMillis() ==
 						t2.getLatestActivityMillis() &&
-						t1.getTitle().equals(t2.getTitle());
+						t1.getTitle().equals(t2.getTitle()) &&
+						t1.isPreviewLoading() == t2.isPreviewLoading() &&
+						t1.getPreviewText().equals(t2.getPreviewText());
 			}
 			ContactListItem c1 = ((BriarInboxThreadItem) i1).getItem();
 			ContactListItem c2 = ((BriarInboxThreadItem) i2).getItem();

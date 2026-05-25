@@ -9,17 +9,28 @@ public final class TelegramInboxThreadItem implements InboxThreadItem {
 	private final long chatId;
 	private final String title;
 	private final long latestActivityMillis;
+	private final String previewText;
+	private final boolean previewLoading;
 
 	TelegramInboxThreadItem(TelegramChat chat) {
 		this(chat.getId(), chat.getTitle(),
-				chat.getLastMessageDateSeconds() * 1000L);
+				chat.getLastMessageDateSeconds() * 1000L,
+				cleanPreviewText(chat.getLastMessageText()), false);
 	}
 
 	TelegramInboxThreadItem(long chatId, String title,
 			long latestActivityMillis) {
+		this(chatId, title, latestActivityMillis, "", true);
+	}
+
+	TelegramInboxThreadItem(long chatId, String title,
+			long latestActivityMillis, String previewText,
+			boolean previewLoading) {
 		this.chatId = chatId;
 		this.title = title;
 		this.latestActivityMillis = latestActivityMillis;
+		this.previewText = previewText;
+		this.previewLoading = previewLoading;
 	}
 
 	public long getChatId() {
@@ -28,6 +39,18 @@ public final class TelegramInboxThreadItem implements InboxThreadItem {
 
 	public String getTitle() {
 		return title;
+	}
+
+	public String getPreviewText() {
+		return previewText;
+	}
+
+	public boolean hasPreviewText() {
+		return !previewText.isEmpty();
+	}
+
+	public boolean isPreviewLoading() {
+		return previewLoading;
 	}
 
 	@Override
@@ -43,5 +66,9 @@ public final class TelegramInboxThreadItem implements InboxThreadItem {
 	@Override
 	public Source getSource() {
 		return Source.TELEGRAM;
+	}
+
+	private static String cleanPreviewText(String text) {
+		return text.replaceAll("\\s+", " ").trim();
 	}
 }

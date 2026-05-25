@@ -268,12 +268,13 @@ class ReflectiveTelegramTdlibMessageClient @JvmOverloads constructor(
 	private fun mapChat(chat: Any): TelegramChat? {
 		if (chat.javaClass.simpleName != "Chat") return null
 		val lastMessage = getObjectField(chat, "lastMessage")
-		return TelegramChat(
-				id = getLongField(chat, "id"),
-				title = getStringField(chat, "title"),
-				lastMessageDateSeconds = lastMessage?.let { getIntField(it, "date") } ?: 0,
-		)
-	}
+			return TelegramChat(
+					id = getLongField(chat, "id"),
+					title = getStringField(chat, "title"),
+					lastMessageDateSeconds = lastMessage?.let { getIntField(it, "date") } ?: 0,
+					lastMessageText = mapTextMessage(lastMessage)?.text.orEmpty(),
+			)
+		}
 
 	@Throws(ReflectiveOperationException::class)
 	private fun mapTextMessage(message: Any?): TelegramMessage? {

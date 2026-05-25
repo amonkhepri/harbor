@@ -54,7 +54,11 @@ class TelegramConnectorMessageTest {
 	fun testReflectiveClientMapsRecentChatsAndTextMessages() {
 		Client.resetTestState()
 		Client.setInitialAuthorizationState(TdApi.AuthorizationStateReady())
-		Client.setChats(chat(10L, lastMessageDateSeconds = 1_700_000_000))
+		Client.setChats(chat(
+				10L,
+				lastMessageDateSeconds = 1_700_000_000,
+				body = "chat preview",
+		))
 		Client.setMessages(
 				10L,
 				textMessage(10L, 20L, 1_700_000_001, isOutgoing = false),
@@ -62,10 +66,10 @@ class TelegramConnectorMessageTest {
 		)
 		val client = ReflectiveTelegramTdlibMessageClient(requestTimeoutMs = 1_000L)
 
-		assertEquals(
-				listOf(TelegramChat(10L, "", 1_700_000_000)),
-				client.getRecentChats(3),
-		)
+			assertEquals(
+					listOf(TelegramChat(10L, "", 1_700_000_000, "chat preview")),
+					client.getRecentChats(3),
+			)
 		assertEquals(
 				listOf(
 						TelegramMessage(
@@ -246,11 +250,15 @@ class TelegramConnectorMessageTest {
 		}
 	}
 
-	private fun chat(id: Long, lastMessageDateSeconds: Int): TdApi.Chat =
+	private fun chat(
+		id: Long,
+		lastMessageDateSeconds: Int,
+		body: String = "",
+	): TdApi.Chat =
 		TdApi.Chat().also {
 			it.id = id
 			it.title = ""
-			it.lastMessage = textMessage(id, id * 10, lastMessageDateSeconds, false)
+			it.lastMessage = textMessage(id, id * 10, lastMessageDateSeconds, false, body)
 		}
 
 	private fun textMessage(

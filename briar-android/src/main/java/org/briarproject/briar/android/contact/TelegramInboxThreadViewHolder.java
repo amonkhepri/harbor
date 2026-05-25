@@ -17,11 +17,13 @@ final class TelegramInboxThreadViewHolder extends
 
 	private final TextView title;
 	private final TextView date;
+	private final TextView preview;
 
 	TelegramInboxThreadViewHolder(View view) {
 		super(view);
 		title = view.findViewById(R.id.telegramThreadTitle);
 		date = view.findViewById(R.id.telegramThreadDate);
+		preview = view.findViewById(R.id.telegramThreadPreview);
 	}
 
 	void bind(TelegramInboxThreadItem item,
@@ -29,6 +31,13 @@ final class TelegramInboxThreadViewHolder extends
 		title.setText(item.getTitle());
 		date.setText(formatDate(date.getContext(),
 				item.getLatestActivityMillis()));
+		if (item.isPreviewLoading()) {
+			preview.setText(R.string.telegram_thread_preview_loading);
+		} else if (item.hasPreviewText()) {
+			preview.setText(item.getPreviewText());
+		} else {
+			preview.setText(R.string.telegram_thread_preview_empty);
+		}
 		itemView.setOnClickListener(view -> listener.onItemClick(view, item));
 	}
 }

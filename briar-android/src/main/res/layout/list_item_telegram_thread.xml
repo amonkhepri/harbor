@@ -65,6 +65,21 @@
 		app:layout_constraintStart_toEndOf="@+id/telegramThreadIcon"
 		app:layout_constraintTop_toBottomOf="@+id/telegramThreadTitle" />
 
+	<TextView
+		android:id="@+id/telegramThreadPreview"
+		android:layout_width="0dp"
+		android:layout_height="wrap_content"
+		android:layout_marginStart="@dimen/margin_medium"
+		android:layout_marginEnd="@dimen/listitem_horizontal_margin"
+		android:ellipsize="end"
+		android:maxLines="1"
+		android:textColor="?android:attr/textColorSecondary"
+		android:textSize="@dimen/text_size_small"
+		app:layout_constraintBaseline_toBaselineOf="@+id/telegramThreadBadge"
+		app:layout_constraintEnd_toEndOf="parent"
+		app:layout_constraintStart_toEndOf="@+id/telegramThreadBadge"
+		tools:text="Latest Telegram text preview" />
+
 	<View
 		android:id="@+id/divider"
 		style="@style/Divider.ContactList"
