@@ -84,7 +84,12 @@ public class TelegramConversationActivity extends BriarActivity {
 		ioExecutor.execute(() -> {
 			if (!telegramConnector.isEnabled()) {
 				showMessages(Collections.emptyList(),
-						emptyTextForState(false, false));
+						emptyTextForState(false, false, false));
+				return;
+			}
+			if (!telegramConnector.isAuthorized()) {
+				showMessages(Collections.emptyList(),
+						emptyTextForState(true, false, false));
 				return;
 			}
 			try {
@@ -93,10 +98,10 @@ public class TelegramConversationActivity extends BriarActivity {
 								telegramConnector.getRecentMessages(chatId,
 										MESSAGE_LIMIT)
 						);
-				showMessages(messages, emptyTextForState(true, false));
+				showMessages(messages, emptyTextForState(true, true, false));
 			} catch (RuntimeException e) {
 				showMessages(Collections.emptyList(),
-						emptyTextForState(true, true));
+						emptyTextForState(true, true, true));
 			}
 		});
 	}
@@ -110,7 +115,13 @@ public class TelegramConversationActivity extends BriarActivity {
 	}
 
 	static int emptyTextForState(boolean connectorEnabled, boolean loadFailed) {
+		return emptyTextForState(connectorEnabled, true, loadFailed);
+	}
+
+	static int emptyTextForState(boolean connectorEnabled, boolean authorized,
+			boolean loadFailed) {
 		if (!connectorEnabled) return R.string.telegram_conversation_disabled;
+		if (!authorized) return R.string.telegram_conversation_account_unavailable;
 		if (loadFailed) return R.string.telegram_conversation_load_failed;
 		return R.string.telegram_conversation_empty;
 	}

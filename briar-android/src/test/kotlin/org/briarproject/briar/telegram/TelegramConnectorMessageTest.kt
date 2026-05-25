@@ -22,6 +22,7 @@ class TelegramConnectorMessageTest {
 		val connector = NoOpTelegramConnector()
 
 		assertFalse(connector.isEnabled())
+		assertFalse(connector.isAuthorized())
 		assertEquals(emptyList<TelegramChat>(), connector.getRecentChats(5))
 		assertEquals(emptyList<TelegramMessage>(), connector.getRecentMessages(1L, 5))
 	}
@@ -32,6 +33,7 @@ class TelegramConnectorMessageTest {
 		val connector = StubTelegramConnector(client)
 
 		assertTrue(connector.isEnabled())
+		assertTrue(connector.isAuthorized())
 		assertEquals(client.chats, connector.getRecentChats(3))
 		assertEquals(3, client.lastChatLimit)
 		assertEquals(client.messages, connector.getRecentMessages(10L, 2))
@@ -44,10 +46,21 @@ class TelegramConnectorMessageTest {
 		Client.resetTestState()
 		val client = ReflectiveTelegramTdlibMessageClient(requestTimeoutMs = 1_000L)
 
+		assertFalse(client.isAuthorized())
 		assertEquals(emptyList<TelegramChat>(), client.getRecentChats(5))
 		assertEquals(emptyList<TelegramMessage>(), client.getRecentMessages(10L, 5))
 		assertFalse(Client.getSentRequestNames().contains("GetChats"))
 		assertFalse(Client.getSentRequestNames().contains("GetChatHistory"))
+	}
+
+	@Test
+	fun testReflectiveClientReportsAuthorizationReady() {
+		Client.resetTestState()
+		Client.setInitialAuthorizationState(TdApi.AuthorizationStateReady())
+		val client = ReflectiveTelegramTdlibMessageClient(requestTimeoutMs = 1_000L)
+
+		assertTrue(client.isAuthorized())
+		assertEquals(listOf("Close"), Client.getSentRequestNames())
 	}
 
 	@Test
@@ -152,6 +165,23 @@ class TelegramConnectorMessageTest {
 	}
 
 	@Test
+	fun testMessageIngestDiagnosticsReportsAuthorizationUnavailable() {
+		val connector = StubTelegramConnector(
+				FakeTelegramTdlibMessageClient(authorized = false),
+		)
+
+		val snapshot = TelegramMessageIngestDiagnostics(connector)
+				.readSnapshot(chatLimit = 3, messageLimit = 3)
+
+		assertEquals(
+				TelegramMessageIngestStatus.AUTHORIZATION_UNAVAILABLE,
+				snapshot.status,
+		)
+		assertEquals(0, snapshot.recentChatCount)
+		assertEquals(0, snapshot.sampledMessageCount)
+	}
+
+	@Test
 	fun testMessageIngestDiagnosticsReportsCountsOnly() {
 		val client = FakeTelegramTdlibMessageClient()
 		val connector = StubTelegramConnector(client)
@@ -168,7 +198,7 @@ class TelegramConnectorMessageTest {
 	}
 
 	@Test
-	fun testMessageIngestDiagnosticsTreatsNotReadyAsNoContent() {
+	fun testMessageIngestDiagnosticsTreatsAuthorizedEmptyAsNoContent() {
 		val connector = StubTelegramConnector(
 				FakeTelegramTdlibMessageClient(
 						chats = emptyList(),
@@ -192,6 +222,7 @@ class TelegramConnectorMessageTest {
 		) : TelegramTdlibMessageClient {
 			val messageChatIds = mutableListOf<Long>()
 			val messageLimits = mutableListOf<Int>()
+			override fun isAuthorized(): Boolean = true
 			override fun getRecentChats(limit: Int): List<TelegramChat> =
 				chatList.take(limit)
 			override fun getRecentMessages(chatId: Long, limit: Int): List<TelegramMessage> {
@@ -223,6 +254,7 @@ class TelegramConnectorMessageTest {
 	}
 
 	private class FakeTelegramTdlibMessageClient(
+		val authorized: Boolean = true,
 		val chats: List<TelegramChat> = listOf(TelegramChat(10L, "", 1_700_000_000)),
 		val messages: List<TelegramMessage> = listOf(
 				TelegramMessage(
@@ -237,6 +269,8 @@ class TelegramConnectorMessageTest {
 		var lastChatLimit = 0
 		var lastMessageChatId = 0L
 		var lastMessageLimit = 0
+
+		override fun isAuthorized(): Boolean = authorized
 
 		override fun getRecentChats(limit: Int): List<TelegramChat> {
 			lastChatLimit = limit

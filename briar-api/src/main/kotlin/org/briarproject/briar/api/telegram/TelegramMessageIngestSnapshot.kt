@@ -8,6 +8,7 @@ data class TelegramMessageIngestSnapshot(
 
 enum class TelegramMessageIngestStatus {
 	DISABLED,
+	AUTHORIZATION_UNAVAILABLE,
 	NO_CONTENT,
 	CHAT_COUNT_ONLY,
 	MESSAGE_COUNT_AVAILABLE,

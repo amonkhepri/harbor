@@ -107,6 +107,10 @@ class ContactListViewModel extends ContactsViewModel {
 		}
 		ioExecutor.execute(() -> {
 			try {
+				if (!telegramConnector.isAuthorized()) {
+					telegramThreadItems.postValue(Collections.emptyList());
+					return;
+				}
 				List<TelegramChat> chats = telegramConnector.getRecentChats(20);
 				List<TelegramInboxThreadItem> items =
 						new ArrayList<>(chats.size());

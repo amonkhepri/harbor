@@ -19,6 +19,13 @@ class TelegramMessageIngestDiagnostics(
 					sampledMessageCount = 0,
 			)
 		}
+		if (!connector.isAuthorized()) {
+			return TelegramMessageIngestSnapshot(
+					status = TelegramMessageIngestStatus.AUTHORIZATION_UNAVAILABLE,
+					recentChatCount = 0,
+					sampledMessageCount = 0,
+			)
+		}
 		val chats = connector.getRecentChats(chatLimit)
 		if (chats.isEmpty()) {
 			return TelegramMessageIngestSnapshot(

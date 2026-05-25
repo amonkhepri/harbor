@@ -9,6 +9,8 @@ class StubTelegramConnector(
 ) : TelegramConnector {
 	override fun isEnabled(): Boolean = true
 
+	override fun isAuthorized(): Boolean = messageClient.isAuthorized()
+
 	override fun getRecentChats(limit: Int): List<TelegramChat> =
 		messageClient.getRecentChats(limit)
 

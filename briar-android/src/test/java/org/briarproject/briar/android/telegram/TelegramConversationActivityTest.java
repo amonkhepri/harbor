@@ -8,12 +8,18 @@ import static org.junit.Assert.assertEquals;
 public class TelegramConversationActivityTest {
 
 	@Test
-	public void testEmptyTextDistinguishesDisabledEmptyAndFailure() {
+	public void testEmptyTextDistinguishesDisabledUnauthorizedEmptyAndFailure() {
 		assertEquals(R.string.telegram_conversation_disabled,
-				TelegramConversationActivity.emptyTextForState(false, false));
+				TelegramConversationActivity.emptyTextForState(false, false,
+						false));
+		assertEquals(R.string.telegram_conversation_account_unavailable,
+				TelegramConversationActivity.emptyTextForState(true, false,
+						false));
 		assertEquals(R.string.telegram_conversation_load_failed,
-				TelegramConversationActivity.emptyTextForState(true, true));
+				TelegramConversationActivity.emptyTextForState(true, true,
+						true));
 		assertEquals(R.string.telegram_conversation_empty,
-				TelegramConversationActivity.emptyTextForState(true, false));
+				TelegramConversationActivity.emptyTextForState(true, true,
+						false));
 	}
 }

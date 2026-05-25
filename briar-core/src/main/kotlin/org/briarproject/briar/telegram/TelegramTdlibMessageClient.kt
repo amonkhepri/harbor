@@ -11,11 +11,14 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 
 interface TelegramTdlibMessageClient {
+	fun isAuthorized(): Boolean
 	fun getRecentChats(limit: Int): List<TelegramChat>
 	fun getRecentMessages(chatId: Long, limit: Int): List<TelegramMessage>
 }
 
 class NoOpTelegramTdlibMessageClient : TelegramTdlibMessageClient {
+	override fun isAuthorized(): Boolean = false
+
 	override fun getRecentChats(limit: Int): List<TelegramChat> = emptyList()
 
 	override fun getRecentMessages(chatId: Long, limit: Int): List<TelegramMessage> =
@@ -33,6 +36,8 @@ class ReflectiveTelegramTdlibMessageClient @JvmOverloads constructor(
 		val authorizationStateClassName = AtomicReference("")
 		val updateReceived = CountDownLatch(1)
 	}
+
+	override fun isAuthorized(): Boolean = withReadyClient(false) { true }
 
 	override fun getRecentChats(limit: Int): List<TelegramChat> {
 		val safeLimit = safeLimit(limit)
