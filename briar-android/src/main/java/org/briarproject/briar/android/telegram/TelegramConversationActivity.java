@@ -94,6 +94,7 @@ public class TelegramConversationActivity extends BriarActivity {
 	}
 
 	private void loadMessages() {
+		list.setEmptyText(emptyTextForState(true, true, false, true));
 		ioExecutor.execute(() -> {
 			if (!telegramConnector.isEnabled()) {
 				showMessages(Collections.emptyList(),
@@ -133,6 +134,13 @@ public class TelegramConversationActivity extends BriarActivity {
 
 	static int emptyTextForState(boolean connectorEnabled, boolean authorized,
 			boolean loadFailed) {
+		return emptyTextForState(connectorEnabled, authorized, loadFailed,
+				false);
+	}
+
+	static int emptyTextForState(boolean connectorEnabled, boolean authorized,
+			boolean loadFailed, boolean loadPending) {
+		if (loadPending) return R.string.telegram_conversation_loading;
 		if (!connectorEnabled) return R.string.telegram_conversation_disabled;
 		if (!authorized) return R.string.telegram_conversation_account_unavailable;
 		if (loadFailed) return R.string.telegram_conversation_load_failed;

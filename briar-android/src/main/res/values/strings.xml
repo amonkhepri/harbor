@@ -166,6 +166,7 @@
 	<string name="telegram_inbox_empty">No recent Telegram chats</string>
 	<string name="telegram_inbox_load_failed">Telegram inbox unavailable</string>
 	<string name="telegram_conversation_title">Telegram conversation</string>
+	<string name="telegram_conversation_loading">Loading Telegram messages...</string>
 	<string name="telegram_conversation_empty">No Telegram text messages</string>
 	<string name="telegram_conversation_disabled">Telegram connector unavailable in this build</string>
 	<string name="telegram_conversation_account_unavailable">Telegram account unavailable</string>
