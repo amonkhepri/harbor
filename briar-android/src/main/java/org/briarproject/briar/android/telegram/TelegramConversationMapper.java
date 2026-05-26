@@ -21,12 +21,13 @@ final class TelegramConversationMapper {
 		List<TelegramConversationUiMessage> items =
 				new ArrayList<>(messages.size());
 		for (TelegramMessage message : messages) {
-			if (message.getText().isEmpty()) continue;
+			String text = message.getText();
+			if (text.trim().isEmpty()) continue;
 			items.add(new TelegramConversationUiMessage(
 					message.getMessageId(),
 					message.getDateSeconds() * 1000L,
 					message.isOutgoing(),
-					message.getText()
+					text
 			));
 		}
 		items.sort(BY_DATE_ASCENDING);

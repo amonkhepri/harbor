@@ -18,6 +18,7 @@ public class TelegramConversationMapperTest {
 				TelegramConversationMapper.toUiMessages(Arrays.asList(
 						new TelegramMessage(1L, 3L, 30, true, "new"),
 						new TelegramMessage(1L, 2L, 20, false, ""),
+						new TelegramMessage(1L, 4L, 40, false, " \t\n"),
 						new TelegramMessage(1L, 1L, 10, false, "old")
 				));
 
