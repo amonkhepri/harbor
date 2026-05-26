@@ -34,4 +34,16 @@ public class TelegramConversationActivityTest {
 		assertFalse(TelegramConversationActivity.isManualRefreshAction(
 				R.id.action_delete_all_messages));
 	}
+
+	@Test
+	public void testDirectionTextDistinguishesIncomingAndOutgoingMessages() {
+		assertEquals(R.string.telegram_conversation_direction_incoming,
+				TelegramConversationAdapter.directionText(
+						new TelegramConversationUiMessage(1L, 10L, false,
+								"in")));
+		assertEquals(R.string.telegram_conversation_direction_outgoing,
+				TelegramConversationAdapter.directionText(
+						new TelegramConversationUiMessage(2L, 20L, true,
+								"out")));
+	}
 }

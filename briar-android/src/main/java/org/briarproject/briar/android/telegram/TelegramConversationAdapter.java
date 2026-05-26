@@ -38,18 +38,27 @@ final class TelegramConversationAdapter extends
 	static final class MessageViewHolder extends RecyclerView.ViewHolder {
 
 		private final TextView text;
+		private final TextView direction;
 		private final TextView date;
 
 		MessageViewHolder(View itemView) {
 			super(itemView);
 			text = itemView.findViewById(R.id.telegramMessageText);
+			direction = itemView.findViewById(R.id.telegramMessageDirection);
 			date = itemView.findViewById(R.id.telegramMessageDate);
 		}
 
 		void bind(TelegramConversationUiMessage item) {
 			text.setText(item.getText());
+			direction.setText(directionText(item));
 			date.setText(formatDate(date.getContext(), item.getDateMillis()));
 		}
+	}
+
+	static int directionText(TelegramConversationUiMessage item) {
+		return item.isOutgoing() ?
+				R.string.telegram_conversation_direction_outgoing :
+				R.string.telegram_conversation_direction_incoming;
 	}
 
 	private static final class MessageCallback extends
