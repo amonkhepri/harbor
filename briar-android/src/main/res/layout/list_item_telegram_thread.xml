@@ -14,12 +14,12 @@
 		android:layout_height="@dimen/listitem_picture_size"
 		android:layout_margin="@dimen/listitem_horizontal_margin"
 		android:background="@drawable/bg_telegram_thread_icon"
+		android:contentDescription="@string/telegram_thread_source_content_description"
 		android:padding="@dimen/margin_medium"
 		android:src="@drawable/ic_telegram"
 		app:layout_constraintBottom_toTopOf="@+id/divider"
 		app:layout_constraintStart_toStartOf="parent"
-		app:layout_constraintTop_toTopOf="parent"
-		tools:ignore="ContentDescription" />
+		app:layout_constraintTop_toTopOf="parent" />
 
 	<com.vanniktech.emoji.EmojiTextView
 		android:id="@+id/telegramThreadTitle"
