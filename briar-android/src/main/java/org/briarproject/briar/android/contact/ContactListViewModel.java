@@ -43,6 +43,9 @@ class ContactListViewModel extends ContactsViewModel {
 			new MutableLiveData<>();
 	private final MutableLiveData<List<TelegramInboxThreadItem>>
 			telegramThreadItems = new MutableLiveData<>(Collections.emptyList());
+	private final MutableLiveData<TelegramInboxAvailabilityState>
+			telegramAvailabilityState =
+			new MutableLiveData<>(TelegramInboxAvailabilityState.NONE);
 
 	@Inject
 	ContactListViewModel(Application application,
@@ -80,6 +83,10 @@ class ContactListViewModel extends ContactsViewModel {
 		return telegramThreadItems;
 	}
 
+	LiveData<TelegramInboxAvailabilityState> getTelegramAvailabilityState() {
+		return telegramAvailabilityState;
+	}
+
 	boolean isTelegramConnectorEnabled() {
 		return telegramConnector.isEnabled();
 	}
@@ -106,16 +113,24 @@ class ContactListViewModel extends ContactsViewModel {
 
 	void loadTelegramThreads() {
 		if (!telegramConnector.isEnabled()) {
+			telegramAvailabilityState.setValue(
+					TelegramInboxAvailabilityState.NONE);
 			telegramThreadItems.setValue(Collections.emptyList());
 			return;
 		}
 		ioExecutor.execute(() -> {
 			try {
 				if (!telegramConnector.isAuthorized()) {
+					telegramAvailabilityState.postValue(
+							telegramAvailabilityStateFor(true, false, false,
+									false));
 					telegramThreadItems.postValue(Collections.emptyList());
 					return;
 				}
 				List<TelegramChat> chats = telegramConnector.getRecentChats(20);
+				telegramAvailabilityState.postValue(
+						telegramAvailabilityStateFor(true, true, false,
+								!chats.isEmpty()));
 				List<TelegramInboxThreadItem> items =
 						new ArrayList<>(chats.size());
 				for (TelegramChat chat : chats) {
@@ -131,9 +146,25 @@ class ContactListViewModel extends ContactsViewModel {
 				}
 				telegramThreadItems.postValue(previewItems);
 			} catch (RuntimeException e) {
+				telegramAvailabilityState.postValue(
+						telegramAvailabilityStateFor(true, true, true,
+								false));
 				telegramThreadItems.postValue(Collections.emptyList());
 			}
 		});
+	}
+
+	static TelegramInboxAvailabilityState telegramAvailabilityStateFor(
+			boolean connectorEnabled, boolean authorized, boolean loadFailed,
+			boolean hasRows) {
+		if (!connectorEnabled || hasRows) {
+			return TelegramInboxAvailabilityState.NONE;
+		} else if (loadFailed) {
+			return TelegramInboxAvailabilityState.LOAD_FAILED;
+		} else if (!authorized) {
+			return TelegramInboxAvailabilityState.ACCOUNT_UNAVAILABLE;
+		}
+		return TelegramInboxAvailabilityState.EMPTY;
 	}
 
 }

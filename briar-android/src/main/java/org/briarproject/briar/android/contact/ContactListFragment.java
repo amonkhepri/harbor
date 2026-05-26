@@ -59,6 +59,8 @@ public class ContactListFragment extends BaseFragment
 	private FabSpeedDial speedDial;
 	private List<ContactListItem> briarItems = emptyList();
 	private List<TelegramInboxThreadItem> telegramItems = emptyList();
+	private TelegramInboxAvailabilityState telegramAvailabilityState =
+			TelegramInboxAvailabilityState.NONE;
 
 	/**
 	 * The Snackbar is non-null when shown and null otherwise.
@@ -117,6 +119,11 @@ public class ContactListFragment extends BaseFragment
 				.observe(getViewLifecycleOwner(), items -> {
 					telegramItems = items;
 					submitInboxItems();
+				});
+		viewModel.getTelegramAvailabilityState()
+				.observe(getViewLifecycleOwner(), state -> {
+					telegramAvailabilityState = state;
+					updateEmptyState();
 				});
 		viewModel.getHasPendingContacts()
 				.observe(getViewLifecycleOwner(), hasPending -> {
@@ -223,10 +230,36 @@ public class ContactListFragment extends BaseFragment
 	}
 
 	private void submitInboxItems() {
+		updateEmptyState();
 		adapter.submitList(InboxThreadMerger.merge(briarItems, telegramItems));
+	}
+
+	private void updateEmptyState() {
+		list.setEmptyText(emptyTextForState(telegramAvailabilityState));
+		int actionRes = emptyActionTextForState(telegramAvailabilityState);
+		if (actionRes == 0) list.setEmptyAction("");
+		else list.setEmptyAction(actionRes);
 	}
 
 	static boolean isManualRefreshAction(int itemId) {
 		return itemId == R.id.action_refresh_telegram_threads;
+	}
+
+	static int emptyTextForState(TelegramInboxAvailabilityState state) {
+		switch (state) {
+			case ACCOUNT_UNAVAILABLE:
+				return R.string.telegram_inbox_account_unavailable;
+			case EMPTY:
+				return R.string.telegram_inbox_empty;
+			case LOAD_FAILED:
+				return R.string.telegram_inbox_load_failed;
+			default:
+				return R.string.no_contacts;
+		}
+	}
+
+	static int emptyActionTextForState(TelegramInboxAvailabilityState state) {
+		return state == TelegramInboxAvailabilityState.NONE ?
+				R.string.no_contacts_action : 0;
 	}
 }
