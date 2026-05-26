@@ -80,6 +80,10 @@ class ContactListViewModel extends ContactsViewModel {
 		return telegramThreadItems;
 	}
 
+	boolean isTelegramConnectorEnabled() {
+		return telegramConnector.isEnabled();
+	}
+
 	void checkForPendingContacts() {
 		runOnDbThread(() -> {
 			try {

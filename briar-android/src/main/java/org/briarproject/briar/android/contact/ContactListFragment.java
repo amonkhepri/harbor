@@ -3,6 +3,9 @@ package org.briarproject.briar.android.contact;
 import android.content.Intent;
 import android.os.Bundle;
 import android.view.LayoutInflater;
+import android.view.Menu;
+import android.view.MenuInflater;
+import android.view.MenuItem;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.TextView;
@@ -141,6 +144,30 @@ public class ContactListFragment extends BaseFragment
 	}
 
 	@Override
+	public void onCreateOptionsMenu(Menu menu, MenuInflater inflater) {
+		inflater.inflate(R.menu.telegram_inbox_actions, menu);
+		super.onCreateOptionsMenu(menu, inflater);
+	}
+
+	@Override
+	public void onPrepareOptionsMenu(Menu menu) {
+		super.onPrepareOptionsMenu(menu);
+		MenuItem refresh = menu.findItem(R.id.action_refresh_telegram_threads);
+		if (refresh != null) {
+			refresh.setVisible(viewModel.isTelegramConnectorEnabled());
+		}
+	}
+
+	@Override
+	public boolean onOptionsItemSelected(MenuItem item) {
+		if (isManualRefreshAction(item.getItemId())) {
+			viewModel.loadTelegramThreads();
+			return true;
+		}
+		return super.onOptionsItemSelected(item);
+	}
+
+	@Override
 	public void onMenuItemClick(FloatingActionButton fab, @Nullable TextView v,
 			int itemId) {
 		if (itemId == R.id.action_add_contact_nearby) {
@@ -197,5 +224,9 @@ public class ContactListFragment extends BaseFragment
 
 	private void submitInboxItems() {
 		adapter.submitList(InboxThreadMerger.merge(briarItems, telegramItems));
+	}
+
+	static boolean isManualRefreshAction(int itemId) {
+		return itemId == R.id.action_refresh_telegram_threads;
 	}
 }
