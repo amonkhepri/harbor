@@ -36,6 +36,20 @@ public class TelegramConversationActivityTest {
 	}
 
 	@Test
+	public void testTitleTextFallsBackForBlankTitles() {
+		String fallback = "Telegram conversation";
+		assertEquals(fallback,
+				TelegramConversationActivity.titleText(null, fallback));
+		assertEquals(fallback,
+				TelegramConversationActivity.titleText("", fallback));
+		assertEquals(fallback,
+				TelegramConversationActivity.titleText(" \t\n ", fallback));
+		assertEquals("Synthetic title",
+				TelegramConversationActivity.titleText("Synthetic title",
+						fallback));
+	}
+
+	@Test
 	public void testDirectionTextDistinguishesIncomingAndOutgoingMessages() {
 		assertEquals(R.string.telegram_conversation_direction_incoming,
 				TelegramConversationAdapter.directionText(

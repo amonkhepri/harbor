@@ -56,8 +56,8 @@ public class TelegramConversationActivity extends BriarActivity {
 		setContentView(R.layout.activity_telegram_conversation);
 
 		chatId = getIntent().getLongExtra(CHAT_ID, 0L);
-		String title = getIntent().getStringExtra(CHAT_TITLE);
-		if (title == null) title = getString(R.string.telegram_origin_label);
+		String title = titleText(getIntent().getStringExtra(CHAT_TITLE),
+				getString(R.string.telegram_conversation_title));
 
 		ActionBar ab = getSupportActionBar();
 		if (ab != null) {
@@ -141,5 +141,10 @@ public class TelegramConversationActivity extends BriarActivity {
 
 	static boolean isManualRefreshAction(int itemId) {
 		return itemId == R.id.action_refresh_telegram_conversation;
+	}
+
+	static String titleText(@Nullable String title, String fallback) {
+		if (title == null || title.trim().isEmpty()) return fallback;
+		return title;
 	}
 }
