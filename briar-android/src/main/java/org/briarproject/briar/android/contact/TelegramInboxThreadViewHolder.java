@@ -29,7 +29,7 @@ final class TelegramInboxThreadViewHolder extends
 
 	void bind(TelegramInboxThreadItem item,
 			OnContactClickListener<TelegramInboxThreadItem> listener) {
-		title.setText(item.getTitle());
+		title.setText(titleText(title.getResources(), item));
 		date.setText(formatDate(date.getContext(),
 				item.getLatestActivityMillis()));
 		if (item.isPreviewLoading()) {
@@ -40,6 +40,15 @@ final class TelegramInboxThreadViewHolder extends
 			preview.setText(R.string.telegram_thread_preview_empty);
 		}
 		itemView.setOnClickListener(view -> listener.onItemClick(view, item));
+	}
+
+	static CharSequence titleText(Resources resources,
+			TelegramInboxThreadItem item) {
+		String title = item.getTitle();
+		if (title.trim().isEmpty()) {
+			return resources.getString(R.string.telegram_thread_title_fallback);
+		}
+		return title;
 	}
 
 	static CharSequence previewText(Resources resources,

@@ -42,6 +42,25 @@ public class TelegramInboxThreadViewHolderTest {
 	}
 
 	@Test
+	public void testTitleTextFallsBackForBlankChatTitles() {
+		Resources resources = RuntimeEnvironment.getApplication()
+				.getResources();
+		TelegramInboxThreadItem blank = new TelegramInboxThreadItem(7L,
+				"", 42000L);
+		TelegramInboxThreadItem whitespace = new TelegramInboxThreadItem(8L,
+				" \n\t ", 42000L);
+		TelegramInboxThreadItem normal = new TelegramInboxThreadItem(9L,
+				"chat", 42000L);
+
+		assertEquals(resources.getString(R.string.telegram_thread_title_fallback),
+				TelegramInboxThreadViewHolder.titleText(resources, blank));
+		assertEquals(resources.getString(R.string.telegram_thread_title_fallback),
+				TelegramInboxThreadViewHolder.titleText(resources, whitespace));
+		assertEquals("chat",
+				TelegramInboxThreadViewHolder.titleText(resources, normal));
+	}
+
+	@Test
 	public void testPreviewTextOnlyPrefixesOutgoingMessages() {
 		Resources resources = RuntimeEnvironment.getApplication()
 				.getResources();
