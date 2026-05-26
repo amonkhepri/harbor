@@ -5,4 +5,5 @@ data class TelegramChat @JvmOverloads constructor(
 	val title: String,
 	val lastMessageDateSeconds: Int,
 	val lastMessageText: String = "",
+	val lastMessageIsOutgoing: Boolean = false,
 )

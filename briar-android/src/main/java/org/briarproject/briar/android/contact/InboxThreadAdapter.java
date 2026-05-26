@@ -82,6 +82,8 @@ final class InboxThreadAdapter extends
 						t2.getLatestActivityMillis() &&
 						t1.getTitle().equals(t2.getTitle()) &&
 						t1.isPreviewLoading() == t2.isPreviewLoading() &&
+						t1.isLastMessageOutgoing() ==
+								t2.isLastMessageOutgoing() &&
 						t1.getPreviewText().equals(t2.getPreviewText());
 			}
 			ContactListItem c1 = ((BriarInboxThreadItem) i1).getItem();

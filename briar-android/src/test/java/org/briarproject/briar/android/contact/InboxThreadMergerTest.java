@@ -29,6 +29,7 @@ public class InboxThreadMergerTest {
 		assertEquals("chat", item.getTitle());
 		assertEquals(42000L, item.getLatestActivityMillis());
 		assertFalse(item.isPreviewLoading());
+		assertFalse(item.isLastMessageOutgoing());
 		assertEquals("", item.getPreviewText());
 		assertEquals(InboxThreadItem.Source.TELEGRAM, item.getSource());
 	}
@@ -41,6 +42,20 @@ public class InboxThreadMergerTest {
 		);
 
 		assertFalse(item.isPreviewLoading());
+		assertFalse(item.isLastMessageOutgoing());
+		assertTrue(item.hasPreviewText());
+		assertEquals("synthetic preview text", item.getPreviewText());
+	}
+
+	@Test
+	public void testTelegramRowsExposeOutgoingLatestPreviewDirection() {
+		TelegramInboxThreadItem item = new TelegramInboxThreadItem(
+				new TelegramChat(7L, "chat", 42,
+						"synthetic\npreview\ttext", true)
+		);
+
+		assertFalse(item.isPreviewLoading());
+		assertTrue(item.isLastMessageOutgoing());
 		assertTrue(item.hasPreviewText());
 		assertEquals("synthetic preview text", item.getPreviewText());
 	}
@@ -52,6 +67,7 @@ public class InboxThreadMergerTest {
 		);
 
 		assertFalse(item.isPreviewLoading());
+		assertFalse(item.isLastMessageOutgoing());
 		assertFalse(item.hasPreviewText());
 		assertEquals("", item.getPreviewText());
 	}
@@ -62,6 +78,7 @@ public class InboxThreadMergerTest {
 				new TelegramInboxThreadItem(7L, "chat", 42000L);
 
 		assertTrue(item.isPreviewLoading());
+		assertFalse(item.isLastMessageOutgoing());
 		assertFalse(item.hasPreviewText());
 		assertEquals("", item.getPreviewText());
 	}

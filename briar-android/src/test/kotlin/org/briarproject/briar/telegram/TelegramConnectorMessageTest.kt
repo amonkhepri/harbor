@@ -71,6 +71,7 @@ class TelegramConnectorMessageTest {
 				10L,
 				lastMessageDateSeconds = 1_700_000_000,
 				body = "chat preview",
+				isOutgoing = true,
 		))
 		Client.setMessages(
 				10L,
@@ -80,7 +81,8 @@ class TelegramConnectorMessageTest {
 		val client = ReflectiveTelegramTdlibMessageClient(requestTimeoutMs = 1_000L)
 
 			assertEquals(
-					listOf(TelegramChat(10L, "", 1_700_000_000, "chat preview")),
+					listOf(TelegramChat(10L, "", 1_700_000_000,
+							"chat preview", true)),
 					client.getRecentChats(3),
 			)
 		assertEquals(
@@ -288,11 +290,13 @@ class TelegramConnectorMessageTest {
 		id: Long,
 		lastMessageDateSeconds: Int,
 		body: String = "",
+		isOutgoing: Boolean = false,
 	): TdApi.Chat =
 		TdApi.Chat().also {
 			it.id = id
 			it.title = ""
-			it.lastMessage = textMessage(id, id * 10, lastMessageDateSeconds, false, body)
+			it.lastMessage = textMessage(id, id * 10, lastMessageDateSeconds,
+					isOutgoing, body)
 		}
 
 	private fun textMessage(
