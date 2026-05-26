@@ -118,6 +118,7 @@ class ContactListViewModel extends ContactsViewModel {
 			telegramThreadItems.setValue(Collections.emptyList());
 			return;
 		}
+		telegramAvailabilityState.setValue(TelegramInboxAvailabilityState.LOADING);
 		ioExecutor.execute(() -> {
 			try {
 				if (!telegramConnector.isAuthorized()) {

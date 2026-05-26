@@ -24,6 +24,9 @@ public class ContactListFragmentTest {
 		assertEquals(R.string.no_contacts,
 				ContactListFragment.emptyTextForState(
 						TelegramInboxAvailabilityState.NONE));
+		assertEquals(R.string.telegram_inbox_loading,
+				ContactListFragment.emptyTextForState(
+						TelegramInboxAvailabilityState.LOADING));
 		assertEquals(R.string.telegram_inbox_account_unavailable,
 				ContactListFragment.emptyTextForState(
 						TelegramInboxAvailabilityState.ACCOUNT_UNAVAILABLE));
@@ -40,6 +43,8 @@ public class ContactListFragmentTest {
 		assertEquals(R.string.no_contacts_action,
 				ContactListFragment.emptyActionTextForState(
 						TelegramInboxAvailabilityState.NONE));
+		assertEquals(0, ContactListFragment.emptyActionTextForState(
+				TelegramInboxAvailabilityState.LOADING));
 		assertEquals(0, ContactListFragment.emptyActionTextForState(
 				TelegramInboxAvailabilityState.ACCOUNT_UNAVAILABLE));
 		assertEquals(0, ContactListFragment.emptyActionTextForState(

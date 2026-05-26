@@ -247,6 +247,8 @@ public class ContactListFragment extends BaseFragment
 
 	static int emptyTextForState(TelegramInboxAvailabilityState state) {
 		switch (state) {
+			case LOADING:
+				return R.string.telegram_inbox_loading;
 			case ACCOUNT_UNAVAILABLE:
 				return R.string.telegram_inbox_account_unavailable;
 			case EMPTY:
