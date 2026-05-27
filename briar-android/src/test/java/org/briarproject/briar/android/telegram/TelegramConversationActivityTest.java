@@ -39,6 +39,14 @@ public class TelegramConversationActivityTest {
 	}
 
 	@Test
+	public void testManualRefreshVisibilityTracksConnectorState() {
+		assertTrue(TelegramConversationActivity.shouldShowManualRefreshAction(
+				true));
+		assertFalse(TelegramConversationActivity.shouldShowManualRefreshAction(
+				false));
+	}
+
+	@Test
 	public void testTitleTextFallsBackForBlankTitles() {
 		String fallback = "Telegram conversation";
 		assertEquals(fallback,

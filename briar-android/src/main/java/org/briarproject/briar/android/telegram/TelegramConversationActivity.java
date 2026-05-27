@@ -81,6 +81,17 @@ public class TelegramConversationActivity extends BriarActivity {
 	}
 
 	@Override
+	public boolean onPrepareOptionsMenu(Menu menu) {
+		MenuItem refresh = menu.findItem(
+				R.id.action_refresh_telegram_conversation);
+		if (refresh != null) {
+			refresh.setVisible(shouldShowManualRefreshAction(
+					telegramConnector.isEnabled()));
+		}
+		return super.onPrepareOptionsMenu(menu);
+	}
+
+	@Override
 	public boolean onOptionsItemSelected(MenuItem item) {
 		int itemId = item.getItemId();
 		if (itemId == android.R.id.home) {
@@ -149,6 +160,10 @@ public class TelegramConversationActivity extends BriarActivity {
 
 	static boolean isManualRefreshAction(int itemId) {
 		return itemId == R.id.action_refresh_telegram_conversation;
+	}
+
+	static boolean shouldShowManualRefreshAction(boolean connectorEnabled) {
+		return connectorEnabled;
 	}
 
 	static String titleText(@Nullable String title, String fallback) {
