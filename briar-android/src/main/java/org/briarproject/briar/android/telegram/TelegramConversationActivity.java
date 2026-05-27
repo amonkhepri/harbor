@@ -86,7 +86,7 @@ public class TelegramConversationActivity extends BriarActivity {
 				R.id.action_refresh_telegram_conversation);
 		if (refresh != null) {
 			refresh.setVisible(shouldShowManualRefreshAction(
-					telegramConnector.isEnabled()));
+					telegramConnector.isEnabled(), chatId));
 		}
 		return super.onPrepareOptionsMenu(menu);
 	}
@@ -167,8 +167,9 @@ public class TelegramConversationActivity extends BriarActivity {
 		return itemId == R.id.action_refresh_telegram_conversation;
 	}
 
-	static boolean shouldShowManualRefreshAction(boolean connectorEnabled) {
-		return connectorEnabled;
+	static boolean shouldShowManualRefreshAction(boolean connectorEnabled,
+			long chatId) {
+		return connectorEnabled && hasValidChatId(chatId);
 	}
 
 	static boolean hasValidChatId(long chatId) {

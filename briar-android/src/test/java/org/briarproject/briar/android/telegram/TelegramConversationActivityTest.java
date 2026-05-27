@@ -41,9 +41,13 @@ public class TelegramConversationActivityTest {
 	@Test
 	public void testManualRefreshVisibilityTracksConnectorState() {
 		assertTrue(TelegramConversationActivity.shouldShowManualRefreshAction(
-				true));
+				true, 1L));
+		assertTrue(TelegramConversationActivity.shouldShowManualRefreshAction(
+				true, -1L));
 		assertFalse(TelegramConversationActivity.shouldShowManualRefreshAction(
-				false));
+				true, 0L));
+		assertFalse(TelegramConversationActivity.shouldShowManualRefreshAction(
+				false, 1L));
 	}
 
 	@Test
