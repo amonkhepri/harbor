@@ -11,6 +11,7 @@ import org.robolectric.RuntimeEnvironment;
 import org.robolectric.annotation.Config;
 import org.xmlpull.v1.XmlPullParser;
 
+import static org.briarproject.briar.android.util.UiUtils.formatDate;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.fail;
 
@@ -58,6 +59,27 @@ public class TelegramInboxThreadViewHolderTest {
 				TelegramInboxThreadViewHolder.titleText(resources, whitespace));
 		assertEquals("chat",
 				TelegramInboxThreadViewHolder.titleText(resources, normal));
+	}
+
+	@Test
+	public void testDateTextHidesNonPositiveLatestActivity() {
+		TelegramInboxThreadItem missing = new TelegramInboxThreadItem(7L,
+				"chat", 0L);
+		TelegramInboxThreadItem invalid = new TelegramInboxThreadItem(8L,
+				"chat", -1L);
+		TelegramInboxThreadItem valid = new TelegramInboxThreadItem(9L,
+				"chat", 1_700_000_000_000L);
+
+		assertEquals("",
+				TelegramInboxThreadViewHolder.dateText(
+						RuntimeEnvironment.getApplication(), missing));
+		assertEquals("",
+				TelegramInboxThreadViewHolder.dateText(
+						RuntimeEnvironment.getApplication(), invalid));
+		assertEquals(formatDate(RuntimeEnvironment.getApplication(),
+						valid.getLatestActivityMillis()),
+				TelegramInboxThreadViewHolder.dateText(
+						RuntimeEnvironment.getApplication(), valid));
 	}
 
 	@Test

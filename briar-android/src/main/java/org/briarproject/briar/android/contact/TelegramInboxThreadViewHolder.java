@@ -1,5 +1,6 @@
 package org.briarproject.briar.android.contact;
 
+import android.content.Context;
 import android.content.res.Resources;
 import android.view.View;
 import android.widget.TextView;
@@ -30,8 +31,7 @@ final class TelegramInboxThreadViewHolder extends
 	void bind(TelegramInboxThreadItem item,
 			OnContactClickListener<TelegramInboxThreadItem> listener) {
 		title.setText(titleText(title.getResources(), item));
-		date.setText(formatDate(date.getContext(),
-				item.getLatestActivityMillis()));
+		date.setText(dateText(date.getContext(), item));
 		if (item.isPreviewLoading()) {
 			preview.setText(R.string.telegram_thread_preview_loading);
 		} else if (item.hasPreviewText()) {
@@ -49,6 +49,12 @@ final class TelegramInboxThreadViewHolder extends
 			return resources.getString(R.string.telegram_thread_title_fallback);
 		}
 		return title;
+	}
+
+	static CharSequence dateText(Context context, TelegramInboxThreadItem item) {
+		long latestActivityMillis = item.getLatestActivityMillis();
+		if (latestActivityMillis <= 0) return "";
+		return formatDate(context, latestActivityMillis);
 	}
 
 	static CharSequence previewText(Resources resources,
