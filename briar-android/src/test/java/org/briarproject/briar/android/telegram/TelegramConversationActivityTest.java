@@ -2,11 +2,18 @@ package org.briarproject.briar.android.telegram;
 
 import org.briarproject.briar.R;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.robolectric.RobolectricTestRunner;
+import org.robolectric.RuntimeEnvironment;
+import org.robolectric.annotation.Config;
 
+import static org.briarproject.briar.android.util.UiUtils.formatDate;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
+@RunWith(RobolectricTestRunner.class)
+@Config(sdk = 21)
 public class TelegramConversationActivityTest {
 
 	@Test
@@ -84,5 +91,27 @@ public class TelegramConversationActivityTest {
 				TelegramConversationAdapter.directionText(
 						new TelegramConversationUiMessage(2L, 20L, true,
 								"out")));
+	}
+
+	@Test
+	public void testDateTextHidesNonPositiveMessageDates() {
+		TelegramConversationUiMessage missing =
+				new TelegramConversationUiMessage(1L, 0L, false, "missing");
+		TelegramConversationUiMessage invalid =
+				new TelegramConversationUiMessage(2L, -1L, false, "invalid");
+		TelegramConversationUiMessage valid =
+				new TelegramConversationUiMessage(3L, 1_700_000_000_000L,
+						false, "valid");
+
+		assertEquals("",
+				TelegramConversationAdapter.dateText(
+						RuntimeEnvironment.getApplication(), missing));
+		assertEquals("",
+				TelegramConversationAdapter.dateText(
+						RuntimeEnvironment.getApplication(), invalid));
+		assertEquals(formatDate(RuntimeEnvironment.getApplication(),
+						valid.getDateMillis()),
+				TelegramConversationAdapter.dateText(
+						RuntimeEnvironment.getApplication(), valid));
 	}
 }

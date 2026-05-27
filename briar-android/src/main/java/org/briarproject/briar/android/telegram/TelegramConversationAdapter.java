@@ -1,5 +1,6 @@
 package org.briarproject.briar.android.telegram;
 
+import android.content.Context;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -51,8 +52,14 @@ final class TelegramConversationAdapter extends
 		void bind(TelegramConversationUiMessage item) {
 			text.setText(item.getText());
 			direction.setText(directionText(item));
-			date.setText(formatDate(date.getContext(), item.getDateMillis()));
+			date.setText(dateText(date.getContext(), item));
 		}
+	}
+
+	static CharSequence dateText(Context context, TelegramConversationUiMessage item) {
+		long dateMillis = item.getDateMillis();
+		if (dateMillis <= 0) return "";
+		return formatDate(context, dateMillis);
 	}
 
 	static int directionText(TelegramConversationUiMessage item) {
