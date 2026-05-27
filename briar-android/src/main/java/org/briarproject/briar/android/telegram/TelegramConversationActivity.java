@@ -105,6 +105,11 @@ public class TelegramConversationActivity extends BriarActivity {
 	}
 
 	private void loadMessages() {
+		if (!hasValidChatId(chatId)) {
+			showMessages(Collections.emptyList(),
+					emptyTextForState(true, true, true));
+			return;
+		}
 		list.setEmptyText(emptyTextForState(true, true, false, true));
 		ioExecutor.execute(() -> {
 			if (!telegramConnector.isEnabled()) {
@@ -164,6 +169,10 @@ public class TelegramConversationActivity extends BriarActivity {
 
 	static boolean shouldShowManualRefreshAction(boolean connectorEnabled) {
 		return connectorEnabled;
+	}
+
+	static boolean hasValidChatId(long chatId) {
+		return chatId != 0L;
 	}
 
 	static String titleText(@Nullable String title, String fallback) {

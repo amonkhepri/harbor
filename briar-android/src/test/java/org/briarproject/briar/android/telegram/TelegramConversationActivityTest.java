@@ -47,6 +47,16 @@ public class TelegramConversationActivityTest {
 	}
 
 	@Test
+	public void testChatIdGuardRejectsOnlyMissingDefault() {
+		assertFalse(TelegramConversationActivity.hasValidChatId(0L));
+		assertTrue(TelegramConversationActivity.hasValidChatId(1L));
+		assertTrue(TelegramConversationActivity.hasValidChatId(-1L));
+		assertEquals(R.string.telegram_conversation_load_failed,
+				TelegramConversationActivity.emptyTextForState(true, true,
+						true));
+	}
+
+	@Test
 	public void testTitleTextFallsBackForBlankTitles() {
 		String fallback = "Telegram conversation";
 		assertEquals(fallback,
