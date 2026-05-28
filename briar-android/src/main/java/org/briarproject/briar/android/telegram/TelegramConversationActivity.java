@@ -44,6 +44,7 @@ public class TelegramConversationActivity extends BriarActivity {
 
 	private BriarRecyclerView list;
 	private long chatId;
+	private boolean messageLoadPending;
 
 	@Override
 	public void injectActivity(ActivityComponent component) {
@@ -86,7 +87,7 @@ public class TelegramConversationActivity extends BriarActivity {
 				R.id.action_refresh_telegram_conversation);
 		if (refresh != null) {
 			refresh.setVisible(shouldShowManualRefreshAction(
-					telegramConnector.isEnabled(), chatId));
+					telegramConnector.isEnabled(), chatId, messageLoadPending));
 		}
 		return super.onPrepareOptionsMenu(menu);
 	}
@@ -110,6 +111,8 @@ public class TelegramConversationActivity extends BriarActivity {
 					emptyTextForState(true, true, true));
 			return;
 		}
+		messageLoadPending = true;
+		invalidateOptionsMenu();
 		list.setEmptyText(emptyTextForState(true, true, false, true));
 		ioExecutor.execute(() -> {
 			if (!telegramConnector.isEnabled()) {
@@ -139,8 +142,10 @@ public class TelegramConversationActivity extends BriarActivity {
 	private void showMessages(List<TelegramConversationUiMessage> messages,
 			int emptyTextRes) {
 		runOnUiThread(() -> {
+			messageLoadPending = false;
 			list.setEmptyText(emptyTextRes);
 			adapter.submitList(messages);
+			invalidateOptionsMenu();
 		});
 	}
 
@@ -168,8 +173,9 @@ public class TelegramConversationActivity extends BriarActivity {
 	}
 
 	static boolean shouldShowManualRefreshAction(boolean connectorEnabled,
-			long chatId) {
-		return connectorEnabled && hasValidChatId(chatId);
+			long chatId, boolean messageLoadPending) {
+		return connectorEnabled && hasValidChatId(chatId) &&
+				!messageLoadPending;
 	}
 
 	static boolean hasValidChatId(long chatId) {

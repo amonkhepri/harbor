@@ -48,13 +48,21 @@ public class TelegramConversationActivityTest {
 	@Test
 	public void testManualRefreshVisibilityTracksConnectorState() {
 		assertTrue(TelegramConversationActivity.shouldShowManualRefreshAction(
-				true, 1L));
+				true, 1L, false));
 		assertTrue(TelegramConversationActivity.shouldShowManualRefreshAction(
-				true, -1L));
+				true, -1L, false));
 		assertFalse(TelegramConversationActivity.shouldShowManualRefreshAction(
-				true, 0L));
+				true, 0L, false));
 		assertFalse(TelegramConversationActivity.shouldShowManualRefreshAction(
-				false, 1L));
+				false, 1L, false));
+	}
+
+	@Test
+	public void testManualRefreshVisibilityHidesWhileLoading() {
+		assertFalse(TelegramConversationActivity.shouldShowManualRefreshAction(
+				true, 1L, true));
+		assertTrue(TelegramConversationActivity.shouldShowManualRefreshAction(
+				true, 1L, false));
 	}
 
 	@Test
