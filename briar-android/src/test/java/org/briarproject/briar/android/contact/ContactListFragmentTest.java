@@ -20,6 +20,22 @@ public class ContactListFragmentTest {
 	}
 
 	@Test
+	public void testManualRefreshVisibilityHidesWhileLoading() {
+		assertFalse(ContactListFragment.shouldShowManualRefreshAction(true,
+				TelegramInboxAvailabilityState.LOADING));
+		assertTrue(ContactListFragment.shouldShowManualRefreshAction(true,
+				TelegramInboxAvailabilityState.NONE));
+		assertTrue(ContactListFragment.shouldShowManualRefreshAction(true,
+				TelegramInboxAvailabilityState.EMPTY));
+		assertTrue(ContactListFragment.shouldShowManualRefreshAction(true,
+				TelegramInboxAvailabilityState.ACCOUNT_UNAVAILABLE));
+		assertTrue(ContactListFragment.shouldShowManualRefreshAction(true,
+				TelegramInboxAvailabilityState.LOAD_FAILED));
+		assertFalse(ContactListFragment.shouldShowManualRefreshAction(false,
+				TelegramInboxAvailabilityState.NONE));
+	}
+
+	@Test
 	public void testTelegramAvailabilityUsesSanitizedEmptyText() {
 		assertEquals(R.string.no_contacts,
 				ContactListFragment.emptyTextForState(

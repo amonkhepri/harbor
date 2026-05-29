@@ -124,6 +124,7 @@ public class ContactListFragment extends BaseFragment
 				.observe(getViewLifecycleOwner(), state -> {
 					telegramAvailabilityState = state;
 					updateEmptyState();
+					requireActivity().invalidateOptionsMenu();
 				});
 		viewModel.getHasPendingContacts()
 				.observe(getViewLifecycleOwner(), hasPending -> {
@@ -161,7 +162,9 @@ public class ContactListFragment extends BaseFragment
 		super.onPrepareOptionsMenu(menu);
 		MenuItem refresh = menu.findItem(R.id.action_refresh_telegram_threads);
 		if (refresh != null) {
-			refresh.setVisible(viewModel.isTelegramConnectorEnabled());
+			refresh.setVisible(shouldShowManualRefreshAction(
+					viewModel.isTelegramConnectorEnabled(),
+					telegramAvailabilityState));
 		}
 	}
 
@@ -243,6 +246,12 @@ public class ContactListFragment extends BaseFragment
 
 	static boolean isManualRefreshAction(int itemId) {
 		return itemId == R.id.action_refresh_telegram_threads;
+	}
+
+	static boolean shouldShowManualRefreshAction(boolean connectorEnabled,
+			TelegramInboxAvailabilityState state) {
+		return connectorEnabled &&
+				state != TelegramInboxAvailabilityState.LOADING;
 	}
 
 	static int emptyTextForState(TelegramInboxAvailabilityState state) {
