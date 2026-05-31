@@ -52,8 +52,13 @@ final class TelegramConversationAdapter extends
 		void bind(TelegramConversationUiMessage item) {
 			text.setText(item.getText());
 			direction.setText(directionText(item));
+			date.setVisibility(dateVisibility(item));
 			date.setText(dateText(date.getContext(), item));
 		}
+	}
+
+	static int dateVisibility(TelegramConversationUiMessage item) {
+		return item.getDateMillis() > 0 ? View.VISIBLE : View.GONE;
 	}
 
 	static CharSequence dateText(Context context, TelegramConversationUiMessage item) {

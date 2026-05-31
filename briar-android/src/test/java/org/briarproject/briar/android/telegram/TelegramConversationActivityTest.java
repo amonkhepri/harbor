@@ -1,5 +1,7 @@
 package org.briarproject.briar.android.telegram;
 
+import android.view.View;
+
 import org.briarproject.briar.R;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -121,5 +123,21 @@ public class TelegramConversationActivityTest {
 						valid.getDateMillis()),
 				TelegramConversationAdapter.dateText(
 						RuntimeEnvironment.getApplication(), valid));
+	}
+
+	@Test
+	public void testDateVisibilityHidesNonPositiveMessageDates() {
+		assertEquals(View.GONE,
+				TelegramConversationAdapter.dateVisibility(
+						new TelegramConversationUiMessage(1L, 0L, false,
+								"missing")));
+		assertEquals(View.GONE,
+				TelegramConversationAdapter.dateVisibility(
+						new TelegramConversationUiMessage(2L, -1L, false,
+								"invalid")));
+		assertEquals(View.VISIBLE,
+				TelegramConversationAdapter.dateVisibility(
+						new TelegramConversationUiMessage(3L, 1L, false,
+								"valid")));
 	}
 }
