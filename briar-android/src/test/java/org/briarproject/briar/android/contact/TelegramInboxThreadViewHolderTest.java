@@ -2,6 +2,7 @@ package org.briarproject.briar.android.contact;
 
 import android.content.res.Resources;
 import android.content.res.XmlResourceParser;
+import android.view.View;
 
 import org.briarproject.briar.R;
 import org.junit.Test;
@@ -80,6 +81,19 @@ public class TelegramInboxThreadViewHolderTest {
 						valid.getLatestActivityMillis()),
 				TelegramInboxThreadViewHolder.dateText(
 						RuntimeEnvironment.getApplication(), valid));
+	}
+
+	@Test
+	public void testDateVisibilityHidesNonPositiveLatestActivity() {
+		assertEquals(View.GONE,
+				TelegramInboxThreadViewHolder.dateVisibility(
+						new TelegramInboxThreadItem(7L, "chat", 0L)));
+		assertEquals(View.GONE,
+				TelegramInboxThreadViewHolder.dateVisibility(
+						new TelegramInboxThreadItem(8L, "chat", -1L)));
+		assertEquals(View.VISIBLE,
+				TelegramInboxThreadViewHolder.dateVisibility(
+						new TelegramInboxThreadItem(9L, "chat", 1L)));
 	}
 
 	@Test

@@ -31,6 +31,7 @@ final class TelegramInboxThreadViewHolder extends
 	void bind(TelegramInboxThreadItem item,
 			OnContactClickListener<TelegramInboxThreadItem> listener) {
 		title.setText(titleText(title.getResources(), item));
+		date.setVisibility(dateVisibility(item));
 		date.setText(dateText(date.getContext(), item));
 		if (item.isPreviewLoading()) {
 			preview.setText(R.string.telegram_thread_preview_loading);
@@ -49,6 +50,10 @@ final class TelegramInboxThreadViewHolder extends
 			return resources.getString(R.string.telegram_thread_title_fallback);
 		}
 		return title;
+	}
+
+	static int dateVisibility(TelegramInboxThreadItem item) {
+		return item.getLatestActivityMillis() > 0 ? View.VISIBLE : View.GONE;
 	}
 
 	static CharSequence dateText(Context context, TelegramInboxThreadItem item) {
