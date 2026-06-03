@@ -158,11 +158,11 @@
 	<string name="telegram_connector_identity_dialog_message">Store a Telegram username or phone number for internal Harbor account-linking tests. Connector syncing is still inactive in this build.</string>
 	<string name="telegram_origin_label">Telegram</string>
 	<string name="connector_thread_source_content_description">%1$s source</string>
-	<string name="telegram_thread_source_content_description">Telegram source</string>
-	<string name="telegram_thread_title_fallback">Telegram chat</string>
-	<string name="telegram_thread_preview_loading">Loading preview...</string>
-	<string name="telegram_thread_preview_empty">No recent text</string>
-	<string name="telegram_thread_preview_outgoing">Outgoing: %1$s</string>
+	<string name="connector_thread_default_source_content_description">Connector source</string>
+	<string name="connector_thread_title_fallback">Telegram chat</string>
+	<string name="connector_thread_preview_loading">Loading preview...</string>
+	<string name="connector_thread_preview_empty">No recent text</string>
+	<string name="connector_thread_preview_outgoing">Outgoing: %1$s</string>
 	<string name="telegram_inbox_loading">Loading Telegram inbox...</string>
 	<string name="telegram_inbox_account_unavailable">Telegram account unavailable</string>
 	<string name="telegram_inbox_empty">No recent Telegram chats</string>

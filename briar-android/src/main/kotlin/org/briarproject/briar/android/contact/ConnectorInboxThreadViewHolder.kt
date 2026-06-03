@@ -31,9 +31,9 @@ class ConnectorInboxThreadViewHolder(view: View) : RecyclerView.ViewHolder(view)
 		badge.text = sourceLabel(item)
 		preview.text = when {
 			item.isPreviewLoading ->
-				preview.resources.getString(R.string.telegram_thread_preview_loading)
+				preview.resources.getString(R.string.connector_thread_preview_loading)
 			item.hasPreviewText() -> previewText(preview.resources, item)
-			else -> preview.resources.getString(R.string.telegram_thread_preview_empty)
+			else -> preview.resources.getString(R.string.connector_thread_preview_empty)
 		}
 		itemView.setOnClickListener { view -> listener.onItemClick(view, item) }
 	}
@@ -44,7 +44,7 @@ class ConnectorInboxThreadViewHolder(view: View) : RecyclerView.ViewHolder(view)
 			item: ConnectorInboxThreadItem): CharSequence {
 			val title = item.title
 			return if (title.trim().isEmpty())
-				resources.getString(R.string.telegram_thread_title_fallback)
+				resources.getString(R.string.connector_thread_title_fallback)
 			else title
 		}
 
@@ -82,7 +82,7 @@ class ConnectorInboxThreadViewHolder(view: View) : RecyclerView.ViewHolder(view)
 		fun previewText(resources: Resources,
 			item: ConnectorInboxThreadItem): CharSequence =
 			if (!item.isLastMessageOutgoing) item.previewText
-			else resources.getString(R.string.telegram_thread_preview_outgoing,
+			else resources.getString(R.string.connector_thread_preview_outgoing,
 				item.previewText)
 	}
 }
