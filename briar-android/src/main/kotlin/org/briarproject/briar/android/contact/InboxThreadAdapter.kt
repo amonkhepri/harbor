@@ -14,7 +14,7 @@ class InboxThreadAdapter(
 ) : ListAdapter<InboxThreadItem, ViewHolder>(InboxThreadCallback()) {
 
 	override fun getItemViewType(position: Int): Int =
-		if (getItem(position).source == InboxThreadItem.Source.BRIAR)
+		if (getItem(position).connectorSource == null)
 			VIEW_TYPE_BRIAR
 		else VIEW_TYPE_TELEGRAM
 
@@ -57,7 +57,7 @@ class InboxThreadAdapter(
 			i1: InboxThreadItem,
 			i2: InboxThreadItem,
 		): Boolean {
-			if (i1.source != i2.source) return false
+			if (i1.connectorSource != i2.connectorSource) return false
 			if (i1 is TelegramInboxThreadItem) {
 				val t2 = i2 as TelegramInboxThreadItem
 				return i1.latestActivityMillis == t2.latestActivityMillis &&

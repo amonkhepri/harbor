@@ -1,15 +1,11 @@
 package org.briarproject.briar.android.contact
 
+import org.briarproject.briar.api.connector.ConnectorSource
+
 interface InboxThreadItem {
-
-	enum class Source {
-		BRIAR,
-		TELEGRAM
-	}
-
 	val stableId: String
 
 	val latestActivityMillis: Long
 
-	val source: Source
+	val connectorSource: ConnectorSource?
 }

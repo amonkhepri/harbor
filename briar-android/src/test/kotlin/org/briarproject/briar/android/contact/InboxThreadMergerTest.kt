@@ -1,6 +1,7 @@
 package org.briarproject.briar.android.contact
 
-import org.briarproject.briar.android.contact.InboxThreadItem.Source
+import org.briarproject.briar.api.connector.ConnectorSource
+import org.briarproject.briar.api.connector.ConnectorSources
 import org.briarproject.briar.api.telegram.TelegramChat
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -23,7 +24,8 @@ class InboxThreadMergerTest {
 		assertFalse(item.isPreviewLoading)
 		assertFalse(item.isLastMessageOutgoing)
 		assertEquals("", item.previewText)
-		assertEquals(Source.TELEGRAM, item.source)
+		assertEquals(ConnectorSources.TELEGRAM, item.connectorSource)
+		assertEquals("telegram:7", item.stableId)
 	}
 
 	@Test
@@ -73,9 +75,9 @@ class InboxThreadMergerTest {
 	@Test
 	fun testMixedItemsSortNewestFirst() {
 		val items = mutableListOf<InboxThreadItem>(
-			FakeInboxThreadItem("older", 1L, Source.BRIAR),
-			FakeInboxThreadItem("newer", 3L, Source.TELEGRAM),
-			FakeInboxThreadItem("middle", 2L, Source.BRIAR),
+			FakeInboxThreadItem("older", 1L, null),
+			FakeInboxThreadItem("newer", 3L, ConnectorSources.TELEGRAM),
+			FakeInboxThreadItem("middle", 2L, null),
 		)
 
 		InboxThreadMerger.sort(items)
@@ -88,6 +90,6 @@ class InboxThreadMergerTest {
 	private class FakeInboxThreadItem(
 		override val stableId: String,
 		override val latestActivityMillis: Long,
-		override val source: Source,
+		override val connectorSource: ConnectorSource?,
 	) : InboxThreadItem
 }

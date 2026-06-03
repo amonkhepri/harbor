@@ -1,5 +1,6 @@
 package org.briarproject.briar.android.contact
 
+import org.briarproject.briar.api.connector.ConnectorSources
 import org.briarproject.briar.api.telegram.TelegramChat
 
 class TelegramInboxThreadItem(
@@ -44,10 +45,9 @@ class TelegramInboxThreadItem(
 	fun hasPreviewText(): Boolean = previewText.isNotEmpty()
 
 	override val stableId: String
-		get() = "telegram:$chatId"
+		get() = "${connectorSource.id}:$chatId"
 
-	override val source: InboxThreadItem.Source
-		get() = InboxThreadItem.Source.TELEGRAM
+	override val connectorSource = ConnectorSources.TELEGRAM
 }
 
 private fun cleanPreviewText(text: String): String =

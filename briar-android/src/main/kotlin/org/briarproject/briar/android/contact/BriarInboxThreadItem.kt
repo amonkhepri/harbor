@@ -1,5 +1,7 @@
 package org.briarproject.briar.android.contact
 
+import org.briarproject.briar.api.connector.ConnectorSource
+
 class BriarInboxThreadItem(val item: ContactListItem) : InboxThreadItem {
 
 	override val stableId: String
@@ -8,6 +10,6 @@ class BriarInboxThreadItem(val item: ContactListItem) : InboxThreadItem {
 	override val latestActivityMillis: Long
 		get() = item.timestamp
 
-	override val source: InboxThreadItem.Source
-		get() = InboxThreadItem.Source.BRIAR
+	override val connectorSource: ConnectorSource?
+		get() = null
 }
