@@ -11,6 +11,28 @@ import org.mockito.Mockito.mock
 class ConnectorInboxThreadClickRouterTest {
 
 	@Test
+	fun testConnectorClickUsesFirstMatchingHandler() {
+		val view = mock(View::class.java)
+		val item = FakeConnectorInboxThreadItem()
+		val ignoredHandler = RecordingConnectorClickHandler(false)
+		val matchingHandler = RecordingConnectorClickHandler(true)
+		val skippedHandler = RecordingConnectorClickHandler(true)
+
+		ConnectorInboxThreadClickRouter(listOf(
+			ignoredHandler,
+			matchingHandler,
+			skippedHandler
+		)).onItemClick(view, item)
+
+		assertSame(view, ignoredHandler.view)
+		assertSame(item, ignoredHandler.item)
+		assertSame(view, matchingHandler.view)
+		assertSame(item, matchingHandler.item)
+		assertNull(skippedHandler.view)
+		assertNull(skippedHandler.item)
+	}
+
+	@Test
 	fun testTelegramConnectorClickForwardsToExistingCallback() {
 		val listener = RecordingListener()
 		val view = mock(View::class.java)
@@ -55,6 +77,22 @@ class ConnectorInboxThreadClickRouterTest {
 			telegramClickCount++
 			telegramView = view
 			telegramItem = item
+		}
+	}
+
+	private class RecordingConnectorClickHandler(
+		private val handled: Boolean,
+	) : ConnectorInboxThreadClickHandler {
+		var view: View? = null
+		var item: ConnectorInboxThreadItem? = null
+
+		override fun onConnectorItemClick(
+			view: View,
+			item: ConnectorInboxThreadItem,
+		): Boolean {
+			this.view = view
+			this.item = item
+			return handled
 		}
 	}
 
