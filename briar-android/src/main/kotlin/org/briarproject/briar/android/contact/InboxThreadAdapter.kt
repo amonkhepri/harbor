@@ -13,6 +13,8 @@ class InboxThreadAdapter(
 	private val listener: OnInboxThreadClickListener,
 ) : ListAdapter<InboxThreadItem, ViewHolder>(InboxThreadCallback()) {
 
+	private val connectorClickRouter = ConnectorInboxThreadClickRouter(listener)
+
 	override fun getItemViewType(position: Int): Int =
 		if (getItem(position).connectorSource == null)
 			VIEW_TYPE_BRIAR
@@ -40,12 +42,9 @@ class InboxThreadAdapter(
 		} else {
 			val connectorItem = item as ConnectorInboxThreadItem
 			(holder as TelegramInboxThreadViewHolder).bind(
-				connectorItem
-			) { view, clickedItem ->
-				if (clickedItem is TelegramInboxThreadItem) {
-					listener.onTelegramItemClick(view, clickedItem)
-				}
-			}
+				connectorItem,
+				connectorClickRouter
+			)
 		}
 	}
 
