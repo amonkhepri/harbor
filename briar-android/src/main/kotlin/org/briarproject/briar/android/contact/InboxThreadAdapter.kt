@@ -46,7 +46,7 @@ class InboxThreadAdapter(
 		}
 	}
 
-	private class InboxThreadCallback : ItemCallback<InboxThreadItem>() {
+	internal class InboxThreadCallback : ItemCallback<InboxThreadItem>() {
 
 		override fun areItemsTheSame(
 			i1: InboxThreadItem,
@@ -58,8 +58,8 @@ class InboxThreadAdapter(
 			i2: InboxThreadItem,
 		): Boolean {
 			if (i1.connectorSource != i2.connectorSource) return false
-			if (i1 is TelegramInboxThreadItem) {
-				val t2 = i2 as TelegramInboxThreadItem
+			if (i1 is ConnectorInboxThreadItem) {
+				val t2 = i2 as ConnectorInboxThreadItem
 				return i1.latestActivityMillis == t2.latestActivityMillis &&
 					i1.title == t2.title &&
 					i1.isPreviewLoading == t2.isPreviewLoading &&

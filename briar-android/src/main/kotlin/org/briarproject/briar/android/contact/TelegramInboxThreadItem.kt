@@ -5,12 +5,12 @@ import org.briarproject.briar.api.telegram.TelegramChat
 
 class TelegramInboxThreadItem(
 	val chatId: Long,
-	val title: String,
+	override val title: String,
 	override val latestActivityMillis: Long,
-	val previewText: String,
-	val isLastMessageOutgoing: Boolean,
-	val isPreviewLoading: Boolean,
-) : InboxThreadItem {
+	override val previewText: String,
+	override val isLastMessageOutgoing: Boolean,
+	override val isPreviewLoading: Boolean,
+) : ConnectorInboxThreadItem {
 
 	constructor(chat: TelegramChat) : this(
 		chat.id,
@@ -42,10 +42,8 @@ class TelegramInboxThreadItem(
 		previewLoading
 	)
 
-	fun hasPreviewText(): Boolean = previewText.isNotEmpty()
-
-	override val stableId: String
-		get() = "${connectorSource.id}:$chatId"
+	override val connectorThreadId: String
+		get() = chatId.toString()
 
 	override val connectorSource = ConnectorSources.TELEGRAM
 }
