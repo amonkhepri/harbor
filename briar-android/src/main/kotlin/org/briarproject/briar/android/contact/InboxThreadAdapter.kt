@@ -27,8 +27,8 @@ class InboxThreadAdapter(
 			InboxContactListItemViewHolder(view)
 		} else {
 			val view = inflater.inflate(
-				R.layout.list_item_telegram_thread, parent, false)
-			TelegramInboxThreadViewHolder(view)
+				R.layout.list_item_connector_thread, parent, false)
+			ConnectorInboxThreadViewHolder(view)
 		}
 	}
 
@@ -41,7 +41,7 @@ class InboxThreadAdapter(
 			}
 		} else {
 			val connectorItem = item as ConnectorInboxThreadItem
-			(holder as TelegramInboxThreadViewHolder).bind(
+			(holder as ConnectorInboxThreadViewHolder).bind(
 				connectorItem,
 				connectorClickRouter
 			)

@@ -13,12 +13,12 @@ import org.briarproject.briar.android.util.UiUtils.formatDate
 import org.briarproject.briar.api.connector.ConnectorSources
 
 @UiThread
-class TelegramInboxThreadViewHolder(view: View) : RecyclerView.ViewHolder(view) {
-	private val sourceIcon: ImageView = view.findViewById(R.id.telegramThreadIcon)
-	private val title: TextView = view.findViewById(R.id.telegramThreadTitle)
-	private val date: TextView = view.findViewById(R.id.telegramThreadDate)
-	private val badge: TextView = view.findViewById(R.id.telegramThreadBadge)
-	private val preview: TextView = view.findViewById(R.id.telegramThreadPreview)
+class ConnectorInboxThreadViewHolder(view: View) : RecyclerView.ViewHolder(view) {
+	private val sourceIcon: ImageView = view.findViewById(R.id.connectorThreadIcon)
+	private val title: TextView = view.findViewById(R.id.connectorThreadTitle)
+	private val date: TextView = view.findViewById(R.id.connectorThreadDate)
+	private val badge: TextView = view.findViewById(R.id.connectorThreadBadge)
+	private val preview: TextView = view.findViewById(R.id.connectorThreadPreview)
 
 	fun bind(item: ConnectorInboxThreadItem,
 		listener: OnContactClickListener<ConnectorInboxThreadItem>) {

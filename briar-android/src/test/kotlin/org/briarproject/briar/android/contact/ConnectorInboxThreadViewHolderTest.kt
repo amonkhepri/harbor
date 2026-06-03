@@ -9,7 +9,7 @@ import org.junit.Test
 import org.mockito.Mockito.mock
 import org.mockito.Mockito.`when`
 
-class TelegramInboxThreadViewHolderTest {
+class ConnectorInboxThreadViewHolderTest {
 
 	@Test
 	fun testConnectorBadgeUsesSourceDisplayName() {
@@ -17,7 +17,7 @@ class TelegramInboxThreadViewHolderTest {
 			connectorSource = ConnectorSource("messenger", "Messenger"),
 		)
 
-		assertEquals("Messenger", TelegramInboxThreadViewHolder.sourceLabel(item))
+		assertEquals("Messenger", ConnectorInboxThreadViewHolder.sourceLabel(item))
 	}
 
 	@Test
@@ -28,7 +28,7 @@ class TelegramInboxThreadViewHolderTest {
 
 		assertEquals(
 			R.drawable.ic_telegram,
-			TelegramInboxThreadViewHolder.sourceIconRes(item)
+			ConnectorInboxThreadViewHolder.sourceIconRes(item)
 		)
 	}
 
@@ -40,7 +40,7 @@ class TelegramInboxThreadViewHolderTest {
 
 		assertEquals(
 			R.drawable.ic_link_menu,
-			TelegramInboxThreadViewHolder.sourceIconRes(item)
+			ConnectorInboxThreadViewHolder.sourceIconRes(item)
 		)
 	}
 
@@ -56,7 +56,7 @@ class TelegramInboxThreadViewHolderTest {
 		)).thenReturn("Messenger source")
 
 		assertEquals("Messenger source",
-			TelegramInboxThreadViewHolder.sourceContentDescription(
+			ConnectorInboxThreadViewHolder.sourceContentDescription(
 				resources,
 				item
 			))

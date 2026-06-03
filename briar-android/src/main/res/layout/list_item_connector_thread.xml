@@ -9,7 +9,7 @@
 	android:focusable="true">
 
 	<ImageView
-		android:id="@+id/telegramThreadIcon"
+		android:id="@+id/connectorThreadIcon"
 		android:layout_width="@dimen/listitem_picture_size"
 		android:layout_height="@dimen/listitem_picture_size"
 		android:layout_margin="@dimen/listitem_horizontal_margin"
@@ -22,7 +22,7 @@
 		app:layout_constraintTop_toTopOf="parent" />
 
 	<com.vanniktech.emoji.EmojiTextView
-		android:id="@+id/telegramThreadTitle"
+		android:id="@+id/connectorThreadTitle"
 		android:layout_width="0dp"
 		android:layout_height="wrap_content"
 		android:layout_marginStart="@dimen/margin_medium"
@@ -31,24 +31,24 @@
 		android:paddingEnd="@dimen/margin_medium"
 		android:textColor="?android:attr/textColorPrimary"
 		android:textSize="@dimen/text_size_medium"
-		app:layout_constraintEnd_toStartOf="@+id/telegramThreadDate"
-		app:layout_constraintStart_toEndOf="@+id/telegramThreadIcon"
+		app:layout_constraintEnd_toStartOf="@+id/connectorThreadDate"
+		app:layout_constraintStart_toEndOf="@+id/connectorThreadIcon"
 		app:layout_constraintTop_toTopOf="parent"
 		tools:text="Telegram chat" />
 
 	<TextView
-		android:id="@+id/telegramThreadDate"
+		android:id="@+id/connectorThreadDate"
 		android:layout_width="wrap_content"
 		android:layout_height="wrap_content"
 		android:layout_marginEnd="@dimen/listitem_horizontal_margin"
 		android:textColor="?android:attr/textColorSecondary"
 		android:textSize="@dimen/text_size_small"
-		app:layout_constraintBaseline_toBaselineOf="@+id/telegramThreadTitle"
+		app:layout_constraintBaseline_toBaselineOf="@+id/connectorThreadTitle"
 		app:layout_constraintEnd_toEndOf="parent"
 		tools:text="Dec 24" />
 
 	<TextView
-		android:id="@+id/telegramThreadBadge"
+		android:id="@+id/connectorThreadBadge"
 		android:layout_width="wrap_content"
 		android:layout_height="wrap_content"
 		android:layout_marginStart="@dimen/margin_medium"
@@ -62,11 +62,11 @@
 		android:textColor="@color/briar_blue_600_new"
 		android:textSize="@dimen/text_size_small"
 		app:layout_constraintBottom_toTopOf="@+id/divider"
-		app:layout_constraintStart_toEndOf="@+id/telegramThreadIcon"
-		app:layout_constraintTop_toBottomOf="@+id/telegramThreadTitle" />
+		app:layout_constraintStart_toEndOf="@+id/connectorThreadIcon"
+		app:layout_constraintTop_toBottomOf="@+id/connectorThreadTitle" />
 
 	<TextView
-		android:id="@+id/telegramThreadPreview"
+		android:id="@+id/connectorThreadPreview"
 		android:layout_width="0dp"
 		android:layout_height="wrap_content"
 		android:layout_marginStart="@dimen/margin_medium"
@@ -75,9 +75,9 @@
 		android:maxLines="1"
 		android:textColor="?android:attr/textColorSecondary"
 		android:textSize="@dimen/text_size_small"
-		app:layout_constraintBaseline_toBaselineOf="@+id/telegramThreadBadge"
+		app:layout_constraintBaseline_toBaselineOf="@+id/connectorThreadBadge"
 		app:layout_constraintEnd_toEndOf="parent"
-		app:layout_constraintStart_toEndOf="@+id/telegramThreadBadge"
+		app:layout_constraintStart_toEndOf="@+id/connectorThreadBadge"
 		tools:text="Latest Telegram text preview" />
 
 	<View
@@ -86,6 +86,6 @@
 		android:layout_width="0dp"
 		app:layout_constraintBottom_toBottomOf="parent"
 		app:layout_constraintEnd_toEndOf="parent"
-		app:layout_constraintStart_toStartOf="@+id/telegramThreadTitle" />
+		app:layout_constraintStart_toStartOf="@+id/connectorThreadTitle" />
 
 </androidx.constraintlayout.widget.ConstraintLayout>
