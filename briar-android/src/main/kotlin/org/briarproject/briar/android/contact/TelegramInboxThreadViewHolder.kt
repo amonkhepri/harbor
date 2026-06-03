@@ -5,10 +5,12 @@ import android.content.res.Resources
 import android.view.View
 import android.widget.ImageView
 import android.widget.TextView
+import androidx.annotation.DrawableRes
 import androidx.annotation.UiThread
 import androidx.recyclerview.widget.RecyclerView
 import org.briarproject.briar.R
 import org.briarproject.briar.android.util.UiUtils.formatDate
+import org.briarproject.briar.api.connector.ConnectorSources
 
 @UiThread
 class TelegramInboxThreadViewHolder(view: View) : RecyclerView.ViewHolder(view) {
@@ -23,6 +25,7 @@ class TelegramInboxThreadViewHolder(view: View) : RecyclerView.ViewHolder(view) 
 		title.text = titleText(title.resources, item)
 		date.visibility = dateVisibility(item)
 		date.text = dateText(date.context, item)
+		sourceIcon.setImageResource(sourceIconRes(item))
 		sourceIcon.contentDescription =
 			sourceContentDescription(sourceIcon.resources, item)
 		badge.text = sourceLabel(item)
@@ -48,6 +51,13 @@ class TelegramInboxThreadViewHolder(view: View) : RecyclerView.ViewHolder(view) 
 		@JvmStatic
 		fun sourceLabel(item: ConnectorInboxThreadItem): CharSequence =
 			item.connectorSource.displayName
+
+		@JvmStatic
+		@DrawableRes
+		fun sourceIconRes(item: ConnectorInboxThreadItem): Int =
+			if (item.connectorSource.id == ConnectorSources.TELEGRAM_ID)
+				R.drawable.ic_telegram
+			else R.drawable.ic_link_menu
 
 		@JvmStatic
 		fun sourceContentDescription(resources: Resources,

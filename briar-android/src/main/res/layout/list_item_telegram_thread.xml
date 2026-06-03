@@ -16,7 +16,7 @@
 		android:background="@drawable/bg_telegram_thread_icon"
 		android:contentDescription="@string/telegram_thread_source_content_description"
 		android:padding="@dimen/margin_medium"
-		android:src="@drawable/ic_telegram"
+		android:src="@drawable/ic_link_menu"
 		app:layout_constraintBottom_toTopOf="@+id/divider"
 		app:layout_constraintStart_toStartOf="parent"
 		app:layout_constraintTop_toTopOf="parent" />

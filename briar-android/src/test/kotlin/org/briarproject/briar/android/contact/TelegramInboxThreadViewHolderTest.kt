@@ -3,6 +3,7 @@ package org.briarproject.briar.android.contact
 import android.content.res.Resources
 import org.briarproject.briar.R
 import org.briarproject.briar.api.connector.ConnectorSource
+import org.briarproject.briar.api.connector.ConnectorSources
 import org.junit.Assert.assertEquals
 import org.junit.Test
 import org.mockito.Mockito.mock
@@ -17,6 +18,30 @@ class TelegramInboxThreadViewHolderTest {
 		)
 
 		assertEquals("Messenger", TelegramInboxThreadViewHolder.sourceLabel(item))
+	}
+
+	@Test
+	fun testTelegramConnectorSourceUsesTelegramIcon() {
+		val item = FakeConnectorInboxThreadItem(
+			connectorSource = ConnectorSources.TELEGRAM,
+		)
+
+		assertEquals(
+			R.drawable.ic_telegram,
+			TelegramInboxThreadViewHolder.sourceIconRes(item)
+		)
+	}
+
+	@Test
+	fun testUnknownConnectorSourceUsesGenericIcon() {
+		val item = FakeConnectorInboxThreadItem(
+			connectorSource = ConnectorSource("messenger", "Messenger"),
+		)
+
+		assertEquals(
+			R.drawable.ic_link_menu,
+			TelegramInboxThreadViewHolder.sourceIconRes(item)
+		)
 	}
 
 	@Test
