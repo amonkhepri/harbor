@@ -18,7 +18,7 @@ class TelegramConversationAdapter :
 	override fun onCreateViewHolder(parent: ViewGroup,
 		viewType: Int): MessageViewHolder {
 		val view = LayoutInflater.from(parent.context).inflate(
-			R.layout.list_item_telegram_message, parent, false)
+			R.layout.list_item_connector_message, parent, false)
 		return MessageViewHolder(view)
 	}
 
@@ -27,10 +27,12 @@ class TelegramConversationAdapter :
 	}
 
 	class MessageViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
-		private val text: TextView = itemView.findViewById(R.id.telegramMessageText)
+		private val text: TextView =
+			itemView.findViewById(R.id.connectorMessageText)
 		private val direction: TextView =
-			itemView.findViewById(R.id.telegramMessageDirection)
-		private val date: TextView = itemView.findViewById(R.id.telegramMessageDate)
+			itemView.findViewById(R.id.connectorMessageDirection)
+		private val date: TextView =
+			itemView.findViewById(R.id.connectorMessageDate)
 
 		fun bind(item: TelegramConversationUiMessage) {
 			text.text = item.text
