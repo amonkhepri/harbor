@@ -1,8 +1,12 @@
 package org.briarproject.briar.android.contact
 
+import android.content.res.Resources
+import org.briarproject.briar.R
 import org.briarproject.briar.api.connector.ConnectorSource
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import org.mockito.Mockito.mock
+import org.mockito.Mockito.`when`
 
 class TelegramInboxThreadViewHolderTest {
 
@@ -13,6 +17,24 @@ class TelegramInboxThreadViewHolderTest {
 		)
 
 		assertEquals("Messenger", TelegramInboxThreadViewHolder.sourceLabel(item))
+	}
+
+	@Test
+	fun testConnectorSourceDescriptionUsesSourceDisplayName() {
+		val resources = mock(Resources::class.java)
+		val item = FakeConnectorInboxThreadItem(
+			connectorSource = ConnectorSource("messenger", "Messenger"),
+		)
+		`when`(resources.getString(
+			R.string.connector_thread_source_content_description,
+			"Messenger"
+		)).thenReturn("Messenger source")
+
+		assertEquals("Messenger source",
+			TelegramInboxThreadViewHolder.sourceContentDescription(
+				resources,
+				item
+			))
 	}
 
 	private data class FakeConnectorInboxThreadItem(
