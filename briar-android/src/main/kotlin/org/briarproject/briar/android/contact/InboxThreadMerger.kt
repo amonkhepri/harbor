@@ -11,13 +11,13 @@ object InboxThreadMerger {
 	@JvmStatic
 	fun merge(
 		briarItems: List<ContactListItem>,
-		telegramItems: List<TelegramInboxThreadItem>,
+		connectorItems: List<ConnectorInboxThreadItem>,
 	): List<InboxThreadItem> {
 		val items = ArrayList<InboxThreadItem>(
-			briarItems.size + telegramItems.size
+			briarItems.size + connectorItems.size
 		)
 		briarItems.mapTo(items) { BriarInboxThreadItem(it) }
-		items.addAll(telegramItems)
+		items.addAll(connectorItems)
 		items.sortWith(byLatestActivity)
 		return items
 	}

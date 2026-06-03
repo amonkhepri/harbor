@@ -29,6 +29,22 @@ class InboxThreadMergerTest {
 	}
 
 	@Test
+	fun testMergeAcceptsGenericConnectorRows() {
+		val items = InboxThreadMerger.merge(
+			emptyList(),
+			listOf(FakeConnectorInboxThreadItem(
+				connectorSource = MESSENGER,
+				connectorThreadId = "123",
+				latestActivityMillis = 7L,
+			))
+		)
+
+		val item = items[0] as ConnectorInboxThreadItem
+		assertEquals(MESSENGER, item.connectorSource)
+		assertEquals("messenger:123", item.stableId)
+	}
+
+	@Test
 	fun testTelegramRowsExposeCleanLatestPreview() {
 		val item = TelegramInboxThreadItem(
 			TelegramChat(7L, "chat", 42, "synthetic\npreview\ttext")
@@ -92,4 +108,18 @@ class InboxThreadMergerTest {
 		override val latestActivityMillis: Long,
 		override val connectorSource: ConnectorSource?,
 	) : InboxThreadItem
+
+	private data class FakeConnectorInboxThreadItem(
+		override val connectorSource: ConnectorSource,
+		override val connectorThreadId: String,
+		override val latestActivityMillis: Long,
+		override val title: String = "synthetic title",
+		override val previewText: String = "",
+		override val isLastMessageOutgoing: Boolean = false,
+		override val isPreviewLoading: Boolean = false,
+	) : ConnectorInboxThreadItem
+
+	private companion object {
+		val MESSENGER = ConnectorSource("messenger", "Messenger")
+	}
 }
