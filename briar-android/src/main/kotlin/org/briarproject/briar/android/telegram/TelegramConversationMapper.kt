@@ -1,21 +1,23 @@
 package org.briarproject.briar.android.telegram
 
-import org.briarproject.briar.api.telegram.TelegramMessage
+import org.briarproject.briar.api.connector.ConnectorMessage
 
 object TelegramConversationMapper {
 
-	private val byDateAscending = compareBy<TelegramConversationUiMessage> {
-		it.dateMillis
+	private val byDateAscending = compareBy<ConnectorMessage> {
+		it.dateSeconds
+	}.thenBy {
+		it.sourceMessageOrder
 	}.thenBy {
 		it.messageId
 	}
 
 	@JvmStatic
 	fun toUiMessages(
-		messages: List<TelegramMessage>,
+		messages: List<ConnectorMessage>,
 	): List<TelegramConversationUiMessage> {
 		val items = ArrayList<TelegramConversationUiMessage>(messages.size)
-		for (message in messages) {
+		for (message in messages.sortedWith(byDateAscending)) {
 			val text = message.text
 			if (text.trim().isEmpty()) continue
 			items.add(
@@ -27,7 +29,6 @@ object TelegramConversationMapper {
 				)
 			)
 		}
-		items.sortWith(byDateAscending)
 		return items
 	}
 }

@@ -165,7 +165,10 @@ class TelegramConversationActivity : BriarActivity() {
 			}
 			try {
 				val messages = TelegramConversationMapper.toUiMessages(
-					telegramConnector.getRecentMessages(chatId, MESSAGE_LIMIT)
+					telegramConnector.getRecentMessages(
+						chatId.toString(),
+						MESSAGE_LIMIT
+					)
 				)
 				showMessages(messages, emptyTextForState(true, true, false))
 			} catch (e: RuntimeException) {

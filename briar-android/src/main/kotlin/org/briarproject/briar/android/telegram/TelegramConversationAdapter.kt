@@ -45,7 +45,7 @@ class TelegramConversationAdapter :
 		override fun areItemsTheSame(
 			i1: TelegramConversationUiMessage,
 			i2: TelegramConversationUiMessage,
-		): Boolean = i1.messageId == i2.messageId
+		): Boolean = i1.stableId == i2.stableId
 
 		override fun areContentsTheSame(
 			i1: TelegramConversationUiMessage,

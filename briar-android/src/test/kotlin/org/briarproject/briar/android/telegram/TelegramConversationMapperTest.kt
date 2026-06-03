@@ -11,18 +11,22 @@ class TelegramConversationMapperTest {
 	@Test
 	fun testTextMessagesRenderInDateOrderOnly() {
 		val items = TelegramConversationMapper.toUiMessages(listOf(
-			TelegramMessage(1L, 3L, 30, true, "new"),
-			TelegramMessage(1L, 2L, 20, false, ""),
-			TelegramMessage(1L, 4L, 40, false, " \t\n"),
-			TelegramMessage(1L, 1L, 10, false, "old"),
+			TelegramMessage(1L, 30L, 30, true, "new").toConnectorMessage(),
+			TelegramMessage(1L, 2L, 20, false, "").toConnectorMessage(),
+			TelegramMessage(1L, 4L, 40, false, " \t\n").toConnectorMessage(),
+			TelegramMessage(1L, 1L, 10, false, "old").toConnectorMessage(),
+			TelegramMessage(1L, 20L, 30, false, "same time").toConnectorMessage(),
 		))
 
-		assertEquals(2, items.size)
+		assertEquals(3, items.size)
 		assertEquals("old", items[0].text)
 		assertEquals(10000L, items[0].dateMillis)
 		assertFalse(items[0].isOutgoing)
-		assertEquals("new", items[1].text)
+		assertEquals("same time", items[1].text)
 		assertEquals(30000L, items[1].dateMillis)
-		assertTrue(items[1].isOutgoing)
+		assertFalse(items[1].isOutgoing)
+		assertEquals("new", items[2].text)
+		assertEquals(30000L, items[2].dateMillis)
+		assertTrue(items[2].isOutgoing)
 	}
 }

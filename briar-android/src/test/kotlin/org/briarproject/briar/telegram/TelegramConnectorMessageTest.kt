@@ -1,5 +1,6 @@
 package org.briarproject.briar.telegram
 
+import org.briarproject.briar.api.connector.ConnectorSources
 import org.briarproject.briar.api.telegram.TelegramChat
 import org.briarproject.briar.api.telegram.TelegramMessage
 import org.briarproject.briar.api.telegram.TelegramMessageIngestStatus
@@ -39,6 +40,32 @@ class TelegramConnectorMessageTest {
 		assertEquals(client.messages, connector.getRecentMessages(10L, 2))
 		assertEquals(10L, client.lastMessageChatId)
 		assertEquals(2, client.lastMessageLimit)
+	}
+
+	@Test
+	fun testEnabledConnectorExposesReadOnlyConnectorContract() {
+		val client = FakeTelegramTdlibMessageClient(
+				chats = listOf(TelegramChat(10L, "synthetic", 1_700_000_000,
+						"preview", true)),
+				messages = listOf(TelegramMessage(10L, 20L, 1_700_000_001,
+						false, "body")),
+		)
+		val connector = StubTelegramConnector(client)
+
+		assertEquals(ConnectorSources.TELEGRAM, connector.source)
+		val threads = connector.getRecentThreads(3)
+		assertEquals(ConnectorSources.TELEGRAM, threads[0].source)
+		assertEquals("10", threads[0].threadId)
+		assertEquals("synthetic", threads[0].title)
+		assertEquals("preview", threads[0].latestMessageText)
+		assertTrue(threads[0].isLatestMessageOutgoing)
+
+		val messages = connector.getRecentMessages("10", 2)
+		assertEquals(ConnectorSources.TELEGRAM, messages[0].source)
+		assertEquals("10", messages[0].threadId)
+		assertEquals("20", messages[0].messageId)
+		assertEquals(20L, messages[0].sourceMessageOrder)
+		assertEquals("body", messages[0].text)
 	}
 
 	@Test
