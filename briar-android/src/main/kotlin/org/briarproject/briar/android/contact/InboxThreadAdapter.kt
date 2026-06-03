@@ -16,7 +16,7 @@ class InboxThreadAdapter(
 	override fun getItemViewType(position: Int): Int =
 		if (getItem(position).connectorSource == null)
 			VIEW_TYPE_BRIAR
-		else VIEW_TYPE_TELEGRAM
+		else VIEW_TYPE_CONNECTOR
 
 	override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
 		val inflater = LayoutInflater.from(parent.context)
@@ -38,10 +38,13 @@ class InboxThreadAdapter(
 				listener.onBriarItemClick(view, clickedItem)
 			}
 		} else {
+			val connectorItem = item as ConnectorInboxThreadItem
 			(holder as TelegramInboxThreadViewHolder).bind(
-				item as TelegramInboxThreadItem
+				connectorItem
 			) { view, clickedItem ->
-				listener.onTelegramItemClick(view, clickedItem)
+				if (clickedItem is TelegramInboxThreadItem) {
+					listener.onTelegramItemClick(view, clickedItem)
+				}
 			}
 		}
 	}
@@ -95,6 +98,6 @@ class InboxThreadAdapter(
 
 	companion object {
 		private const val VIEW_TYPE_BRIAR = 0
-		private const val VIEW_TYPE_TELEGRAM = 1
+		private const val VIEW_TYPE_CONNECTOR = 1
 	}
 }

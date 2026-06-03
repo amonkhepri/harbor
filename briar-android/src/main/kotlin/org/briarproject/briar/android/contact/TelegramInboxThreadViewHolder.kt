@@ -15,8 +15,8 @@ class TelegramInboxThreadViewHolder(view: View) : RecyclerView.ViewHolder(view) 
 	private val date: TextView = view.findViewById(R.id.telegramThreadDate)
 	private val preview: TextView = view.findViewById(R.id.telegramThreadPreview)
 
-	fun bind(item: TelegramInboxThreadItem,
-		listener: OnContactClickListener<TelegramInboxThreadItem>) {
+	fun bind(item: ConnectorInboxThreadItem,
+		listener: OnContactClickListener<ConnectorInboxThreadItem>) {
 		title.text = titleText(title.resources, item)
 		date.visibility = dateVisibility(item)
 		date.text = dateText(date.context, item)
