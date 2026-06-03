@@ -32,7 +32,7 @@ class TelegramInboxThreadViewHolder(view: View) : RecyclerView.ViewHolder(view) 
 	companion object {
 		@JvmStatic
 		fun titleText(resources: Resources,
-			item: TelegramInboxThreadItem): CharSequence {
+			item: ConnectorInboxThreadItem): CharSequence {
 			val title = item.title
 			return if (title.trim().isEmpty())
 				resources.getString(R.string.telegram_thread_title_fallback)
@@ -40,11 +40,11 @@ class TelegramInboxThreadViewHolder(view: View) : RecyclerView.ViewHolder(view) 
 		}
 
 		@JvmStatic
-		fun dateVisibility(item: TelegramInboxThreadItem): Int =
+		fun dateVisibility(item: ConnectorInboxThreadItem): Int =
 			if (item.latestActivityMillis > 0) View.VISIBLE else View.GONE
 
 		@JvmStatic
-		fun dateText(context: Context, item: TelegramInboxThreadItem): CharSequence {
+		fun dateText(context: Context, item: ConnectorInboxThreadItem): CharSequence {
 			val latestActivityMillis = item.latestActivityMillis
 			if (latestActivityMillis <= 0) return ""
 			return formatDate(context, latestActivityMillis)
@@ -52,7 +52,7 @@ class TelegramInboxThreadViewHolder(view: View) : RecyclerView.ViewHolder(view) 
 
 		@JvmStatic
 		fun previewText(resources: Resources,
-			item: TelegramInboxThreadItem): CharSequence =
+			item: ConnectorInboxThreadItem): CharSequence =
 			if (!item.isLastMessageOutgoing) item.previewText
 			else resources.getString(R.string.telegram_thread_preview_outgoing,
 				item.previewText)
