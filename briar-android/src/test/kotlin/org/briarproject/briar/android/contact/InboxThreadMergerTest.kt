@@ -86,15 +86,8 @@ class InboxThreadMergerTest {
 	}
 
 	private class FakeInboxThreadItem(
-		private val stableId: String,
-		private val latestActivityMillis: Long,
-		private val source: Source,
-	) : InboxThreadItem {
-
-		override fun getStableId() = stableId
-
-		override fun getLatestActivityMillis() = latestActivityMillis
-
-		override fun getSource() = source
-	}
+		override val stableId: String,
+		override val latestActivityMillis: Long,
+		override val source: Source,
+	) : InboxThreadItem
 }
