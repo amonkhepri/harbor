@@ -13,6 +13,7 @@ import org.briarproject.briar.android.util.UiUtils.formatDate
 class TelegramInboxThreadViewHolder(view: View) : RecyclerView.ViewHolder(view) {
 	private val title: TextView = view.findViewById(R.id.telegramThreadTitle)
 	private val date: TextView = view.findViewById(R.id.telegramThreadDate)
+	private val badge: TextView = view.findViewById(R.id.telegramThreadBadge)
 	private val preview: TextView = view.findViewById(R.id.telegramThreadPreview)
 
 	fun bind(item: ConnectorInboxThreadItem,
@@ -20,6 +21,7 @@ class TelegramInboxThreadViewHolder(view: View) : RecyclerView.ViewHolder(view) 
 		title.text = titleText(title.resources, item)
 		date.visibility = dateVisibility(item)
 		date.text = dateText(date.context, item)
+		badge.text = sourceLabel(item)
 		preview.text = when {
 			item.isPreviewLoading ->
 				preview.resources.getString(R.string.telegram_thread_preview_loading)
@@ -38,6 +40,10 @@ class TelegramInboxThreadViewHolder(view: View) : RecyclerView.ViewHolder(view) 
 				resources.getString(R.string.telegram_thread_title_fallback)
 			else title
 		}
+
+		@JvmStatic
+		fun sourceLabel(item: ConnectorInboxThreadItem): CharSequence =
+			item.connectorSource.displayName
 
 		@JvmStatic
 		fun dateVisibility(item: ConnectorInboxThreadItem): Int =
