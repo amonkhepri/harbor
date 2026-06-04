@@ -15,6 +15,21 @@ data class ConnectorConversationMessageItem(
 		get() = "${connectorSource.id}:$connectorThreadId:$connectorMessageId"
 
 	companion object {
+		private val byDateAscending = compareBy<ConnectorMessage> {
+			it.dateSeconds
+		}.thenBy {
+			it.sourceMessageOrder
+		}.thenBy {
+			it.messageId
+		}
+
+		fun fromMessages(
+			messages: List<ConnectorMessage>,
+		): List<ConnectorConversationMessageItem> =
+			messages.sortedWith(byDateAscending)
+				.filter { it.text.trim().isNotEmpty() }
+				.map { from(it) }
+
 		fun from(message: ConnectorMessage): ConnectorConversationMessageItem =
 			ConnectorConversationMessageItem(
 				message.source,

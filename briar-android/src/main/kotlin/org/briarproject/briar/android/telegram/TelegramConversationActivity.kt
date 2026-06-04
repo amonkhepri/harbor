@@ -166,7 +166,7 @@ class TelegramConversationActivity : BriarActivity() {
 				return@execute
 			}
 			try {
-				val messages = TelegramConversationMapper.toUiMessages(
+				val messages = ConnectorConversationMessageItem.fromMessages(
 					telegramConnector.getRecentMessages(
 						chatId.toString(),
 						MESSAGE_LIMIT

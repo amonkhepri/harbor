@@ -7,7 +7,9 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
+import org.briarproject.briar.api.connector.ConnectorMessage
 import org.briarproject.briar.api.connector.ConnectorSource
+import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -20,6 +22,25 @@ class ConnectorConversationMessageListTest {
 
 	@get:Rule
 	val composeRule = createComposeRule()
+
+	@Test
+	fun testFromMessagesSkipsBlankTextAndSortsByConnectorOrder() {
+		val items = ConnectorConversationMessageItem.fromMessages(listOf(
+			connectorMessage("30", 30, true, "new", 30L),
+			connectorMessage("2", 20, false, "", 2L),
+			connectorMessage("4", 40, false, " \t\n", 4L),
+			connectorMessage("1", 10, false, "old", 1L),
+			connectorMessage("20", 30, false, "same time", 20L),
+		))
+
+		assertEquals(
+			listOf("sample:thread-1:1", "sample:thread-1:20", "sample:thread-1:30"),
+			items.map { it.stableId },
+		)
+		assertEquals(listOf("old", "same time", "new"), items.map { it.text })
+		assertEquals(listOf(10000L, 30000L, 30000L), items.map { it.dateMillis })
+		assertEquals(listOf(false, false, true), items.map { it.isOutgoing })
+	}
 
 	@Test
 	fun testMessageListRendersConnectorItems() {
@@ -69,6 +90,23 @@ class ConnectorConversationMessageListTest {
 			dateMillis = 0L,
 			isOutgoing = isOutgoing,
 			text = text,
+		)
+
+	private fun connectorMessage(
+		messageId: String,
+		dateSeconds: Int,
+		isOutgoing: Boolean,
+		text: String,
+		sourceMessageOrder: Long,
+	): ConnectorMessage =
+		ConnectorMessage(
+			source = CONNECTOR_SOURCE,
+			threadId = "thread-1",
+			messageId = messageId,
+			dateSeconds = dateSeconds,
+			isOutgoing = isOutgoing,
+			text = text,
+			sourceMessageOrder = sourceMessageOrder,
 		)
 
 	companion object {
