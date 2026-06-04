@@ -19,6 +19,7 @@ import org.briarproject.briar.android.connector.ConnectorConversationMessageItem
 import org.briarproject.briar.android.connector.ConnectorConversationMessageListState
 import org.briarproject.briar.android.connector.getConversationMessageItems
 import org.briarproject.briar.android.view.BriarRecyclerView
+import org.briarproject.briar.api.connector.ReadOnlyConnector
 import org.briarproject.briar.api.telegram.TelegramConnector
 import org.briarproject.nullsafety.MethodsNotNullByDefault
 import org.briarproject.nullsafety.ParametersNotNullByDefault
@@ -75,6 +76,9 @@ class TelegramConversationActivity : BriarActivity() {
 	@Inject
 	lateinit var telegramConnector: TelegramConnector
 
+	private val readOnlyConnector: ReadOnlyConnector
+		get() = telegramConnector
+
 	@Inject
 	@field:IoExecutor
 	lateinit var ioExecutor: Executor
@@ -118,7 +122,7 @@ class TelegramConversationActivity : BriarActivity() {
 	override fun onPrepareOptionsMenu(menu: Menu): Boolean {
 		menu.findItem(R.id.action_refresh_telegram_conversation)?.isVisible =
 			shouldShowManualRefreshAction(
-				telegramConnector.isEnabled(),
+				readOnlyConnector.isEnabled(),
 				chatId,
 				messageLoadPending
 			)
@@ -146,16 +150,16 @@ class TelegramConversationActivity : BriarActivity() {
 		invalidateOptionsMenu()
 		list.setEmptyText(emptyTextForState(LOADING))
 		ioExecutor.execute {
-			if (!telegramConnector.isEnabled()) {
+			if (!readOnlyConnector.isEnabled()) {
 				showMessages(emptyList(), DISABLED)
 				return@execute
 			}
-			if (!telegramConnector.isAuthorized()) {
+			if (!readOnlyConnector.isAuthorized()) {
 				showMessages(emptyList(), ACCOUNT_UNAVAILABLE)
 				return@execute
 			}
 			try {
-				val messages = telegramConnector.getConversationMessageItems(
+				val messages = readOnlyConnector.getConversationMessageItems(
 					chatId.toString(),
 					MESSAGE_LIMIT
 				)
