@@ -45,17 +45,6 @@ internal fun connectorConversationAvailabilityState(
 
 @Composable
 internal fun ConnectorConversationMessageList(
-	messages: List<ConnectorConversationMessageItem>,
-	modifier: Modifier = Modifier,
-) {
-	ConnectorConversationMessageList(
-		state = ConnectorConversationMessageListState(messages),
-		modifier = modifier,
-	)
-}
-
-@Composable
-internal fun ConnectorConversationMessageList(
 	state: ConnectorConversationMessageListState,
 	modifier: Modifier = Modifier,
 ) {

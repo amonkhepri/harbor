@@ -57,7 +57,9 @@ class ConnectorConversationMessageListTest {
 
 		composeRule.setContent {
 			MaterialTheme {
-				ConnectorConversationMessageList(listOf(incoming, outgoing))
+				ConnectorConversationMessageList(
+					ConnectorConversationMessageListState(listOf(incoming, outgoing))
+				)
 			}
 		}
 		composeRule.waitForIdle()
