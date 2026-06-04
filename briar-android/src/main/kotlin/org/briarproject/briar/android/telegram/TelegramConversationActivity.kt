@@ -10,6 +10,7 @@ import org.briarproject.briar.android.activity.ActivityComponent
 import org.briarproject.briar.android.activity.BriarActivity
 import org.briarproject.briar.android.connector.ConnectorConversationAdapter
 import org.briarproject.briar.android.connector.ConnectorConversationMessageItem
+import org.briarproject.briar.android.connector.ConnectorConversationMessageListState
 import org.briarproject.briar.android.connector.getConversationMessageItems
 import org.briarproject.briar.android.view.BriarRecyclerView
 import org.briarproject.briar.api.telegram.TelegramConnector
@@ -183,9 +184,10 @@ class TelegramConversationActivity : BriarActivity() {
 		emptyTextRes: Int,
 	) {
 		runOnUiThread {
+			val state = ConnectorConversationMessageListState(messages, getString(emptyTextRes))
 			messageLoadPending = false
-			list.setEmptyText(emptyTextRes)
-			adapter.submitList(messages)
+			list.setEmptyText(state.emptyText)
+			adapter.submitList(state.messages)
 			invalidateOptionsMenu()
 		}
 	}
