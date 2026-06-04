@@ -1,5 +1,0 @@
-package org.briarproject.briar.android.telegram
-
-import org.briarproject.briar.android.connector.ConnectorConversationMessageItem
-
-typealias TelegramConversationUiMessage = ConnectorConversationMessageItem

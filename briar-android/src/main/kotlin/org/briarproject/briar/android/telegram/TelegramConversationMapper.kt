@@ -16,8 +16,8 @@ object TelegramConversationMapper {
 	@JvmStatic
 	fun toUiMessages(
 		messages: List<ConnectorMessage>,
-	): List<TelegramConversationUiMessage> {
-		val items = ArrayList<TelegramConversationUiMessage>(messages.size)
+	): List<ConnectorConversationMessageItem> {
+		val items = ArrayList<ConnectorConversationMessageItem>(messages.size)
 		for (message in messages.sortedWith(byDateAscending)) {
 			val text = message.text
 			if (text.trim().isEmpty()) continue

@@ -8,6 +8,8 @@ import org.briarproject.bramble.api.lifecycle.IoExecutor
 import org.briarproject.briar.R
 import org.briarproject.briar.android.activity.ActivityComponent
 import org.briarproject.briar.android.activity.BriarActivity
+import org.briarproject.briar.android.connector.ConnectorConversationAdapter
+import org.briarproject.briar.android.connector.ConnectorConversationMessageItem
 import org.briarproject.briar.android.view.BriarRecyclerView
 import org.briarproject.briar.api.telegram.TelegramConnector
 import org.briarproject.nullsafety.MethodsNotNullByDefault
@@ -79,7 +81,7 @@ class TelegramConversationActivity : BriarActivity() {
 			if (title == null || title.trim().isEmpty()) fallback else title
 	}
 
-	private val adapter = TelegramConversationAdapter()
+	private val adapter = ConnectorConversationAdapter()
 
 	@Inject
 	lateinit var telegramConnector: TelegramConnector
@@ -178,7 +180,7 @@ class TelegramConversationActivity : BriarActivity() {
 	}
 
 	private fun showMessages(
-		messages: List<TelegramConversationUiMessage>,
+		messages: List<ConnectorConversationMessageItem>,
 		emptyTextRes: Int,
 	) {
 		runOnUiThread {

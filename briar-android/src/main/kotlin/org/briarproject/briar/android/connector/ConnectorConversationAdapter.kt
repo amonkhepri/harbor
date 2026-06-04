@@ -1,4 +1,4 @@
-package org.briarproject.briar.android.telegram
+package org.briarproject.briar.android.connector
 
 import android.content.Context
 import android.view.LayoutInflater
@@ -11,9 +11,9 @@ import androidx.recyclerview.widget.RecyclerView
 import org.briarproject.briar.R
 import org.briarproject.briar.android.util.UiUtils.formatDate
 
-class TelegramConversationAdapter :
-	ListAdapter<TelegramConversationUiMessage,
-		TelegramConversationAdapter.MessageViewHolder>(MessageCallback()) {
+class ConnectorConversationAdapter :
+	ListAdapter<ConnectorConversationMessageItem,
+		ConnectorConversationAdapter.MessageViewHolder>(MessageCallback()) {
 
 	override fun onCreateViewHolder(parent: ViewGroup,
 		viewType: Int): MessageViewHolder {
@@ -34,7 +34,7 @@ class TelegramConversationAdapter :
 		private val date: TextView =
 			itemView.findViewById(R.id.connectorMessageDate)
 
-		fun bind(item: TelegramConversationUiMessage) {
+		fun bind(item: ConnectorConversationMessageItem) {
 			text.text = item.text
 			direction.setText(directionText(item))
 			date.visibility = dateVisibility(item)
@@ -42,16 +42,16 @@ class TelegramConversationAdapter :
 		}
 	}
 
-	private class MessageCallback : ItemCallback<TelegramConversationUiMessage>() {
+	private class MessageCallback : ItemCallback<ConnectorConversationMessageItem>() {
 
 		override fun areItemsTheSame(
-			i1: TelegramConversationUiMessage,
-			i2: TelegramConversationUiMessage,
+			i1: ConnectorConversationMessageItem,
+			i2: ConnectorConversationMessageItem,
 		): Boolean = i1.stableId == i2.stableId
 
 		override fun areContentsTheSame(
-			i1: TelegramConversationUiMessage,
-			i2: TelegramConversationUiMessage,
+			i1: ConnectorConversationMessageItem,
+			i2: ConnectorConversationMessageItem,
 		): Boolean =
 			i1.dateMillis == i2.dateMillis &&
 				i1.isOutgoing == i2.isOutgoing &&
@@ -60,21 +60,21 @@ class TelegramConversationAdapter :
 
 	companion object {
 		@JvmStatic
-		fun dateVisibility(item: TelegramConversationUiMessage): Int =
+		fun dateVisibility(item: ConnectorConversationMessageItem): Int =
 			if (item.dateMillis > 0) View.VISIBLE else View.GONE
 
 		@JvmStatic
 		fun dateText(context: Context,
-			item: TelegramConversationUiMessage): CharSequence {
+			item: ConnectorConversationMessageItem): CharSequence {
 			val dateMillis = item.dateMillis
 			if (dateMillis <= 0) return ""
 			return formatDate(context, dateMillis)
 		}
 
 		@JvmStatic
-		fun directionText(item: TelegramConversationUiMessage): Int =
+		fun directionText(item: ConnectorConversationMessageItem): Int =
 			if (item.isOutgoing)
-				R.string.telegram_conversation_direction_outgoing
-			else R.string.telegram_conversation_direction_incoming
+				R.string.connector_conversation_direction_outgoing
+			else R.string.connector_conversation_direction_incoming
 	}
 }
