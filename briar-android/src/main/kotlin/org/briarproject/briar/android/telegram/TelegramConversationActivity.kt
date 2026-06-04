@@ -171,14 +171,17 @@ class TelegramConversationActivity : BriarActivity() {
 		availabilityState: ConnectorConversationAvailabilityState,
 	) {
 		runOnUiThread {
-			val state = ConnectorConversationMessageListState(
+			submitMessageState(ConnectorConversationMessageListState(
 				messages,
 				getString(emptyTextForState(availabilityState))
-			)
-			messageLoadPending = false
-			list.setEmptyText(state.emptyText)
-			adapter.submitState(state)
-			invalidateOptionsMenu()
+			))
 		}
+	}
+
+	private fun submitMessageState(state: ConnectorConversationMessageListState) {
+		messageLoadPending = false
+		list.setEmptyText(state.emptyText)
+		adapter.submitState(state)
+		invalidateOptionsMenu()
 	}
 }
