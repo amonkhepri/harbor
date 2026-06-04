@@ -50,11 +50,9 @@ class TelegramConversationActivity : BriarActivity() {
 				R.string.telegram_conversation_empty
 		}
 
-		@JvmStatic
 		fun isManualRefreshAction(itemId: Int): Boolean =
 			itemId == R.id.action_refresh_connector_conversation
 
-		@JvmStatic
 		fun shouldShowManualRefreshAction(
 			connectorEnabled: Boolean,
 			chatId: Long,
@@ -62,10 +60,8 @@ class TelegramConversationActivity : BriarActivity() {
 		): Boolean =
 			connectorEnabled && hasValidChatId(chatId) && !messageLoadPending
 
-		@JvmStatic
 		fun hasValidChatId(chatId: Long): Boolean = chatId != 0L
 
-		@JvmStatic
 		fun titleText(title: String?, fallback: String): String =
 			if (title == null || title.trim().isEmpty()) fallback else title
 	}
