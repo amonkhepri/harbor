@@ -30,19 +30,6 @@ internal enum class ConnectorConversationAvailabilityState {
 	LOADING, DISABLED, ACCOUNT_UNAVAILABLE, EMPTY, LOAD_FAILED
 }
 
-internal fun connectorConversationAvailabilityState(
-	connectorEnabled: Boolean,
-	authorized: Boolean,
-	loadFailed: Boolean,
-	loadPending: Boolean,
-): ConnectorConversationAvailabilityState = when {
-	loadPending -> ConnectorConversationAvailabilityState.LOADING
-	!connectorEnabled -> ConnectorConversationAvailabilityState.DISABLED
-	!authorized -> ConnectorConversationAvailabilityState.ACCOUNT_UNAVAILABLE
-	loadFailed -> ConnectorConversationAvailabilityState.LOAD_FAILED
-	else -> ConnectorConversationAvailabilityState.EMPTY
-}
-
 @Composable
 internal fun ConnectorConversationMessageList(
 	state: ConnectorConversationMessageListState,
