@@ -38,12 +38,10 @@ internal fun ConnectorConversationMessageList(
 	LazyColumn(
 		modifier = modifier.testTag(CONNECTOR_CONVERSATION_MESSAGE_LIST_TAG),
 	) {
-		val messages = state.messages
-		val emptyText = state.emptyText
-		if (messages.isEmpty() && emptyText != null) {
+		if (state.messages.isEmpty() && state.emptyText != null) {
 			item {
 				Text(
-					text = emptyText,
+					text = state.emptyText,
 					style = MaterialTheme.typography.bodyMedium,
 					color = MaterialTheme.colorScheme.onBackground,
 					modifier = Modifier.padding(
@@ -55,7 +53,7 @@ internal fun ConnectorConversationMessageList(
 			}
 		} else {
 			items(
-				items = messages,
+				items = state.messages,
 				key = { it.stableId },
 			) { item ->
 				ConnectorConversationMessageRow(item)
