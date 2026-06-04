@@ -50,19 +50,19 @@ class TelegramConversationActivity : BriarActivity() {
 				R.string.telegram_conversation_empty
 		}
 
-		fun isManualRefreshAction(itemId: Int): Boolean =
+		private fun isManualRefreshAction(itemId: Int): Boolean =
 			itemId == R.id.action_refresh_connector_conversation
 
-		fun shouldShowManualRefreshAction(
+		private fun shouldShowManualRefreshAction(
 			connectorEnabled: Boolean,
 			chatId: Long,
 			messageLoadPending: Boolean,
 		): Boolean =
 			connectorEnabled && hasValidChatId(chatId) && !messageLoadPending
 
-		fun hasValidChatId(chatId: Long): Boolean = chatId != 0L
+		private fun hasValidChatId(chatId: Long): Boolean = chatId != 0L
 
-		fun titleText(title: String?, fallback: String): String =
+		private fun titleText(title: String?, fallback: String): String =
 			if (title == null || title.trim().isEmpty()) fallback else title
 	}
 
@@ -161,7 +161,7 @@ class TelegramConversationActivity : BriarActivity() {
 					chatId.toString(),
 					MESSAGE_LIMIT
 				)
-				showMessages(state, EMPTY)
+				showMessages(state)
 			} catch (e: RuntimeException) {
 				showMessages(ConnectorConversationMessageListState(), LOAD_FAILED)
 			}
@@ -170,7 +170,7 @@ class TelegramConversationActivity : BriarActivity() {
 
 	private fun showMessages(
 		state: ConnectorConversationMessageListState,
-		availabilityState: ConnectorConversationAvailabilityState,
+		availabilityState: ConnectorConversationAvailabilityState = EMPTY,
 	) {
 		runOnUiThread {
 			submitMessageState(state.copy(
