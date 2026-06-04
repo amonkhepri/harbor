@@ -9,9 +9,13 @@ import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
 import org.briarproject.briar.R
 
-class ConnectorConversationAdapter :
+internal class ConnectorConversationAdapter :
 	ListAdapter<ConnectorConversationMessageItem,
-		ConnectorConversationAdapter.MessageViewHolder>(MessageCallback()) {
+			ConnectorConversationAdapter.MessageViewHolder>(MessageCallback()) {
+
+	fun submitState(state: ConnectorConversationMessageListState) {
+		submitList(state.messages)
+	}
 
 	override fun onCreateViewHolder(parent: ViewGroup,
 		viewType: Int): MessageViewHolder {

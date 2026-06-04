@@ -177,7 +177,7 @@ class TelegramConversationActivity : BriarActivity() {
 			)
 			messageLoadPending = false
 			list.setEmptyText(state.emptyText)
-			adapter.submitList(state.messages)
+			adapter.submitState(state)
 			invalidateOptionsMenu()
 		}
 	}
