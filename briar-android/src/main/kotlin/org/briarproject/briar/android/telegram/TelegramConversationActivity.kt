@@ -139,7 +139,7 @@ class TelegramConversationActivity : BriarActivity() {
 
 	private fun loadMessages() {
 		if (!hasValidChatId(chatId)) {
-			showMessages(emptyList(), emptyTextForState(LOAD_FAILED))
+			showMessages(emptyList(), LOAD_FAILED)
 			return
 		}
 		messageLoadPending = true
@@ -147,11 +147,11 @@ class TelegramConversationActivity : BriarActivity() {
 		list.setEmptyText(emptyTextForState(LOADING))
 		ioExecutor.execute {
 			if (!telegramConnector.isEnabled()) {
-				showMessages(emptyList(), emptyTextForState(DISABLED))
+				showMessages(emptyList(), DISABLED)
 				return@execute
 			}
 			if (!telegramConnector.isAuthorized()) {
-				showMessages(emptyList(), emptyTextForState(ACCOUNT_UNAVAILABLE))
+				showMessages(emptyList(), ACCOUNT_UNAVAILABLE)
 				return@execute
 			}
 			try {
@@ -159,19 +159,22 @@ class TelegramConversationActivity : BriarActivity() {
 					chatId.toString(),
 					MESSAGE_LIMIT
 				)
-				showMessages(messages, emptyTextForState(EMPTY))
+				showMessages(messages, EMPTY)
 			} catch (e: RuntimeException) {
-				showMessages(emptyList(), emptyTextForState(LOAD_FAILED))
+				showMessages(emptyList(), LOAD_FAILED)
 			}
 		}
 	}
 
 	private fun showMessages(
 		messages: List<ConnectorConversationMessageItem>,
-		emptyTextRes: Int,
+		availabilityState: ConnectorConversationAvailabilityState,
 	) {
 		runOnUiThread {
-			val state = ConnectorConversationMessageListState(messages, getString(emptyTextRes))
+			val state = ConnectorConversationMessageListState(
+				messages,
+				getString(emptyTextForState(availabilityState))
+			)
 			messageLoadPending = false
 			list.setEmptyText(state.emptyText)
 			adapter.submitList(state.messages)
