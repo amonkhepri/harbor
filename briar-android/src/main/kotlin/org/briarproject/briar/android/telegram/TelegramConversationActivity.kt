@@ -114,7 +114,7 @@ class TelegramConversationActivity : BriarActivity() {
 			setSubtitle(R.string.telegram_origin_label)
 		}
 
-		list = findViewById(R.id.telegramConversationList)
+		list = findViewById(R.id.connectorConversationList)
 		list.setLayoutManager(LinearLayoutManager(this))
 		list.setAdapter(adapter)
 		list.setEmptyText(R.string.telegram_conversation_empty)
