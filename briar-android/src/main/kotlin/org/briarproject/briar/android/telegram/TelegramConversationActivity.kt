@@ -52,7 +52,7 @@ class TelegramConversationActivity : BriarActivity() {
 
 		@JvmStatic
 		fun isManualRefreshAction(itemId: Int): Boolean =
-			itemId == R.id.action_refresh_telegram_conversation
+			itemId == R.id.action_refresh_connector_conversation
 
 		@JvmStatic
 		fun shouldShowManualRefreshAction(
@@ -114,12 +114,12 @@ class TelegramConversationActivity : BriarActivity() {
 	}
 
 	override fun onCreateOptionsMenu(menu: Menu): Boolean {
-		menuInflater.inflate(R.menu.telegram_conversation_actions, menu)
+		menuInflater.inflate(R.menu.connector_conversation_actions, menu)
 		return super.onCreateOptionsMenu(menu)
 	}
 
 	override fun onPrepareOptionsMenu(menu: Menu): Boolean {
-		menu.findItem(R.id.action_refresh_telegram_conversation)?.isVisible =
+		menu.findItem(R.id.action_refresh_connector_conversation)?.isVisible =
 			shouldShowManualRefreshAction(
 				readOnlyConnector.isEnabled(),
 				chatId,
