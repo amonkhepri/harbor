@@ -56,9 +56,9 @@ class TelegramConversationActivity : BriarActivity() {
 		private fun shouldShowManualRefreshAction(
 			connectorEnabled: Boolean,
 			chatId: Long,
-			messageLoadPending: Boolean,
+			state: ConnectorConversationMessageListState,
 		): Boolean =
-			connectorEnabled && hasValidChatId(chatId) && !messageLoadPending
+			connectorEnabled && hasValidChatId(chatId) && !state.isLoading
 
 		private fun hasValidChatId(chatId: Long): Boolean = chatId != 0L
 
@@ -80,7 +80,7 @@ class TelegramConversationActivity : BriarActivity() {
 
 	private lateinit var list: BriarRecyclerView
 	private var chatId = 0L
-	private var messageLoadPending = false
+	private var messageState = ConnectorConversationMessageListState()
 
 	override fun injectActivity(component: ActivityComponent) {
 		component.inject(this)
@@ -118,7 +118,7 @@ class TelegramConversationActivity : BriarActivity() {
 			shouldShowManualRefreshAction(
 				readOnlyConnector.isEnabled(),
 				chatId,
-				messageLoadPending
+				messageState
 			)
 		return super.onPrepareOptionsMenu(menu)
 	}
@@ -144,8 +144,8 @@ class TelegramConversationActivity : BriarActivity() {
 			ConnectorConversationMessageListState(
 				adapter.currentList,
 				getString(emptyTextForState(LOADING)),
+				isLoading = true,
 			),
-			pending = true,
 		)
 		ioExecutor.execute {
 			if (!readOnlyConnector.isEnabled()) {
@@ -179,11 +179,8 @@ class TelegramConversationActivity : BriarActivity() {
 		}
 	}
 
-	private fun submitMessageState(
-		state: ConnectorConversationMessageListState,
-		pending: Boolean = false,
-	) {
-		messageLoadPending = pending
+	private fun submitMessageState(state: ConnectorConversationMessageListState) {
+		messageState = state
 		list.setEmptyText(state.emptyText)
 		adapter.submitState(state)
 		invalidateOptionsMenu()
