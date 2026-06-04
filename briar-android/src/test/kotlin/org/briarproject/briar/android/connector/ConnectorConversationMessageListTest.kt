@@ -78,6 +78,26 @@ class ConnectorConversationMessageListTest {
 		composeRule.onAllNodesWithText("Outgoing").assertCountEquals(1)
 	}
 
+	@Test
+	fun testMessageListRendersEmptyState() {
+		composeRule.setContent {
+			MaterialTheme {
+				ConnectorConversationMessageList(
+					ConnectorConversationMessageListState(
+						messages = emptyList(),
+						emptyText = "No connector messages",
+					)
+				)
+			}
+		}
+		composeRule.waitForIdle()
+
+		composeRule.onNodeWithTag(CONNECTOR_CONVERSATION_MESSAGE_LIST_TAG)
+			.assertIsDisplayed()
+		composeRule.onAllNodesWithText("No connector messages")
+			.assertCountEquals(1)
+	}
+
 	private fun connectorMessageItem(
 		messageId: String,
 		isOutgoing: Boolean,

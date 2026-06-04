@@ -21,19 +21,52 @@ internal const val CONNECTOR_CONVERSATION_MESSAGE_LIST_TAG =
 internal const val CONNECTOR_CONVERSATION_MESSAGE_ROW_TAG_PREFIX =
 	"connector_conversation_message_row:"
 
+internal data class ConnectorConversationMessageListState(
+	val messages: List<ConnectorConversationMessageItem>,
+	val emptyText: String? = null,
+)
+
 @Composable
 internal fun ConnectorConversationMessageList(
 	messages: List<ConnectorConversationMessageItem>,
 	modifier: Modifier = Modifier,
 ) {
+	ConnectorConversationMessageList(
+		state = ConnectorConversationMessageListState(messages),
+		modifier = modifier,
+	)
+}
+
+@Composable
+internal fun ConnectorConversationMessageList(
+	state: ConnectorConversationMessageListState,
+	modifier: Modifier = Modifier,
+) {
 	LazyColumn(
 		modifier = modifier.testTag(CONNECTOR_CONVERSATION_MESSAGE_LIST_TAG),
 	) {
-		items(
-			items = messages,
-			key = { it.stableId },
-		) { item ->
-			ConnectorConversationMessageRow(item)
+		val messages = state.messages
+		val emptyText = state.emptyText
+		if (messages.isEmpty() && emptyText != null) {
+			item {
+				Text(
+					text = emptyText,
+					style = MaterialTheme.typography.bodyMedium,
+					color = MaterialTheme.colorScheme.onBackground,
+					modifier = Modifier.padding(
+						horizontal = dimensionResource(
+							R.dimen.margin_activity_horizontal),
+						vertical = dimensionResource(R.dimen.margin_medium),
+					),
+				)
+			}
+		} else {
+			items(
+				items = messages,
+				key = { it.stableId },
+			) { item ->
+				ConnectorConversationMessageRow(item)
+			}
 		}
 	}
 }
