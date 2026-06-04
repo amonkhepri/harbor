@@ -15,9 +15,8 @@ import org.briarproject.briar.android.connector.ConnectorConversationAvailabilit
 import org.briarproject.briar.android.connector.ConnectorConversationAvailabilityState.LOAD_FAILED
 import org.briarproject.briar.android.connector.ConnectorConversationAvailabilityState.LOADING
 import org.briarproject.briar.android.connector.ConnectorConversationAdapter
-import org.briarproject.briar.android.connector.ConnectorConversationMessageItem
 import org.briarproject.briar.android.connector.ConnectorConversationMessageListState
-import org.briarproject.briar.android.connector.getConversationMessageItems
+import org.briarproject.briar.android.connector.getConversationMessageListState
 import org.briarproject.briar.android.view.BriarRecyclerView
 import org.briarproject.briar.api.connector.ReadOnlyConnector
 import org.briarproject.briar.api.telegram.TelegramConnector
@@ -143,7 +142,7 @@ class TelegramConversationActivity : BriarActivity() {
 
 	private fun loadMessages() {
 		if (!hasValidChatId(chatId)) {
-			showMessages(emptyList(), LOAD_FAILED)
+			showMessages(ConnectorConversationMessageListState(), LOAD_FAILED)
 			return
 		}
 		messageLoadPending = true
@@ -151,33 +150,32 @@ class TelegramConversationActivity : BriarActivity() {
 		list.setEmptyText(emptyTextForState(LOADING))
 		ioExecutor.execute {
 			if (!readOnlyConnector.isEnabled()) {
-				showMessages(emptyList(), DISABLED)
+				showMessages(ConnectorConversationMessageListState(), DISABLED)
 				return@execute
 			}
 			if (!readOnlyConnector.isAuthorized()) {
-				showMessages(emptyList(), ACCOUNT_UNAVAILABLE)
+				showMessages(ConnectorConversationMessageListState(), ACCOUNT_UNAVAILABLE)
 				return@execute
 			}
 			try {
-				val messages = readOnlyConnector.getConversationMessageItems(
+				val state = readOnlyConnector.getConversationMessageListState(
 					chatId.toString(),
 					MESSAGE_LIMIT
 				)
-				showMessages(messages, EMPTY)
+				showMessages(state, EMPTY)
 			} catch (e: RuntimeException) {
-				showMessages(emptyList(), LOAD_FAILED)
+				showMessages(ConnectorConversationMessageListState(), LOAD_FAILED)
 			}
 		}
 	}
 
 	private fun showMessages(
-		messages: List<ConnectorConversationMessageItem>,
+		state: ConnectorConversationMessageListState,
 		availabilityState: ConnectorConversationAvailabilityState,
 	) {
 		runOnUiThread {
-			submitMessageState(ConnectorConversationMessageListState(
-				messages,
-				getString(emptyTextForState(availabilityState))
+			submitMessageState(state.copy(
+				emptyText = getString(emptyTextForState(availabilityState))
 			))
 		}
 	}

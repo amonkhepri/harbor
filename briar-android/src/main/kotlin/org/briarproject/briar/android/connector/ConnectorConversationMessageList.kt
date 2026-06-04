@@ -22,7 +22,7 @@ internal const val CONNECTOR_CONVERSATION_MESSAGE_ROW_TAG_PREFIX =
 	"connector_conversation_message_row:"
 
 internal data class ConnectorConversationMessageListState(
-	val messages: List<ConnectorConversationMessageItem>,
+	val messages: List<ConnectorConversationMessageItem> = emptyList(),
 	val emptyText: String? = null,
 )
 

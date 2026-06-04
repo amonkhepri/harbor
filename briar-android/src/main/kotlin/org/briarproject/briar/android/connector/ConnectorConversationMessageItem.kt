@@ -43,8 +43,9 @@ data class ConnectorConversationMessageItem(
 	}
 }
 
-internal fun ReadOnlyConnector.getConversationMessageItems(
+internal fun ReadOnlyConnector.getConversationMessageListState(
 	threadId: String,
 	limit: Int,
-): List<ConnectorConversationMessageItem> =
-	ConnectorConversationMessageItem.fromMessages(getRecentMessages(threadId, limit))
+): ConnectorConversationMessageListState =
+	ConnectorConversationMessageListState(
+		ConnectorConversationMessageItem.fromMessages(getRecentMessages(threadId, limit)))
