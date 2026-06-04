@@ -9,10 +9,14 @@ import org.briarproject.briar.R
 import org.briarproject.briar.android.activity.ActivityComponent
 import org.briarproject.briar.android.activity.BriarActivity
 import org.briarproject.briar.android.connector.ConnectorConversationAvailabilityState
+import org.briarproject.briar.android.connector.ConnectorConversationAvailabilityState.ACCOUNT_UNAVAILABLE
+import org.briarproject.briar.android.connector.ConnectorConversationAvailabilityState.DISABLED
+import org.briarproject.briar.android.connector.ConnectorConversationAvailabilityState.EMPTY
+import org.briarproject.briar.android.connector.ConnectorConversationAvailabilityState.LOAD_FAILED
+import org.briarproject.briar.android.connector.ConnectorConversationAvailabilityState.LOADING
 import org.briarproject.briar.android.connector.ConnectorConversationAdapter
 import org.briarproject.briar.android.connector.ConnectorConversationMessageItem
 import org.briarproject.briar.android.connector.ConnectorConversationMessageListState
-import org.briarproject.briar.android.connector.connectorConversationAvailabilityState
 import org.briarproject.briar.android.connector.getConversationMessageItems
 import org.briarproject.briar.android.view.BriarRecyclerView
 import org.briarproject.briar.api.telegram.TelegramConnector
@@ -31,41 +35,18 @@ class TelegramConversationActivity : BriarActivity() {
 
 		private const val MESSAGE_LIMIT = 50
 
-		@JvmStatic
-		fun emptyTextForState(
-			connectorEnabled: Boolean,
-			loadFailed: Boolean,
-		): Int = emptyTextForState(connectorEnabled, true, loadFailed)
-
-		@JvmStatic
-		fun emptyTextForState(
-			connectorEnabled: Boolean,
-			authorized: Boolean,
-			loadFailed: Boolean,
-		): Int = emptyTextForState(
-			connectorEnabled,
-			authorized,
-			loadFailed,
-			false
-		)
-
-		@JvmStatic
-		fun emptyTextForState(
-			connectorEnabled: Boolean,
-			authorized: Boolean,
-			loadFailed: Boolean,
-			loadPending: Boolean,
-		): Int = when (connectorConversationAvailabilityState(
-			connectorEnabled, authorized, loadFailed, loadPending)) {
-			ConnectorConversationAvailabilityState.LOADING ->
+		private fun emptyTextForState(
+			state: ConnectorConversationAvailabilityState,
+		): Int = when (state) {
+			LOADING ->
 				R.string.telegram_conversation_loading
-			ConnectorConversationAvailabilityState.DISABLED ->
+			DISABLED ->
 				R.string.telegram_conversation_disabled
-			ConnectorConversationAvailabilityState.ACCOUNT_UNAVAILABLE ->
+			ACCOUNT_UNAVAILABLE ->
 				R.string.telegram_conversation_account_unavailable
-			ConnectorConversationAvailabilityState.LOAD_FAILED ->
+			LOAD_FAILED ->
 				R.string.telegram_conversation_load_failed
-			ConnectorConversationAvailabilityState.EMPTY ->
+			EMPTY ->
 				R.string.telegram_conversation_empty
 		}
 
@@ -158,19 +139,19 @@ class TelegramConversationActivity : BriarActivity() {
 
 	private fun loadMessages() {
 		if (!hasValidChatId(chatId)) {
-			showMessages(emptyList(), emptyTextForState(true, true, true))
+			showMessages(emptyList(), emptyTextForState(LOAD_FAILED))
 			return
 		}
 		messageLoadPending = true
 		invalidateOptionsMenu()
-		list.setEmptyText(emptyTextForState(true, true, false, true))
+		list.setEmptyText(emptyTextForState(LOADING))
 		ioExecutor.execute {
 			if (!telegramConnector.isEnabled()) {
-				showMessages(emptyList(), emptyTextForState(false, false, false))
+				showMessages(emptyList(), emptyTextForState(DISABLED))
 				return@execute
 			}
 			if (!telegramConnector.isAuthorized()) {
-				showMessages(emptyList(), emptyTextForState(true, false, false))
+				showMessages(emptyList(), emptyTextForState(ACCOUNT_UNAVAILABLE))
 				return@execute
 			}
 			try {
@@ -178,9 +159,9 @@ class TelegramConversationActivity : BriarActivity() {
 					chatId.toString(),
 					MESSAGE_LIMIT
 				)
-				showMessages(messages, emptyTextForState(true, true, false))
+				showMessages(messages, emptyTextForState(EMPTY))
 			} catch (e: RuntimeException) {
-				showMessages(emptyList(), emptyTextForState(true, true, true))
+				showMessages(emptyList(), emptyTextForState(LOAD_FAILED))
 			}
 		}
 	}
