@@ -142,7 +142,7 @@ class TelegramConversationActivity : BriarActivity() {
 		}
 		submitMessageState(
 			ConnectorConversationMessageListState(
-				adapter.currentList,
+				messageState.messages,
 				getString(emptyTextForState(LOADING)),
 				isLoading = true,
 			),
