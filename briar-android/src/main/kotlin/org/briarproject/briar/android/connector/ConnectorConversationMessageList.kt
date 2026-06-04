@@ -15,7 +15,6 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.dimensionResource
 import androidx.compose.ui.res.stringResource
 import org.briarproject.briar.R
-import org.briarproject.briar.android.util.UiUtils.formatDate
 
 internal const val CONNECTOR_CONVERSATION_MESSAGE_LIST_TAG =
 	"connector_conversation_message_list"
@@ -65,7 +64,7 @@ private fun ConnectorConversationMessageRow(
 				style = MaterialTheme.typography.bodySmall,
 				color = MaterialTheme.colorScheme.onSurfaceVariant,
 			)
-			val dateText = dateText(item)
+			val dateText = dateText(LocalContext.current, item).toString()
 			if (dateText.isNotEmpty()) {
 				Text(
 					text = dateText,
@@ -79,18 +78,3 @@ private fun ConnectorConversationMessageRow(
 		}
 	}
 }
-
-@Composable
-private fun dateText(
-	item: ConnectorConversationMessageItem,
-): String {
-	if (item.dateMillis <= 0) return ""
-	return formatDate(LocalContext.current, item.dateMillis).toString()
-}
-
-private fun directionText(item: ConnectorConversationMessageItem): Int =
-	if (item.isOutgoing) {
-		R.string.connector_conversation_direction_outgoing
-	} else {
-		R.string.connector_conversation_direction_incoming
-	}

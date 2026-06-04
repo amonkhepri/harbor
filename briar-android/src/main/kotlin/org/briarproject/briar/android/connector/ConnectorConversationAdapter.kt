@@ -1,6 +1,5 @@
 package org.briarproject.briar.android.connector
 
-import android.content.Context
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -9,7 +8,6 @@ import androidx.recyclerview.widget.DiffUtil.ItemCallback
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
 import org.briarproject.briar.R
-import org.briarproject.briar.android.util.UiUtils.formatDate
 
 class ConnectorConversationAdapter :
 	ListAdapter<ConnectorConversationMessageItem,
@@ -58,23 +56,4 @@ class ConnectorConversationAdapter :
 				i1.text == i2.text
 	}
 
-	companion object {
-		@JvmStatic
-		fun dateVisibility(item: ConnectorConversationMessageItem): Int =
-			if (item.dateMillis > 0) View.VISIBLE else View.GONE
-
-		@JvmStatic
-		fun dateText(context: Context,
-			item: ConnectorConversationMessageItem): CharSequence {
-			val dateMillis = item.dateMillis
-			if (dateMillis <= 0) return ""
-			return formatDate(context, dateMillis)
-		}
-
-		@JvmStatic
-		fun directionText(item: ConnectorConversationMessageItem): Int =
-			if (item.isOutgoing)
-				R.string.connector_conversation_direction_outgoing
-			else R.string.connector_conversation_direction_incoming
-	}
 }
