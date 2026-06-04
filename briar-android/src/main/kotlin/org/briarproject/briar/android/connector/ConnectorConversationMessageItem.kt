@@ -2,6 +2,7 @@ package org.briarproject.briar.android.connector
 
 import org.briarproject.briar.api.connector.ConnectorMessage
 import org.briarproject.briar.api.connector.ConnectorSource
+import org.briarproject.briar.api.connector.ReadOnlyConnector
 
 data class ConnectorConversationMessageItem(
 	val connectorSource: ConnectorSource,
@@ -41,3 +42,9 @@ data class ConnectorConversationMessageItem(
 			)
 	}
 }
+
+internal fun ReadOnlyConnector.getConversationMessageItems(
+	threadId: String,
+	limit: Int,
+): List<ConnectorConversationMessageItem> =
+	ConnectorConversationMessageItem.fromMessages(getRecentMessages(threadId, limit))

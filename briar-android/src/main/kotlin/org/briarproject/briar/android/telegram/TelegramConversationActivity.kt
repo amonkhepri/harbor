@@ -10,6 +10,7 @@ import org.briarproject.briar.android.activity.ActivityComponent
 import org.briarproject.briar.android.activity.BriarActivity
 import org.briarproject.briar.android.connector.ConnectorConversationAdapter
 import org.briarproject.briar.android.connector.ConnectorConversationMessageItem
+import org.briarproject.briar.android.connector.getConversationMessageItems
 import org.briarproject.briar.android.view.BriarRecyclerView
 import org.briarproject.briar.api.telegram.TelegramConnector
 import org.briarproject.nullsafety.MethodsNotNullByDefault
@@ -166,11 +167,9 @@ class TelegramConversationActivity : BriarActivity() {
 				return@execute
 			}
 			try {
-				val messages = ConnectorConversationMessageItem.fromMessages(
-					telegramConnector.getRecentMessages(
-						chatId.toString(),
-						MESSAGE_LIMIT
-					)
+				val messages = telegramConnector.getConversationMessageItems(
+					chatId.toString(),
+					MESSAGE_LIMIT
 				)
 				showMessages(messages, emptyTextForState(true, true, false))
 			} catch (e: RuntimeException) {
