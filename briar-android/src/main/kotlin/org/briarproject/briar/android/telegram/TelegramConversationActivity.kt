@@ -8,9 +8,11 @@ import org.briarproject.bramble.api.lifecycle.IoExecutor
 import org.briarproject.briar.R
 import org.briarproject.briar.android.activity.ActivityComponent
 import org.briarproject.briar.android.activity.BriarActivity
+import org.briarproject.briar.android.connector.ConnectorConversationAvailabilityState
 import org.briarproject.briar.android.connector.ConnectorConversationAdapter
 import org.briarproject.briar.android.connector.ConnectorConversationMessageItem
 import org.briarproject.briar.android.connector.ConnectorConversationMessageListState
+import org.briarproject.briar.android.connector.connectorConversationAvailabilityState
 import org.briarproject.briar.android.connector.getConversationMessageItems
 import org.briarproject.briar.android.view.BriarRecyclerView
 import org.briarproject.briar.api.telegram.TelegramConnector
@@ -53,14 +55,18 @@ class TelegramConversationActivity : BriarActivity() {
 			authorized: Boolean,
 			loadFailed: Boolean,
 			loadPending: Boolean,
-		): Int {
-			if (loadPending) return R.string.telegram_conversation_loading
-			if (!connectorEnabled) return R.string.telegram_conversation_disabled
-			if (!authorized) {
-				return R.string.telegram_conversation_account_unavailable
-			}
-			if (loadFailed) return R.string.telegram_conversation_load_failed
-			return R.string.telegram_conversation_empty
+		): Int = when (connectorConversationAvailabilityState(
+			connectorEnabled, authorized, loadFailed, loadPending)) {
+			ConnectorConversationAvailabilityState.LOADING ->
+				R.string.telegram_conversation_loading
+			ConnectorConversationAvailabilityState.DISABLED ->
+				R.string.telegram_conversation_disabled
+			ConnectorConversationAvailabilityState.ACCOUNT_UNAVAILABLE ->
+				R.string.telegram_conversation_account_unavailable
+			ConnectorConversationAvailabilityState.LOAD_FAILED ->
+				R.string.telegram_conversation_load_failed
+			ConnectorConversationAvailabilityState.EMPTY ->
+				R.string.telegram_conversation_empty
 		}
 
 		@JvmStatic
