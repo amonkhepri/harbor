@@ -140,9 +140,13 @@ class TelegramConversationActivity : BriarActivity() {
 			showMessages(ConnectorConversationMessageListState(), LOAD_FAILED)
 			return
 		}
-		messageLoadPending = true
-		invalidateOptionsMenu()
-		list.setEmptyText(emptyTextForState(LOADING))
+		submitMessageState(
+			ConnectorConversationMessageListState(
+				adapter.currentList,
+				getString(emptyTextForState(LOADING)),
+			),
+			pending = true,
+		)
 		ioExecutor.execute {
 			if (!readOnlyConnector.isEnabled()) {
 				showMessages(ConnectorConversationMessageListState(), DISABLED)
@@ -175,8 +179,11 @@ class TelegramConversationActivity : BriarActivity() {
 		}
 	}
 
-	private fun submitMessageState(state: ConnectorConversationMessageListState) {
-		messageLoadPending = false
+	private fun submitMessageState(
+		state: ConnectorConversationMessageListState,
+		pending: Boolean = false,
+	) {
+		messageLoadPending = pending
 		list.setEmptyText(state.emptyText)
 		adapter.submitState(state)
 		invalidateOptionsMenu()
