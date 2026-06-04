@@ -92,7 +92,7 @@ class TelegramConversationActivity : BriarActivity() {
 
 	override fun onCreate(state: Bundle?) {
 		super.onCreate(state)
-		setContentView(R.layout.activity_telegram_conversation)
+		setContentView(R.layout.activity_connector_conversation)
 
 		chatId = intent.getLongExtra(CHAT_ID, 0L)
 		val title = titleText(
