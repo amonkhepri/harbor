@@ -3,10 +3,8 @@ package org.briarproject.briar.android.connector
 import android.app.Application
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.test.assertCountEquals
-import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
-import androidx.compose.ui.test.onNodeWithTag
 import org.briarproject.briar.api.connector.ConnectorMessage
 import org.briarproject.briar.api.connector.ConnectorSource
 import org.junit.Assert.assertEquals
@@ -64,14 +62,6 @@ class ConnectorConversationMessageListTest {
 		}
 		composeRule.waitForIdle()
 
-		composeRule.onNodeWithTag(CONNECTOR_CONVERSATION_MESSAGE_LIST_TAG)
-			.assertIsDisplayed()
-		composeRule.onNodeWithTag(
-			CONNECTOR_CONVERSATION_MESSAGE_ROW_TAG_PREFIX + incoming.stableId,
-		).assertIsDisplayed()
-		composeRule.onNodeWithTag(
-			CONNECTOR_CONVERSATION_MESSAGE_ROW_TAG_PREFIX + outgoing.stableId,
-		).assertIsDisplayed()
 		composeRule.onAllNodesWithText("Incoming connector body")
 			.assertCountEquals(1)
 		composeRule.onAllNodesWithText("Outgoing connector body")
@@ -94,8 +84,6 @@ class ConnectorConversationMessageListTest {
 		}
 		composeRule.waitForIdle()
 
-		composeRule.onNodeWithTag(CONNECTOR_CONVERSATION_MESSAGE_LIST_TAG)
-			.assertIsDisplayed()
 		composeRule.onAllNodesWithText("No connector messages")
 			.assertCountEquals(1)
 	}

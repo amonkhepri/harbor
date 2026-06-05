@@ -11,15 +11,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.dimensionResource
 import androidx.compose.ui.res.stringResource
 import org.briarproject.briar.R
-
-internal const val CONNECTOR_CONVERSATION_MESSAGE_LIST_TAG =
-	"connector_conversation_message_list"
-internal const val CONNECTOR_CONVERSATION_MESSAGE_ROW_TAG_PREFIX =
-	"connector_conversation_message_row:"
 
 internal data class ConnectorConversationMessageListState(
 	val messages: List<ConnectorConversationMessageItem> = emptyList(),
@@ -36,9 +30,7 @@ internal fun ConnectorConversationMessageList(
 	state: ConnectorConversationMessageListState,
 	modifier: Modifier = Modifier,
 ) {
-	LazyColumn(
-		modifier = modifier.testTag(CONNECTOR_CONVERSATION_MESSAGE_LIST_TAG),
-	) {
+	LazyColumn(modifier = modifier) {
 		if (state.messages.isEmpty() && state.emptyText != null) {
 			item {
 				Text(
@@ -73,7 +65,6 @@ private fun ConnectorConversationMessageRow(
 				horizontal = dimensionResource(R.dimen.margin_activity_horizontal),
 				vertical = dimensionResource(R.dimen.margin_medium),
 			)
-			.testTag(CONNECTOR_CONVERSATION_MESSAGE_ROW_TAG_PREFIX + item.stableId),
 	) {
 		Text(
 			text = item.text,
