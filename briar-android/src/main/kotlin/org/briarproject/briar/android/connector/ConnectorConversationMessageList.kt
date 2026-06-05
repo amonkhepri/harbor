@@ -52,13 +52,12 @@ internal fun ConnectorConversationMessageList(
 					),
 				)
 			}
-		} else {
-			items(
-				items = state.messages,
-				key = { it.stableId },
-			) { item ->
-				ConnectorConversationMessageRow(item)
-			}
+		}
+		items(
+			items = state.messages,
+			key = { it.stableId },
+		) { item ->
+			ConnectorConversationMessageRow(item)
 		}
 	}
 }
