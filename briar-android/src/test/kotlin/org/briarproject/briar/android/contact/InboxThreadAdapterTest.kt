@@ -49,16 +49,6 @@ class InboxThreadAdapterTest {
 		)))
 	}
 
-	private data class FakeConnectorInboxThreadItem(
-		override val connectorSource: ConnectorSource,
-		override val connectorThreadId: String,
-		override val title: String,
-		override val latestActivityMillis: Long,
-		override val previewText: String = "",
-		override val isLastMessageOutgoing: Boolean = false,
-		override val isPreviewLoading: Boolean = false,
-	) : ConnectorInboxThreadItem
-
 	private companion object {
 		val MESSENGER = ConnectorSource("messenger", "Messenger")
 	}

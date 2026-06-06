@@ -109,16 +109,6 @@ class InboxThreadMergerTest {
 		override val connectorSource: ConnectorSource?,
 	) : InboxThreadItem
 
-	private data class FakeConnectorInboxThreadItem(
-		override val connectorSource: ConnectorSource,
-		override val connectorThreadId: String,
-		override val latestActivityMillis: Long,
-		override val title: String = "synthetic title",
-		override val previewText: String = "",
-		override val isLastMessageOutgoing: Boolean = false,
-		override val isPreviewLoading: Boolean = false,
-	) : ConnectorInboxThreadItem
-
 	private companion object {
 		val MESSENGER = ConnectorSource("messenger", "Messenger")
 	}

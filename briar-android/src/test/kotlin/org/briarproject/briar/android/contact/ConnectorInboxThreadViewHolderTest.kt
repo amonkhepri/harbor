@@ -62,13 +62,4 @@ class ConnectorInboxThreadViewHolderTest {
 			))
 	}
 
-	private data class FakeConnectorInboxThreadItem(
-		override val connectorSource: ConnectorSource,
-		override val connectorThreadId: String = "thread",
-		override val title: String = "title",
-		override val latestActivityMillis: Long = 1L,
-		override val previewText: String = "",
-		override val isLastMessageOutgoing: Boolean = false,
-		override val isPreviewLoading: Boolean = false,
-	) : ConnectorInboxThreadItem
 }
