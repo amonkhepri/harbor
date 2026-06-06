@@ -20,6 +20,10 @@ class TelegramConnectorMessageTest {
 	@get:Rule
 	val testFolder = TemporaryFolder()
 
+	private fun assertSentRequests(vararg requestNames: String) {
+		assertEquals(requestNames.toList(), Client.getSentRequestNames())
+	}
+
 	@Test
 	fun testNoOpConnectorReturnsDisabledEmptyMessageLists() {
 		val connector = NoOpTelegramConnector()
@@ -87,7 +91,7 @@ class TelegramConnectorMessageTest {
 		val client = readyReflectiveMessageClient()
 
 		assertTrue(client.isAuthorized())
-		assertEquals(listOf("Close"), Client.getSentRequestNames())
+		assertSentRequests("Close")
 	}
 
 	@Test
@@ -123,16 +127,13 @@ class TelegramConnectorMessageTest {
 				),
 				client.getRecentMessages(10L, 3),
 		)
-		assertEquals(
-				listOf(
-						"GetChats",
-						"GetChat",
-						"Close",
-						"GetChatHistory",
-						"GetChatHistory",
-						"Close",
-				),
-				Client.getSentRequestNames(),
+		assertSentRequests(
+				"GetChats",
+				"GetChat",
+				"Close",
+				"GetChatHistory",
+				"GetChatHistory",
+				"Close",
 		)
 	}
 
@@ -153,10 +154,7 @@ class TelegramConnectorMessageTest {
 
 		assertEquals(listOf(40L, 30L, 20L, 10L), messages.map { it.messageId })
 		assertEquals(listOf("latest", "middle", "older", "oldest"), messages.map { it.text })
-		assertEquals(
-				listOf("GetChatHistory", "GetChatHistory", "GetChatHistory", "Close"),
-				Client.getSentRequestNames(),
-		)
+		assertSentRequests("GetChatHistory", "GetChatHistory", "GetChatHistory", "Close")
 	}
 
 	@Test
@@ -175,10 +173,7 @@ class TelegramConnectorMessageTest {
 				listOf(TelegramChat(11L, "", 1_700_000_003)),
 				client.getRecentChats(1),
 		)
-		assertEquals(
-				listOf("SetTdlibParameters", "GetChats", "GetChat", "Close"),
-				Client.getSentRequestNames(),
-		)
+		assertSentRequests("SetTdlibParameters", "GetChats", "GetChat", "Close")
 	}
 
 	@Test
