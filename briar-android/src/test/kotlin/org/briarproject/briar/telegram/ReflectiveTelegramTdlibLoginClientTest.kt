@@ -42,6 +42,18 @@ class ReflectiveTelegramTdlibLoginClientTest {
 		)
 	}
 
+	private fun assertSentRequests(vararg requestNames: String) {
+		assertEquals(requestNames.toList(), Client.getSentRequestNames())
+	}
+
+	private companion object {
+		private const val SET_PARAMETERS = "SetTdlibParameters"
+		private const val SET_PHONE = "SetAuthenticationPhoneNumber"
+		private const val CHECK_CODE = "CheckAuthenticationCode"
+		private const val CHECK_PASSWORD = "CheckAuthenticationPassword"
+		private const val CLOSE = "Close"
+	}
+
 	@Test
 	fun testStartThenSubmitIdentifierTransitionsToCodeEntry() {
 		val client = createClient()
@@ -54,10 +66,7 @@ class ReflectiveTelegramTdlibLoginClientTest {
 			client.submitIdentifier("test-login-identifier"),
 		)
 		assertEquals(RecoverableErrorDetail.NONE, client.getRecoverableErrorDetail())
-		assertEquals(
-			listOf("SetTdlibParameters", "SetAuthenticationPhoneNumber"),
-			Client.getSentRequestNames(),
-		)
+		assertSentRequests(SET_PARAMETERS, SET_PHONE)
 		assertEquals("test-login-identifier", Client.getLastPhoneNumber())
 
 		client.close()
@@ -116,7 +125,7 @@ class ReflectiveTelegramTdlibLoginClientTest {
 			RecoverableErrorDetail.MISSING_API_CREDENTIALS,
 			client.getRecoverableErrorDetail(),
 		)
-		assertEquals(emptyList<String>(), Client.getSentRequestNames())
+		assertSentRequests()
 
 		client.close()
 	}
@@ -137,7 +146,7 @@ class ReflectiveTelegramTdlibLoginClientTest {
 			RecoverableErrorDetail.MISSING_API_CREDENTIALS,
 			client.getRecoverableErrorDetail(),
 		)
-		assertEquals(emptyList<String>(), Client.getSentRequestNames())
+		assertSentRequests()
 
 		client.close()
 	}
@@ -159,7 +168,7 @@ class ReflectiveTelegramTdlibLoginClientTest {
 			RecoverableErrorDetail.MISSING_API_CREDENTIALS,
 			client.getRecoverableErrorDetail(),
 		)
-		assertEquals(listOf("SetTdlibParameters"), Client.getSentRequestNames())
+		assertSentRequests(SET_PARAMETERS)
 
 		client.close()
 	}
@@ -190,7 +199,7 @@ class ReflectiveTelegramTdlibLoginClientTest {
 			"Expected start wait timeout around 1s, got ${elapsed}ms",
 			elapsed >= 900L,
 		)
-		assertEquals(listOf("Close"), Client.getSentRequestNames())
+		assertSentRequests(CLOSE)
 		assertEquals("", Client.getLastPhoneNumber())
 
 		client.close()
@@ -210,10 +219,7 @@ class ReflectiveTelegramTdlibLoginClientTest {
 		val elapsed = System.currentTimeMillis() - startTime
 		assertTrue("Expected delayed phone result, got ${elapsed}ms", elapsed >= 1_100L)
 		assertEquals(RecoverableErrorDetail.NONE, client.getRecoverableErrorDetail())
-		assertEquals(
-			listOf("SetTdlibParameters", "SetAuthenticationPhoneNumber"),
-			Client.getSentRequestNames(),
-		)
+		assertSentRequests(SET_PARAMETERS, SET_PHONE)
 		assertEquals("test-login-identifier", Client.getLastPhoneNumber())
 
 		client.close()
@@ -238,10 +244,7 @@ class ReflectiveTelegramTdlibLoginClientTest {
 			"Expected identifier wait timeout around 1s, got ${elapsed}ms",
 			elapsed >= 900L,
 		)
-		assertEquals(
-			listOf("SetTdlibParameters", "SetAuthenticationPhoneNumber", "Close"),
-			Client.getSentRequestNames(),
-		)
+		assertSentRequests(SET_PARAMETERS, SET_PHONE, CLOSE)
 		assertEquals("test-login-identifier", Client.getLastPhoneNumber())
 
 		client.close()
@@ -260,10 +263,7 @@ class ReflectiveTelegramTdlibLoginClientTest {
 			RecoverableErrorDetail.INVALID_IDENTIFIER,
 			client.getRecoverableErrorDetail(),
 		)
-		assertEquals(
-			listOf("SetTdlibParameters", "SetAuthenticationPhoneNumber"),
-			Client.getSentRequestNames(),
-		)
+		assertSentRequests(SET_PARAMETERS, SET_PHONE)
 		assertEquals("invalid-phone", Client.getLastPhoneNumber())
 
 		client.close()
@@ -282,14 +282,7 @@ class ReflectiveTelegramTdlibLoginClientTest {
 			RecoverableErrorDetail.INVALID_CODE,
 			client.getRecoverableErrorDetail(),
 		)
-		assertEquals(
-			listOf(
-				"SetTdlibParameters",
-				"SetAuthenticationPhoneNumber",
-				"CheckAuthenticationCode",
-			),
-			Client.getSentRequestNames(),
-		)
+		assertSentRequests(SET_PARAMETERS, SET_PHONE, CHECK_CODE)
 
 		client.close()
 	}
@@ -301,14 +294,7 @@ class ReflectiveTelegramTdlibLoginClientTest {
 		startToCodeEntry(client)
 		assertEquals(TelegramAuthState.READY, client.submitCode("12345"))
 		assertEquals(RecoverableErrorDetail.NONE, client.getRecoverableErrorDetail())
-		assertEquals(
-			listOf(
-				"SetTdlibParameters",
-				"SetAuthenticationPhoneNumber",
-				"CheckAuthenticationCode",
-			),
-			Client.getSentRequestNames(),
-		)
+		assertSentRequests(SET_PARAMETERS, SET_PHONE, CHECK_CODE)
 
 		client.close()
 	}
@@ -332,15 +318,7 @@ class ReflectiveTelegramTdlibLoginClientTest {
 			"Expected code wait timeout around 1s, got ${elapsed}ms",
 			elapsed >= 900L,
 		)
-		assertEquals(
-			listOf(
-				"SetTdlibParameters",
-				"SetAuthenticationPhoneNumber",
-				"CheckAuthenticationCode",
-				"Close",
-			),
-			Client.getSentRequestNames(),
-		)
+		assertSentRequests(SET_PARAMETERS, SET_PHONE, CHECK_CODE, CLOSE)
 
 		client.close()
 	}
@@ -364,15 +342,7 @@ class ReflectiveTelegramTdlibLoginClientTest {
 			"Expected password-entry wait timeout around 1s, got ${elapsed}ms",
 			elapsed >= 900L,
 		)
-		assertEquals(
-			listOf(
-				"SetTdlibParameters",
-				"SetAuthenticationPhoneNumber",
-				"CheckAuthenticationCode",
-				"Close",
-			),
-			Client.getSentRequestNames(),
-		)
+		assertSentRequests(SET_PARAMETERS, SET_PHONE, CHECK_CODE, CLOSE)
 
 		client.close()
 	}
@@ -387,14 +357,7 @@ class ReflectiveTelegramTdlibLoginClientTest {
 			client.submitCode("password-required"),
 		)
 		assertEquals(RecoverableErrorDetail.NONE, client.getRecoverableErrorDetail())
-		assertEquals(
-			listOf(
-				"SetTdlibParameters",
-				"SetAuthenticationPhoneNumber",
-				"CheckAuthenticationCode",
-			),
-			Client.getSentRequestNames(),
-		)
+		assertSentRequests(SET_PARAMETERS, SET_PHONE, CHECK_CODE)
 
 		client.close()
 	}
@@ -406,15 +369,7 @@ class ReflectiveTelegramTdlibLoginClientTest {
 		startToPasswordEntry(client)
 		assertEquals(TelegramAuthState.READY, client.submitPassword("hunter2"))
 		assertEquals(RecoverableErrorDetail.NONE, client.getRecoverableErrorDetail())
-		assertEquals(
-			listOf(
-				"SetTdlibParameters",
-				"SetAuthenticationPhoneNumber",
-				"CheckAuthenticationCode",
-				"CheckAuthenticationPassword",
-			),
-			Client.getSentRequestNames(),
-		)
+		assertSentRequests(SET_PARAMETERS, SET_PHONE, CHECK_CODE, CHECK_PASSWORD)
 
 		client.close()
 	}
@@ -440,16 +395,7 @@ class ReflectiveTelegramTdlibLoginClientTest {
 
 		submitPasswordThread.join()
 		assertEquals(TelegramAuthState.CLOSED, delayedPasswordResult[0])
-		assertEquals(
-			listOf(
-				"SetTdlibParameters",
-				"SetAuthenticationPhoneNumber",
-				"CheckAuthenticationCode",
-				"CheckAuthenticationPassword",
-				"Close",
-			),
-			Client.getSentRequestNames(),
-		)
+		assertSentRequests(SET_PARAMETERS, SET_PHONE, CHECK_CODE, CHECK_PASSWORD, CLOSE)
 
 		client.close()
 	}
@@ -467,28 +413,11 @@ class ReflectiveTelegramTdlibLoginClientTest {
 			RecoverableErrorDetail.INVALID_PASSWORD,
 			client.getRecoverableErrorDetail(),
 		)
-		assertEquals(
-			listOf(
-				"SetTdlibParameters",
-				"SetAuthenticationPhoneNumber",
-				"CheckAuthenticationCode",
-				"CheckAuthenticationPassword",
-			),
-			Client.getSentRequestNames(),
-		)
+		assertSentRequests(SET_PARAMETERS, SET_PHONE, CHECK_CODE, CHECK_PASSWORD)
 
 		assertEquals(TelegramAuthState.READY, client.submitPassword("hunter2"))
 		assertEquals(RecoverableErrorDetail.NONE, client.getRecoverableErrorDetail())
-		assertEquals(
-			listOf(
-				"SetTdlibParameters",
-				"SetAuthenticationPhoneNumber",
-				"CheckAuthenticationCode",
-				"CheckAuthenticationPassword",
-				"CheckAuthenticationPassword",
-			),
-			Client.getSentRequestNames(),
-		)
+		assertSentRequests(SET_PARAMETERS, SET_PHONE, CHECK_CODE, CHECK_PASSWORD, CHECK_PASSWORD)
 
 		client.close()
 	}
@@ -512,16 +441,7 @@ class ReflectiveTelegramTdlibLoginClientTest {
 			"Expected password wait timeout around 1s, got ${elapsed}ms",
 			elapsed >= 900L,
 		)
-		assertEquals(
-			listOf(
-				"SetTdlibParameters",
-				"SetAuthenticationPhoneNumber",
-				"CheckAuthenticationCode",
-				"CheckAuthenticationPassword",
-				"Close",
-			),
-			Client.getSentRequestNames(),
-		)
+		assertSentRequests(SET_PARAMETERS, SET_PHONE, CHECK_CODE, CHECK_PASSWORD, CLOSE)
 
 		client.close()
 	}
@@ -542,16 +462,7 @@ class ReflectiveTelegramTdlibLoginClientTest {
 
 		assertEquals(TelegramAuthState.CLOSED, client.close())
 		assertEquals(RecoverableErrorDetail.NONE, client.getRecoverableErrorDetail())
-		assertEquals(
-			listOf(
-				"SetTdlibParameters",
-				"SetAuthenticationPhoneNumber",
-				"CheckAuthenticationCode",
-				"CheckAuthenticationPassword",
-				"Close",
-			),
-			Client.getSentRequestNames(),
-		)
+		assertSentRequests(SET_PARAMETERS, SET_PHONE, CHECK_CODE, CHECK_PASSWORD, CLOSE)
 
 		assertEquals(TelegramAuthState.IDENTIFIER_ENTRY, client.start())
 		assertEquals(RecoverableErrorDetail.NONE, client.getRecoverableErrorDetail())
@@ -560,17 +471,14 @@ class ReflectiveTelegramTdlibLoginClientTest {
 			client.submitIdentifier("test-login-identifier"),
 		)
 		assertEquals(RecoverableErrorDetail.NONE, client.getRecoverableErrorDetail())
-		assertEquals(
-			listOf(
-				"SetTdlibParameters",
-				"SetAuthenticationPhoneNumber",
-				"CheckAuthenticationCode",
-				"CheckAuthenticationPassword",
-				"Close",
-				"SetTdlibParameters",
-				"SetAuthenticationPhoneNumber",
-			),
-			Client.getSentRequestNames(),
+		assertSentRequests(
+			SET_PARAMETERS,
+			SET_PHONE,
+			CHECK_CODE,
+			CHECK_PASSWORD,
+			CLOSE,
+			SET_PARAMETERS,
+			SET_PHONE,
 		)
 
 		client.close()
