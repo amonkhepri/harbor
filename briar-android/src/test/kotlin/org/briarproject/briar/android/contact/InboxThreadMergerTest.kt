@@ -4,8 +4,6 @@ import org.briarproject.briar.api.connector.ConnectorSource
 import org.briarproject.briar.api.connector.ConnectorSources
 import org.briarproject.briar.api.telegram.TelegramChat
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class InboxThreadMergerTest {
@@ -21,9 +19,7 @@ class InboxThreadMergerTest {
 		assertEquals(7L, item.chatId)
 		assertEquals("chat", item.title)
 		assertEquals(42000L, item.latestActivityMillis)
-		assertFalse(item.isPreviewLoading)
-		assertFalse(item.isLastMessageOutgoing)
-		assertEquals("", item.previewText)
+		assertPreviewState(item)
 		assertEquals(ConnectorSources.TELEGRAM, item.connectorSource)
 		assertEquals("telegram:7", item.stableId)
 	}
@@ -50,10 +46,7 @@ class InboxThreadMergerTest {
 			TelegramChat(7L, "chat", 42, "synthetic\npreview\ttext")
 		)
 
-		assertFalse(item.isPreviewLoading)
-		assertFalse(item.isLastMessageOutgoing)
-		assertTrue(item.hasPreviewText())
-		assertEquals("synthetic preview text", item.previewText)
+		assertPreviewState(item, previewText = "synthetic preview text")
 	}
 
 	@Test
@@ -62,30 +55,25 @@ class InboxThreadMergerTest {
 			TelegramChat(7L, "chat", 42, "synthetic\npreview\ttext", true)
 		)
 
-		assertFalse(item.isPreviewLoading)
-		assertTrue(item.isLastMessageOutgoing)
-		assertTrue(item.hasPreviewText())
-		assertEquals("synthetic preview text", item.previewText)
+		assertPreviewState(
+			item,
+			previewText = "synthetic preview text",
+			isLastMessageOutgoing = true,
+		)
 	}
 
 	@Test
 	fun testTelegramRowsExposeEmptyPreviewState() {
 		val item = TelegramInboxThreadItem(TelegramChat(7L, "chat", 42))
 
-		assertFalse(item.isPreviewLoading)
-		assertFalse(item.isLastMessageOutgoing)
-		assertFalse(item.hasPreviewText())
-		assertEquals("", item.previewText)
+		assertPreviewState(item)
 	}
 
 	@Test
 	fun testTelegramRowsExposeLoadingState() {
 		val item = TelegramInboxThreadItem(7L, "chat", 42000L)
 
-		assertTrue(item.isPreviewLoading)
-		assertFalse(item.isLastMessageOutgoing)
-		assertFalse(item.hasPreviewText())
-		assertEquals("", item.previewText)
+		assertPreviewState(item, isPreviewLoading = true)
 	}
 
 	@Test
@@ -108,6 +96,18 @@ class InboxThreadMergerTest {
 		override val latestActivityMillis: Long,
 		override val connectorSource: ConnectorSource?,
 	) : InboxThreadItem
+
+	private fun assertPreviewState(
+		item: TelegramInboxThreadItem,
+		previewText: String = "",
+		isPreviewLoading: Boolean = false,
+		isLastMessageOutgoing: Boolean = false,
+	) {
+		assertEquals(isPreviewLoading, item.isPreviewLoading)
+		assertEquals(isLastMessageOutgoing, item.isLastMessageOutgoing)
+		assertEquals(previewText.isNotEmpty(), item.hasPreviewText())
+		assertEquals(previewText, item.previewText)
+	}
 
 	private companion object {
 		val MESSENGER = ConnectorSource("messenger", "Messenger")
