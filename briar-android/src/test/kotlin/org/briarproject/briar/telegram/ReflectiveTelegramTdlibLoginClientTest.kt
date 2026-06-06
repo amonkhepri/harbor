@@ -46,6 +46,15 @@ class ReflectiveTelegramTdlibLoginClientTest {
 		assertEquals(requestNames.toList(), Client.getSentRequestNames())
 	}
 
+	private fun assertRecoverableError(
+		client: ReflectiveTelegramTdlibLoginClient,
+		expectedDetail: RecoverableErrorDetail,
+		action: () -> TelegramAuthState,
+	) {
+		assertEquals(TelegramAuthState.RECOVERABLE_ERROR, action())
+		assertEquals(expectedDetail, client.getRecoverableErrorDetail())
+	}
+
 	private companion object {
 		private const val SET_PARAMETERS = "SetTdlibParameters"
 		private const val SET_PHONE = "SetAuthenticationPhoneNumber"
@@ -117,14 +126,10 @@ class ReflectiveTelegramTdlibLoginClientTest {
 		)
 
 		assertEquals(TelegramAuthState.IDENTIFIER_ENTRY, client.start())
-		assertEquals(
-			TelegramAuthState.RECOVERABLE_ERROR,
-			client.submitIdentifier("test-login-identifier"),
-		)
-		assertEquals(
+		assertRecoverableError(
+			client,
 			RecoverableErrorDetail.MISSING_API_CREDENTIALS,
-			client.getRecoverableErrorDetail(),
-		)
+		) { client.submitIdentifier("test-login-identifier") }
 		assertSentRequests()
 
 		client.close()
@@ -138,14 +143,10 @@ class ReflectiveTelegramTdlibLoginClientTest {
 		)
 
 		assertEquals(TelegramAuthState.IDENTIFIER_ENTRY, client.start())
-		assertEquals(
-			TelegramAuthState.RECOVERABLE_ERROR,
-			client.submitIdentifier("test-login-identifier"),
-		)
-		assertEquals(
+		assertRecoverableError(
+			client,
 			RecoverableErrorDetail.MISSING_API_CREDENTIALS,
-			client.getRecoverableErrorDetail(),
-		)
+		) { client.submitIdentifier("test-login-identifier") }
 		assertSentRequests()
 
 		client.close()
@@ -160,14 +161,10 @@ class ReflectiveTelegramTdlibLoginClientTest {
 		)
 
 		assertEquals(TelegramAuthState.IDENTIFIER_ENTRY, client.start())
-		assertEquals(
-			TelegramAuthState.RECOVERABLE_ERROR,
-			client.submitIdentifier("test-login-identifier"),
-		)
-		assertEquals(
+		assertRecoverableError(
+			client,
 			RecoverableErrorDetail.MISSING_API_CREDENTIALS,
-			client.getRecoverableErrorDetail(),
-		)
+		) { client.submitIdentifier("test-login-identifier") }
 		assertSentRequests(SET_PARAMETERS)
 
 		client.close()
@@ -192,9 +189,8 @@ class ReflectiveTelegramTdlibLoginClientTest {
 		)
 
 		val startTime = System.currentTimeMillis()
-		assertEquals(TelegramAuthState.RECOVERABLE_ERROR, client.start())
+		assertRecoverableError(client, RecoverableErrorDetail.NONE) { client.start() }
 		val elapsed = System.currentTimeMillis() - startTime
-		assertEquals(RecoverableErrorDetail.NONE, client.getRecoverableErrorDetail())
 		assertTrue(
 			"Expected start wait timeout around 1s, got ${elapsed}ms",
 			elapsed >= 900L,
@@ -234,12 +230,11 @@ class ReflectiveTelegramTdlibLoginClientTest {
 
 		assertEquals(TelegramAuthState.IDENTIFIER_ENTRY, client.start())
 		val startTime = System.currentTimeMillis()
-		assertEquals(
-			TelegramAuthState.RECOVERABLE_ERROR,
-			client.submitIdentifier("test-login-identifier"),
-		)
+		assertRecoverableError(
+			client,
+			RecoverableErrorDetail.NONE,
+		) { client.submitIdentifier("test-login-identifier") }
 		val elapsed = System.currentTimeMillis() - startTime
-		assertEquals(RecoverableErrorDetail.NONE, client.getRecoverableErrorDetail())
 		assertTrue(
 			"Expected identifier wait timeout around 1s, got ${elapsed}ms",
 			elapsed >= 900L,
@@ -255,14 +250,10 @@ class ReflectiveTelegramTdlibLoginClientTest {
 		val client = createClient()
 
 		assertEquals(TelegramAuthState.IDENTIFIER_ENTRY, client.start())
-		assertEquals(
-			TelegramAuthState.RECOVERABLE_ERROR,
-			client.submitIdentifier("invalid-phone"),
-		)
-		assertEquals(
+		assertRecoverableError(
+			client,
 			RecoverableErrorDetail.INVALID_IDENTIFIER,
-			client.getRecoverableErrorDetail(),
-		)
+		) { client.submitIdentifier("invalid-phone") }
 		assertSentRequests(SET_PARAMETERS, SET_PHONE)
 		assertEquals("invalid-phone", Client.getLastPhoneNumber())
 
@@ -274,14 +265,10 @@ class ReflectiveTelegramTdlibLoginClientTest {
 		val client = createClient()
 
 		startToCodeEntry(client)
-		assertEquals(
-			TelegramAuthState.RECOVERABLE_ERROR,
-			client.submitCode("invalid-code"),
-		)
-		assertEquals(
+		assertRecoverableError(
+			client,
 			RecoverableErrorDetail.INVALID_CODE,
-			client.getRecoverableErrorDetail(),
-		)
+		) { client.submitCode("invalid-code") }
 		assertSentRequests(SET_PARAMETERS, SET_PHONE, CHECK_CODE)
 
 		client.close()
@@ -308,12 +295,11 @@ class ReflectiveTelegramTdlibLoginClientTest {
 
 		startToCodeEntry(client)
 		val startTime = System.currentTimeMillis()
-		assertEquals(
-			TelegramAuthState.RECOVERABLE_ERROR,
-			client.submitCode("12345"),
-		)
+		assertRecoverableError(
+			client,
+			RecoverableErrorDetail.NONE,
+		) { client.submitCode("12345") }
 		val elapsed = System.currentTimeMillis() - startTime
-		assertEquals(RecoverableErrorDetail.NONE, client.getRecoverableErrorDetail())
 		assertTrue(
 			"Expected code wait timeout around 1s, got ${elapsed}ms",
 			elapsed >= 900L,
@@ -332,12 +318,11 @@ class ReflectiveTelegramTdlibLoginClientTest {
 
 		startToCodeEntry(client)
 		val startTime = System.currentTimeMillis()
-		assertEquals(
-			TelegramAuthState.RECOVERABLE_ERROR,
-			client.submitCode("password-required"),
-		)
+		assertRecoverableError(
+			client,
+			RecoverableErrorDetail.NONE,
+		) { client.submitCode("password-required") }
 		val elapsed = System.currentTimeMillis() - startTime
-		assertEquals(RecoverableErrorDetail.NONE, client.getRecoverableErrorDetail())
 		assertTrue(
 			"Expected password-entry wait timeout around 1s, got ${elapsed}ms",
 			elapsed >= 900L,
@@ -405,14 +390,10 @@ class ReflectiveTelegramTdlibLoginClientTest {
 		val client = createClient()
 
 		startToPasswordEntry(client)
-		assertEquals(
-			TelegramAuthState.RECOVERABLE_ERROR,
-			client.submitPassword("invalid-password"),
-		)
-		assertEquals(
+		assertRecoverableError(
+			client,
 			RecoverableErrorDetail.INVALID_PASSWORD,
-			client.getRecoverableErrorDetail(),
-		)
+		) { client.submitPassword("invalid-password") }
 		assertSentRequests(SET_PARAMETERS, SET_PHONE, CHECK_CODE, CHECK_PASSWORD)
 
 		assertEquals(TelegramAuthState.READY, client.submitPassword("hunter2"))
@@ -431,12 +412,11 @@ class ReflectiveTelegramTdlibLoginClientTest {
 
 		startToPasswordEntry(client)
 		val startTime = System.currentTimeMillis()
-		assertEquals(
-			TelegramAuthState.RECOVERABLE_ERROR,
-			client.submitPassword("hunter2"),
-		)
+		assertRecoverableError(
+			client,
+			RecoverableErrorDetail.NONE,
+		) { client.submitPassword("hunter2") }
 		val elapsed = System.currentTimeMillis() - startTime
-		assertEquals(RecoverableErrorDetail.NONE, client.getRecoverableErrorDetail())
 		assertTrue(
 			"Expected password wait timeout around 1s, got ${elapsed}ms",
 			elapsed >= 900L,
@@ -451,14 +431,10 @@ class ReflectiveTelegramTdlibLoginClientTest {
 		val client = createClient()
 
 		startToPasswordEntry(client)
-		assertEquals(
-			TelegramAuthState.RECOVERABLE_ERROR,
-			client.submitPassword("invalid-password"),
-		)
-		assertEquals(
+		assertRecoverableError(
+			client,
 			RecoverableErrorDetail.INVALID_PASSWORD,
-			client.getRecoverableErrorDetail(),
-		)
+		) { client.submitPassword("invalid-password") }
 
 		assertEquals(TelegramAuthState.CLOSED, client.close())
 		assertEquals(RecoverableErrorDetail.NONE, client.getRecoverableErrorDetail())
