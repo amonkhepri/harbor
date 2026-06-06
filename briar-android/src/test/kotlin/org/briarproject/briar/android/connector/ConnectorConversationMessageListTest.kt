@@ -53,40 +53,37 @@ class ConnectorConversationMessageListTest {
 			text = "Outgoing connector body",
 		)
 
-		composeRule.setContent {
-			MaterialTheme {
-				ConnectorConversationMessageList(
-					ConnectorConversationMessageListState(listOf(incoming, outgoing))
-				)
-			}
-		}
-		composeRule.waitForIdle()
+		renderMessageList(listOf(incoming, outgoing))
 
-		composeRule.onAllNodesWithText("Incoming connector body")
-			.assertCountEquals(1)
-		composeRule.onAllNodesWithText("Outgoing connector body")
-			.assertCountEquals(1)
-		composeRule.onAllNodesWithText("Incoming").assertCountEquals(1)
-		composeRule.onAllNodesWithText("Outgoing").assertCountEquals(1)
+		assertTextCount("Incoming connector body")
+		assertTextCount("Outgoing connector body")
+		assertTextCount("Incoming")
+		assertTextCount("Outgoing")
 	}
 
 	@Test
 	fun testMessageListRendersEmptyState() {
+		renderMessageList(emptyText = "No connector messages")
+
+		assertTextCount("No connector messages")
+	}
+
+	private fun renderMessageList(
+		messages: List<ConnectorConversationMessageItem> = emptyList(),
+		emptyText: String? = null,
+	) {
+		val state = ConnectorConversationMessageListState(
+			messages = messages,
+			emptyText = emptyText,
+		)
 		composeRule.setContent {
-			MaterialTheme {
-				ConnectorConversationMessageList(
-					ConnectorConversationMessageListState(
-						messages = emptyList(),
-						emptyText = "No connector messages",
-					)
-				)
-			}
+			MaterialTheme { ConnectorConversationMessageList(state) }
 		}
 		composeRule.waitForIdle()
-
-		composeRule.onAllNodesWithText("No connector messages")
-			.assertCountEquals(1)
 	}
+
+	private fun assertTextCount(text: String, count: Int = 1) =
+		composeRule.onAllNodesWithText(text).assertCountEquals(count)
 
 	private fun connectorMessageItem(
 		messageId: String,
