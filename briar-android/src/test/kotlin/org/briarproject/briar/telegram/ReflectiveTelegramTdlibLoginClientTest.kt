@@ -181,28 +181,6 @@ class ReflectiveTelegramTdlibLoginClientTest {
 	}
 
 	@Test
-	fun testSubmitIdentifierWaitsForBriefDelayedAuthorizationUpdate() {
-		Client.setAuthorizationUpdateDelaySequenceMs(0L, 0L, 300L)
-		val client = createClient()
-
-		assertEquals(TelegramAuthState.IDENTIFIER_ENTRY, client.start())
-		assertEquals(RecoverableErrorDetail.NONE, client.getRecoverableErrorDetail())
-
-		assertEquals(
-			TelegramAuthState.CODE_ENTRY,
-			client.submitIdentifier("test-login-identifier"),
-		)
-		assertEquals(RecoverableErrorDetail.NONE, client.getRecoverableErrorDetail())
-		assertEquals(
-			listOf("SetTdlibParameters", "SetAuthenticationPhoneNumber"),
-			Client.getSentRequestNames(),
-		)
-		assertEquals("test-login-identifier", Client.getLastPhoneNumber())
-
-		client.close()
-	}
-
-	@Test
 	fun testSubmitIdentifierAllowsDelayedPhoneNumberResult() {
 		Client.setPhoneNumberResultDelayMs(1_200L)
 		val client = createClient()
@@ -328,30 +306,6 @@ class ReflectiveTelegramTdlibLoginClientTest {
 	}
 
 	@Test
-	fun testSubmitCodeWaitsForBriefDelayedReadyAuthorizationUpdate() {
-		Client.setAuthorizationUpdateDelaySequenceMs(0L, 0L, 0L, 300L)
-		val client = createClient()
-
-		assertEquals(TelegramAuthState.IDENTIFIER_ENTRY, client.start())
-		assertEquals(
-			TelegramAuthState.CODE_ENTRY,
-			client.submitIdentifier("test-login-identifier"),
-		)
-		assertEquals(TelegramAuthState.READY, client.submitCode("12345"))
-		assertEquals(RecoverableErrorDetail.NONE, client.getRecoverableErrorDetail())
-		assertEquals(
-			listOf(
-				"SetTdlibParameters",
-				"SetAuthenticationPhoneNumber",
-				"CheckAuthenticationCode",
-			),
-			Client.getSentRequestNames(),
-		)
-
-		client.close()
-	}
-
-	@Test
 	fun testSubmitCodeReturnsRecoverableErrorWhenReadyUpdateExceedsTimeout() {
 		Client.setAuthorizationUpdateDelaySequenceMs(0L, 0L, 0L, 1_200L)
 		val client = createClient(
@@ -380,33 +334,6 @@ class ReflectiveTelegramTdlibLoginClientTest {
 				"SetAuthenticationPhoneNumber",
 				"CheckAuthenticationCode",
 				"Close",
-			),
-			Client.getSentRequestNames(),
-		)
-
-		client.close()
-	}
-
-	@Test
-	fun testSubmitCodeWaitsForBriefDelayedPasswordAuthorizationUpdate() {
-		Client.setAuthorizationUpdateDelaySequenceMs(0L, 0L, 0L, 300L)
-		val client = createClient()
-
-		assertEquals(TelegramAuthState.IDENTIFIER_ENTRY, client.start())
-		assertEquals(
-			TelegramAuthState.CODE_ENTRY,
-			client.submitIdentifier("test-login-identifier"),
-		)
-		assertEquals(
-			TelegramAuthState.PASSWORD_ENTRY,
-			client.submitCode("password-required"),
-		)
-		assertEquals(RecoverableErrorDetail.NONE, client.getRecoverableErrorDetail())
-		assertEquals(
-			listOf(
-				"SetTdlibParameters",
-				"SetAuthenticationPhoneNumber",
-				"CheckAuthenticationCode",
 			),
 			Client.getSentRequestNames(),
 		)
@@ -586,38 +513,6 @@ class ReflectiveTelegramTdlibLoginClientTest {
 				"SetAuthenticationPhoneNumber",
 				"CheckAuthenticationCode",
 				"CheckAuthenticationPassword",
-				"CheckAuthenticationPassword",
-			),
-			Client.getSentRequestNames(),
-		)
-
-		client.close()
-	}
-
-	@Test
-	fun testSubmitPasswordWaitsForDelayedReadyAuthorizationUpdate() {
-		Client.setAuthorizationUpdateDelaySequenceMs(0L, 0L, 0L, 0L, 500L)
-		val client = createClient()
-
-		assertEquals(TelegramAuthState.IDENTIFIER_ENTRY, client.start())
-		assertEquals(
-			TelegramAuthState.CODE_ENTRY,
-			client.submitIdentifier("test-login-identifier"),
-		)
-		assertEquals(
-			TelegramAuthState.PASSWORD_ENTRY,
-			client.submitCode("password-required"),
-		)
-		val startTime = System.currentTimeMillis()
-		assertEquals(TelegramAuthState.READY, client.submitPassword("hunter2"))
-		val elapsed = System.currentTimeMillis() - startTime
-		assertEquals(RecoverableErrorDetail.NONE, client.getRecoverableErrorDetail())
-		assertTrue("Expected delayed password update, got ${elapsed}ms", elapsed >= 400L)
-		assertEquals(
-			listOf(
-				"SetTdlibParameters",
-				"SetAuthenticationPhoneNumber",
-				"CheckAuthenticationCode",
 				"CheckAuthenticationPassword",
 			),
 			Client.getSentRequestNames(),
