@@ -54,6 +54,16 @@ class ReflectiveTelegramTdlibLoginClientTest {
 		client.close()
 	}
 
+	private fun assertPhoneRequestsAndClose(
+		client: ReflectiveTelegramTdlibLoginClient,
+		vararg requestNames: String,
+		expectedPhone: String = "test-login-identifier",
+	) {
+		assertSentRequests(*requestNames)
+		assertEquals(expectedPhone, Client.getLastPhoneNumber())
+		client.close()
+	}
+
 	private fun ReflectiveTelegramTdlibLoginClient.assertSuccessfulState(
 		expectedState: TelegramAuthState,
 		actualState: TelegramAuthState,
@@ -102,10 +112,7 @@ class ReflectiveTelegramTdlibLoginClientTest {
 			TelegramAuthState.CODE_ENTRY,
 			client.submitIdentifier("test-login-identifier"),
 		)
-		assertSentRequests(SET_PARAMETERS, SET_PHONE)
-		assertEquals("test-login-identifier", Client.getLastPhoneNumber())
-
-		client.close()
+		assertPhoneRequestsAndClose(client, SET_PARAMETERS, SET_PHONE)
 	}
 
 	@Test
@@ -209,10 +216,7 @@ class ReflectiveTelegramTdlibLoginClientTest {
 		)
 
 		assertRecoverableTimeout(client, "start wait timeout") { client.start() }
-		assertSentRequests(CLOSE)
-		assertEquals("", Client.getLastPhoneNumber())
-
-		client.close()
+		assertPhoneRequestsAndClose(client, CLOSE, expectedPhone = "")
 	}
 
 	@Test
@@ -228,10 +232,7 @@ class ReflectiveTelegramTdlibLoginClientTest {
 		)
 		val elapsed = System.currentTimeMillis() - startTime
 		assertTrue("Expected delayed phone result, got ${elapsed}ms", elapsed >= 1_100L)
-		assertSentRequests(SET_PARAMETERS, SET_PHONE)
-		assertEquals("test-login-identifier", Client.getLastPhoneNumber())
-
-		client.close()
+		assertPhoneRequestsAndClose(client, SET_PARAMETERS, SET_PHONE)
 	}
 
 	@Test
@@ -245,10 +246,7 @@ class ReflectiveTelegramTdlibLoginClientTest {
 		assertRecoverableTimeout(client, "identifier wait timeout") {
 			client.submitIdentifier("test-login-identifier")
 		}
-		assertSentRequests(SET_PARAMETERS, SET_PHONE, CLOSE)
-		assertEquals("test-login-identifier", Client.getLastPhoneNumber())
-
-		client.close()
+		assertPhoneRequestsAndClose(client, SET_PARAMETERS, SET_PHONE, CLOSE)
 	}
 
 	@Test
@@ -260,10 +258,7 @@ class ReflectiveTelegramTdlibLoginClientTest {
 			client,
 			RecoverableErrorDetail.INVALID_IDENTIFIER,
 		) { client.submitIdentifier("invalid-phone") }
-		assertSentRequests(SET_PARAMETERS, SET_PHONE)
-		assertEquals("invalid-phone", Client.getLastPhoneNumber())
-
-		client.close()
+		assertPhoneRequestsAndClose(client, SET_PARAMETERS, SET_PHONE, expectedPhone = "invalid-phone")
 	}
 
 	@Test
