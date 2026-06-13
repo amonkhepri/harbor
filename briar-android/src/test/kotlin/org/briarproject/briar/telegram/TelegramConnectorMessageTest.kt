@@ -222,27 +222,12 @@ class TelegramConnectorMessageTest {
 
 	@Test
 	fun testMessageIngestDiagnosticsSamplesMessagesAcrossChats() {
-		class MultiChatClient(
-			val chatList: List<TelegramChat>,
-			val messagesByChat: Map<Long, List<TelegramMessage>>,
-		) : TelegramTdlibMessageClient {
-			val messageChatIds = mutableListOf<Long>()
-			val messageLimits = mutableListOf<Int>()
-			override fun isAuthorized(): Boolean = true
-			override fun getRecentChats(limit: Int): List<TelegramChat> =
-				chatList.take(limit)
-			override fun getRecentMessages(chatId: Long, limit: Int): List<TelegramMessage> {
-				messageChatIds.add(chatId)
-				messageLimits.add(limit)
-				return messagesByChat.getOrDefault(chatId, emptyList())
-			}
-		}
-
 		val emptyChat = TelegramChat(1L, "", 0)
 		val textChat = TelegramChat(10L, "", 1_700_000_000)
-		val client = MultiChatClient(
-				listOf(emptyChat, textChat),
-				mapOf(textChat.id to listOf(
+		val client = FakeTelegramTdlibMessageClient(
+				chats = listOf(emptyChat, textChat),
+				messages = emptyList(),
+				messagesByChat = mapOf(textChat.id to listOf(
 						TelegramMessage(10L, 20L, 1_700_000_001, false, "")
 				)),
 		)
@@ -288,10 +273,12 @@ class TelegramConnectorMessageTest {
 		val messages: List<TelegramMessage> = listOf(
 				TelegramMessage(10L, 20L, 1_700_000_001, false, ""),
 		),
+		val messagesByChat: Map<Long, List<TelegramMessage>> = emptyMap(),
 	) : TelegramTdlibMessageClient {
 		var lastChatLimit = 0
 		var lastMessageChatId = 0L
 		var lastMessageLimit = 0
+		val messageChatIds = mutableListOf<Long>()
 
 		override fun isAuthorized(): Boolean = authorized
 
@@ -303,7 +290,8 @@ class TelegramConnectorMessageTest {
 		override fun getRecentMessages(chatId: Long, limit: Int): List<TelegramMessage> {
 			lastMessageChatId = chatId
 			lastMessageLimit = limit
-			return messages
+			messageChatIds.add(chatId)
+			return messagesByChat.getOrDefault(chatId, messages)
 		}
 	}
 
