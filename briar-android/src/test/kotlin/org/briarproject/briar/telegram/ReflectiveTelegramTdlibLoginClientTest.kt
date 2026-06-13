@@ -120,11 +120,7 @@ class ReflectiveTelegramTdlibLoginClientTest {
 		val tdlibDir = File("build/test-tdlib-dir")
 		val client = createClient(tdlibDirectory = tdlibDir)
 
-		assertEquals(TelegramAuthState.IDENTIFIER_ENTRY, client.start())
-		assertEquals(
-			TelegramAuthState.CODE_ENTRY,
-			client.submitIdentifier("test-login-identifier"),
-		)
+		startToCodeEntry(client)
 		assertEquals(
 			File(tdlibDir, "database").path,
 			Client.getLastDatabaseDirectory(),
@@ -141,11 +137,7 @@ class ReflectiveTelegramTdlibLoginClientTest {
 			apiHash = "test-api-hash",
 		)
 
-		assertEquals(TelegramAuthState.IDENTIFIER_ENTRY, client.start())
-		assertEquals(
-			TelegramAuthState.CODE_ENTRY,
-			client.submitIdentifier("test-login-identifier"),
-		)
+		startToCodeEntry(client)
 		assertEquals(12345, Client.getLastApiId())
 		assertEquals("test-api-hash", Client.getLastApiHash())
 
