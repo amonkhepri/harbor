@@ -46,6 +46,14 @@ class ReflectiveTelegramTdlibLoginClientTest {
 		assertEquals(requestNames.toList(), Client.getSentRequestNames())
 	}
 
+	private fun assertSentRequestsAndClose(
+		client: ReflectiveTelegramTdlibLoginClient,
+		vararg requestNames: String,
+	) {
+		assertSentRequests(*requestNames)
+		client.close()
+	}
+
 	private fun ReflectiveTelegramTdlibLoginClient.assertSuccessfulState(
 		expectedState: TelegramAuthState,
 		actualState: TelegramAuthState,
@@ -149,9 +157,7 @@ class ReflectiveTelegramTdlibLoginClientTest {
 			client,
 			RecoverableErrorDetail.MISSING_API_CREDENTIALS,
 		) { client.submitIdentifier("test-login-identifier") }
-		assertSentRequests()
-
-		client.close()
+		assertSentRequestsAndClose(client)
 	}
 
 	@Test
@@ -166,9 +172,7 @@ class ReflectiveTelegramTdlibLoginClientTest {
 			client,
 			RecoverableErrorDetail.MISSING_API_CREDENTIALS,
 		) { client.submitIdentifier("test-login-identifier") }
-		assertSentRequests()
-
-		client.close()
+		assertSentRequestsAndClose(client)
 	}
 
 	@Test
@@ -184,9 +188,7 @@ class ReflectiveTelegramTdlibLoginClientTest {
 			client,
 			RecoverableErrorDetail.MISSING_API_CREDENTIALS,
 		) { client.submitIdentifier("test-login-identifier") }
-		assertSentRequests(SET_PARAMETERS)
-
-		client.close()
+		assertSentRequestsAndClose(client, SET_PARAMETERS)
 	}
 
 	@Test
@@ -273,9 +275,7 @@ class ReflectiveTelegramTdlibLoginClientTest {
 			client,
 			RecoverableErrorDetail.INVALID_CODE,
 		) { client.submitCode("invalid-code") }
-		assertSentRequests(SET_PARAMETERS, SET_PHONE, CHECK_CODE)
-
-		client.close()
+		assertSentRequestsAndClose(client, SET_PARAMETERS, SET_PHONE, CHECK_CODE)
 	}
 
 	@Test
@@ -284,9 +284,7 @@ class ReflectiveTelegramTdlibLoginClientTest {
 
 		startToCodeEntry(client)
 		client.assertSuccessfulState(TelegramAuthState.READY, client.submitCode("12345"))
-		assertSentRequests(SET_PARAMETERS, SET_PHONE, CHECK_CODE)
-
-		client.close()
+		assertSentRequestsAndClose(client, SET_PARAMETERS, SET_PHONE, CHECK_CODE)
 	}
 
 	@Test
@@ -300,9 +298,7 @@ class ReflectiveTelegramTdlibLoginClientTest {
 		assertRecoverableTimeout(client, "code wait timeout") {
 			client.submitCode("12345")
 		}
-		assertSentRequests(SET_PARAMETERS, SET_PHONE, CHECK_CODE, CLOSE)
-
-		client.close()
+		assertSentRequestsAndClose(client, SET_PARAMETERS, SET_PHONE, CHECK_CODE, CLOSE)
 	}
 
 	@Test
@@ -316,9 +312,7 @@ class ReflectiveTelegramTdlibLoginClientTest {
 		assertRecoverableTimeout(client, "password-entry wait timeout") {
 			client.submitCode("password-required")
 		}
-		assertSentRequests(SET_PARAMETERS, SET_PHONE, CHECK_CODE, CLOSE)
-
-		client.close()
+		assertSentRequestsAndClose(client, SET_PARAMETERS, SET_PHONE, CHECK_CODE, CLOSE)
 	}
 
 	@Test
@@ -330,9 +324,7 @@ class ReflectiveTelegramTdlibLoginClientTest {
 			TelegramAuthState.PASSWORD_ENTRY,
 			client.submitCode("password-required"),
 		)
-		assertSentRequests(SET_PARAMETERS, SET_PHONE, CHECK_CODE)
-
-		client.close()
+		assertSentRequestsAndClose(client, SET_PARAMETERS, SET_PHONE, CHECK_CODE)
 	}
 
 	@Test
@@ -341,9 +333,7 @@ class ReflectiveTelegramTdlibLoginClientTest {
 
 		startToPasswordEntry(client)
 		client.assertSuccessfulState(TelegramAuthState.READY, client.submitPassword("hunter2"))
-		assertSentRequests(SET_PARAMETERS, SET_PHONE, CHECK_CODE, CHECK_PASSWORD)
-
-		client.close()
+		assertSentRequestsAndClose(client, SET_PARAMETERS, SET_PHONE, CHECK_CODE, CHECK_PASSWORD)
 	}
 
 	@Test
@@ -399,9 +389,7 @@ class ReflectiveTelegramTdlibLoginClientTest {
 		assertRecoverableTimeout(client, "password wait timeout") {
 			client.submitPassword("hunter2")
 		}
-		assertSentRequests(SET_PARAMETERS, SET_PHONE, CHECK_CODE, CHECK_PASSWORD, CLOSE)
-
-		client.close()
+		assertSentRequestsAndClose(client, SET_PARAMETERS, SET_PHONE, CHECK_CODE, CHECK_PASSWORD, CLOSE)
 	}
 
 	@Test
