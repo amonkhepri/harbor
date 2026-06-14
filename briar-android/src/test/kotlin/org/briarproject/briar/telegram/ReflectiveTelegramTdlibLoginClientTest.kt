@@ -81,6 +81,13 @@ class ReflectiveTelegramTdlibLoginClientTest {
 		assertEquals(expectedDetail, client.getRecoverableErrorDetail())
 	}
 
+	private fun assertInvalidPasswordFromPasswordEntry(client: ReflectiveTelegramTdlibLoginClient) {
+		startToPasswordEntry(client)
+		assertRecoverableError(client, RecoverableErrorDetail.INVALID_PASSWORD) {
+			client.submitPassword("invalid-password")
+		}
+	}
+
 	private fun assertRecoverableTimeout(
 		client: ReflectiveTelegramTdlibLoginClient,
 		expectedWaitDescription: String,
@@ -343,11 +350,7 @@ class ReflectiveTelegramTdlibLoginClientTest {
 	fun testSubmitInvalidPasswordReturnsRecoverableErrorAndAllowsRetry() {
 		val client = createClient()
 
-		startToPasswordEntry(client)
-		assertRecoverableError(
-			client,
-			RecoverableErrorDetail.INVALID_PASSWORD,
-		) { client.submitPassword("invalid-password") }
+		assertInvalidPasswordFromPasswordEntry(client)
 		assertSentRequests(SET_PARAMETERS, SET_PHONE, CHECK_CODE, CHECK_PASSWORD)
 
 		client.assertSuccessfulState(TelegramAuthState.READY, client.submitPassword("hunter2"))
@@ -374,11 +377,7 @@ class ReflectiveTelegramTdlibLoginClientTest {
 	fun testCloseAfterInvalidPasswordClearsRecoverableErrorAndAllowsRestart() {
 		val client = createClient()
 
-		startToPasswordEntry(client)
-		assertRecoverableError(
-			client,
-			RecoverableErrorDetail.INVALID_PASSWORD,
-		) { client.submitPassword("invalid-password") }
+		assertInvalidPasswordFromPasswordEntry(client)
 
 		client.assertSuccessfulState(TelegramAuthState.CLOSED, client.close())
 		assertSentRequests(SET_PARAMETERS, SET_PHONE, CHECK_CODE, CHECK_PASSWORD, CLOSE)
