@@ -123,6 +123,13 @@ class ReflectiveTelegramTdlibLoginClientTest {
 		assertSentRequestsAndClose(client, SET_PARAMETERS, SET_PHONE, CHECK_CODE, CLOSE)
 	}
 
+	private fun assertSubmitCodeSuccess(submittedCode: String, expectedState: TelegramAuthState) {
+		val client = createClient()
+		startToCodeEntry(client)
+		client.assertSuccessfulState(expectedState, client.submitCode(submittedCode))
+		assertSentRequestsAndClose(client, SET_PARAMETERS, SET_PHONE, CHECK_CODE)
+	}
+
 	private companion object {
 		private const val SET_PARAMETERS = "SetTdlibParameters"
 		private const val SET_PHONE = "SetAuthenticationPhoneNumber"
@@ -280,11 +287,7 @@ class ReflectiveTelegramTdlibLoginClientTest {
 
 	@Test
 	fun testSubmitCodeTransitionsToReady() {
-		val client = createClient()
-
-		startToCodeEntry(client)
-		client.assertSuccessfulState(TelegramAuthState.READY, client.submitCode("12345"))
-		assertSentRequestsAndClose(client, SET_PARAMETERS, SET_PHONE, CHECK_CODE)
+		assertSubmitCodeSuccess("12345", TelegramAuthState.READY)
 	}
 
 	@Test
@@ -299,14 +302,7 @@ class ReflectiveTelegramTdlibLoginClientTest {
 
 	@Test
 	fun testSubmitCodeTransitionsToPasswordEntry() {
-		val client = createClient()
-
-		startToCodeEntry(client)
-		client.assertSuccessfulState(
-			TelegramAuthState.PASSWORD_ENTRY,
-			client.submitCode("password-required"),
-		)
-		assertSentRequestsAndClose(client, SET_PARAMETERS, SET_PHONE, CHECK_CODE)
+		assertSubmitCodeSuccess("password-required", TelegramAuthState.PASSWORD_ENTRY)
 	}
 
 	@Test
