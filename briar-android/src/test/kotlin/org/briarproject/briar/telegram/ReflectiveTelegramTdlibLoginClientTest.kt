@@ -95,6 +95,18 @@ class ReflectiveTelegramTdlibLoginClientTest {
 		)
 	}
 
+	private fun assertMissingCredentialsAfterIdentifierSubmit(
+		client: ReflectiveTelegramTdlibLoginClient,
+		vararg requestNames: String,
+	) {
+		assertEquals(TelegramAuthState.IDENTIFIER_ENTRY, client.start())
+		assertRecoverableError(
+			client,
+			RecoverableErrorDetail.MISSING_API_CREDENTIALS,
+		) { client.submitIdentifier("test-login-identifier") }
+		assertSentRequestsAndClose(client, *requestNames)
+	}
+
 	private companion object {
 		private const val SET_PARAMETERS = "SetTdlibParameters"
 		private const val SET_PHONE = "SetAuthenticationPhoneNumber"
@@ -151,12 +163,7 @@ class ReflectiveTelegramTdlibLoginClientTest {
 			apiHash = "test-api-hash",
 		)
 
-		assertEquals(TelegramAuthState.IDENTIFIER_ENTRY, client.start())
-		assertRecoverableError(
-			client,
-			RecoverableErrorDetail.MISSING_API_CREDENTIALS,
-		) { client.submitIdentifier("test-login-identifier") }
-		assertSentRequestsAndClose(client)
+		assertMissingCredentialsAfterIdentifierSubmit(client)
 	}
 
 	@Test
@@ -166,12 +173,7 @@ class ReflectiveTelegramTdlibLoginClientTest {
 			apiHash = "",
 		)
 
-		assertEquals(TelegramAuthState.IDENTIFIER_ENTRY, client.start())
-		assertRecoverableError(
-			client,
-			RecoverableErrorDetail.MISSING_API_CREDENTIALS,
-		) { client.submitIdentifier("test-login-identifier") }
-		assertSentRequestsAndClose(client)
+		assertMissingCredentialsAfterIdentifierSubmit(client)
 	}
 
 	@Test
@@ -182,12 +184,7 @@ class ReflectiveTelegramTdlibLoginClientTest {
 			apiHash = "test-api-hash",
 		)
 
-		assertEquals(TelegramAuthState.IDENTIFIER_ENTRY, client.start())
-		assertRecoverableError(
-			client,
-			RecoverableErrorDetail.MISSING_API_CREDENTIALS,
-		) { client.submitIdentifier("test-login-identifier") }
-		assertSentRequestsAndClose(client, SET_PARAMETERS)
+		assertMissingCredentialsAfterIdentifierSubmit(client, SET_PARAMETERS)
 	}
 
 	@Test
