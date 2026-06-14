@@ -107,6 +107,22 @@ class ReflectiveTelegramTdlibLoginClientTest {
 		assertSentRequestsAndClose(client, *requestNames)
 	}
 
+	private fun assertSubmitCodeTimeout(
+		submittedCode: String,
+		expectedWaitDescription: String,
+	) {
+		Client.setAuthorizationUpdateDelaySequenceMs(0L, 0L, 0L, 1_200L)
+		val client = createClient(
+			authorizationUpdateTimeoutMs = 1_000L,
+		)
+
+		startToCodeEntry(client)
+		assertRecoverableTimeout(client, expectedWaitDescription) {
+			client.submitCode(submittedCode)
+		}
+		assertSentRequestsAndClose(client, SET_PARAMETERS, SET_PHONE, CHECK_CODE, CLOSE)
+	}
+
 	private companion object {
 		private const val SET_PARAMETERS = "SetTdlibParameters"
 		private const val SET_PHONE = "SetAuthenticationPhoneNumber"
@@ -273,30 +289,12 @@ class ReflectiveTelegramTdlibLoginClientTest {
 
 	@Test
 	fun testSubmitCodeReturnsRecoverableErrorWhenReadyUpdateExceedsTimeout() {
-		Client.setAuthorizationUpdateDelaySequenceMs(0L, 0L, 0L, 1_200L)
-		val client = createClient(
-			authorizationUpdateTimeoutMs = 1_000L,
-		)
-
-		startToCodeEntry(client)
-		assertRecoverableTimeout(client, "code wait timeout") {
-			client.submitCode("12345")
-		}
-		assertSentRequestsAndClose(client, SET_PARAMETERS, SET_PHONE, CHECK_CODE, CLOSE)
+		assertSubmitCodeTimeout("12345", "code wait timeout")
 	}
 
 	@Test
 	fun testSubmitCodeReturnsRecoverableErrorWhenPasswordUpdateExceedsTimeout() {
-		Client.setAuthorizationUpdateDelaySequenceMs(0L, 0L, 0L, 1_200L)
-		val client = createClient(
-			authorizationUpdateTimeoutMs = 1_000L,
-		)
-
-		startToCodeEntry(client)
-		assertRecoverableTimeout(client, "password-entry wait timeout") {
-			client.submitCode("password-required")
-		}
-		assertSentRequestsAndClose(client, SET_PARAMETERS, SET_PHONE, CHECK_CODE, CLOSE)
+		assertSubmitCodeTimeout("password-required", "password-entry wait timeout")
 	}
 
 	@Test
