@@ -2,7 +2,6 @@ package org.briarproject.briar.telegram
 
 import org.briarproject.briar.api.connector.ConnectorSources
 import org.briarproject.briar.api.telegram.TelegramChat
-import org.briarproject.briar.api.telegram.TelegramConnector
 import org.briarproject.briar.api.telegram.TelegramMessage
 import org.briarproject.briar.api.telegram.TelegramMessageIngestSnapshot
 import org.briarproject.briar.api.telegram.TelegramMessageIngestStatus
@@ -178,16 +177,15 @@ class TelegramConnectorMessageTest {
 
 	@Test
 	fun testMessageIngestDiagnosticsReturnsDisabledSnapshot() {
-		val snapshot = readDiagnosticsSnapshot(NoOpTelegramConnector(), 5, 5)
+		val snapshot = TelegramMessageIngestDiagnostics(NoOpTelegramConnector())
+				.readSnapshot(5, 5)
 
 		assertSnapshot(snapshot, TelegramMessageIngestStatus.DISABLED, 0, 0)
 	}
 
 	@Test
 	fun testMessageIngestDiagnosticsReportsAuthorizationUnavailable() {
-		val snapshot = readDiagnosticsSnapshot(
-				StubTelegramConnector(FakeTelegramTdlibMessageClient(authorized = false)),
-		)
+		val snapshot = snapshotFor(FakeTelegramTdlibMessageClient(authorized = false))
 
 		assertSnapshot(
 				snapshot,
@@ -200,7 +198,7 @@ class TelegramConnectorMessageTest {
 	@Test
 	fun testMessageIngestDiagnosticsReportsCountsOnly() {
 		val client = FakeTelegramTdlibMessageClient()
-		val snapshot = readDiagnosticsSnapshot(StubTelegramConnector(client))
+		val snapshot = snapshotFor(client)
 
 		assertSnapshot(snapshot, TelegramMessageIngestStatus.MESSAGE_COUNT_AVAILABLE, 1, 1)
 		assertEquals(3, client.lastChatLimit)
@@ -210,12 +208,10 @@ class TelegramConnectorMessageTest {
 
 	@Test
 	fun testMessageIngestDiagnosticsTreatsAuthorizedEmptyAsNoContent() {
-		val snapshot = readDiagnosticsSnapshot(
-				StubTelegramConnector(FakeTelegramTdlibMessageClient(
-						chats = emptyList(),
-						messages = emptyList(),
-				)),
-		)
+		val snapshot = snapshotFor(FakeTelegramTdlibMessageClient(
+				chats = emptyList(),
+				messages = emptyList(),
+		))
 
 		assertSnapshot(snapshot, TelegramMessageIngestStatus.NO_CONTENT, 0, 0)
 	}
@@ -232,7 +228,7 @@ class TelegramConnectorMessageTest {
 				)),
 		)
 
-		val snapshot = readDiagnosticsSnapshot(StubTelegramConnector(client), 2, 3)
+		val snapshot = snapshotFor(client, 2, 3)
 
 		assertSnapshot(snapshot, TelegramMessageIngestStatus.MESSAGE_COUNT_AVAILABLE, 2, 1)
 		// should call getRecentMessages for both chats
@@ -249,12 +245,13 @@ class TelegramConnectorMessageTest {
 		return ReflectiveTelegramTdlibMessageClient(requestTimeoutMs = 1_000L)
 	}
 
-	private fun readDiagnosticsSnapshot(
-		connector: TelegramConnector,
+	private fun snapshotFor(
+		client: FakeTelegramTdlibMessageClient,
 		chatLimit: Int = 3,
 		messageLimit: Int = 3,
-	): TelegramMessageIngestSnapshot =
-		TelegramMessageIngestDiagnostics(connector).readSnapshot(chatLimit, messageLimit)
+	) =
+		TelegramMessageIngestDiagnostics(StubTelegramConnector(client))
+				.readSnapshot(chatLimit, messageLimit)
 
 	private fun assertSnapshot(
 		snapshot: TelegramMessageIngestSnapshot,
