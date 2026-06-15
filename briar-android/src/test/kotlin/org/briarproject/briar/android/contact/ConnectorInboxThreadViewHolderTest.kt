@@ -11,10 +11,12 @@ import org.mockito.Mockito.`when`
 
 class ConnectorInboxThreadViewHolderTest {
 
+	private val genericConnectorSource = ConnectorSource("messenger", "Messenger")
+
 	@Test
 	fun testConnectorBadgeUsesSourceDisplayName() {
 		val item = FakeConnectorInboxThreadItem(
-			connectorSource = ConnectorSource("messenger", "Messenger"),
+			connectorSource = genericConnectorSource,
 		)
 
 		assertEquals("Messenger", ConnectorInboxThreadViewHolder.sourceLabel(item))
@@ -35,7 +37,7 @@ class ConnectorInboxThreadViewHolderTest {
 	@Test
 	fun testUnknownConnectorSourceUsesGenericIcon() {
 		val item = FakeConnectorInboxThreadItem(
-			connectorSource = ConnectorSource("messenger", "Messenger"),
+			connectorSource = genericConnectorSource,
 		)
 
 		assertEquals(
@@ -48,7 +50,7 @@ class ConnectorInboxThreadViewHolderTest {
 	fun testConnectorSourceDescriptionUsesSourceDisplayName() {
 		val resources = mock(Resources::class.java)
 		val item = FakeConnectorInboxThreadItem(
-			connectorSource = ConnectorSource("messenger", "Messenger"),
+			connectorSource = genericConnectorSource,
 		)
 		`when`(resources.getString(
 			R.string.connector_thread_source_content_description,
