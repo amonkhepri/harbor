@@ -16,12 +16,13 @@ class InboxThreadMergerTest {
 		)
 
 		val item = items[0] as TelegramInboxThreadItem
-		assertEquals(7L, item.chatId)
-		assertEquals("chat", item.title)
-		assertEquals(42000L, item.latestActivityMillis)
+		val rowIdentity = Triple(item.chatId, item.title, item.latestActivityMillis)
+		assertEquals(Triple(7L, "chat", 42000L), rowIdentity)
 		assertPreviewState(item)
-		assertEquals(ConnectorSources.TELEGRAM, item.connectorSource)
-		assertEquals("telegram:7", item.stableId)
+		assertEquals(
+			ConnectorSources.TELEGRAM to "telegram:7",
+			item.connectorSource to item.stableId
+		)
 	}
 
 	@Test
@@ -36,8 +37,7 @@ class InboxThreadMergerTest {
 		)
 
 		val item = items[0] as ConnectorInboxThreadItem
-		assertEquals(MESSENGER, item.connectorSource)
-		assertEquals("messenger:123", item.stableId)
+		assertEquals(MESSENGER to "messenger:123", item.connectorSource to item.stableId)
 	}
 
 	@Test
