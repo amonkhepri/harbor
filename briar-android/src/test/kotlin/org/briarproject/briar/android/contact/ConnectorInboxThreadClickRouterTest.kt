@@ -23,12 +23,9 @@ class ConnectorInboxThreadClickRouterTest {
 			skippedHandler
 		)).onItemClick(view, item)
 
-		assertSame(view, ignoredHandler.view)
-		assertSame(item, ignoredHandler.item)
-		assertSame(view, matchingHandler.view)
-		assertSame(item, matchingHandler.item)
-		assertNull(skippedHandler.view)
-		assertNull(skippedHandler.item)
+		assertEquals(listOf(view to item), ignoredHandler.clicks)
+		assertEquals(listOf(view to item), matchingHandler.clicks)
+		assertEquals(emptyList<Pair<View, ConnectorInboxThreadItem>>(), skippedHandler.clicks)
 	}
 
 	@Test
@@ -82,15 +79,13 @@ class ConnectorInboxThreadClickRouterTest {
 	private class RecordingConnectorClickHandler(
 		private val handled: Boolean,
 	) : ConnectorInboxThreadClickHandler {
-		var view: View? = null
-		var item: ConnectorInboxThreadItem? = null
+		val clicks = mutableListOf<Pair<View, ConnectorInboxThreadItem>>()
 
 		override fun onConnectorItemClick(
 			view: View,
 			item: ConnectorInboxThreadItem,
 		): Boolean {
-			this.view = view
-			this.item = item
+			clicks += view to item
 			return handled
 		}
 	}
