@@ -46,6 +46,10 @@ class ReflectiveTelegramTdlibLoginClientTest {
 		assertEquals(requestNames.toList(), Client.getSentRequestNames())
 	}
 
+	private fun assertPasswordFlowRequests(vararg tail: String) {
+		assertSentRequests(SET_PARAMETERS, SET_PHONE, CHECK_CODE, CHECK_PASSWORD, *tail)
+	}
+
 	private fun assertSentRequestsAndClose(
 		client: ReflectiveTelegramTdlibLoginClient,
 		vararg requestNames: String,
@@ -318,7 +322,8 @@ class ReflectiveTelegramTdlibLoginClientTest {
 
 		startToPasswordEntry(client)
 		client.assertSuccessfulState(TelegramAuthState.READY, client.submitPassword("hunter2"))
-		assertSentRequestsAndClose(client, SET_PARAMETERS, SET_PHONE, CHECK_CODE, CHECK_PASSWORD)
+		assertPasswordFlowRequests()
+		client.close()
 	}
 
 	@Test
@@ -341,7 +346,7 @@ class ReflectiveTelegramTdlibLoginClientTest {
 
 		submitPasswordThread.join()
 		assertEquals(TelegramAuthState.CLOSED, delayedPasswordResult[0])
-		assertSentRequests(SET_PARAMETERS, SET_PHONE, CHECK_CODE, CHECK_PASSWORD, CLOSE)
+		assertPasswordFlowRequests(CLOSE)
 
 		client.close()
 	}
@@ -351,10 +356,10 @@ class ReflectiveTelegramTdlibLoginClientTest {
 		val client = createClient()
 
 		assertInvalidPasswordFromPasswordEntry(client)
-		assertSentRequests(SET_PARAMETERS, SET_PHONE, CHECK_CODE, CHECK_PASSWORD)
+		assertPasswordFlowRequests()
 
 		client.assertSuccessfulState(TelegramAuthState.READY, client.submitPassword("hunter2"))
-		assertSentRequests(SET_PARAMETERS, SET_PHONE, CHECK_CODE, CHECK_PASSWORD, CHECK_PASSWORD)
+		assertPasswordFlowRequests(CHECK_PASSWORD)
 
 		client.close()
 	}
@@ -370,7 +375,8 @@ class ReflectiveTelegramTdlibLoginClientTest {
 		assertRecoverableTimeout(client, "password wait timeout") {
 			client.submitPassword("hunter2")
 		}
-		assertSentRequestsAndClose(client, SET_PARAMETERS, SET_PHONE, CHECK_CODE, CHECK_PASSWORD, CLOSE)
+		assertPasswordFlowRequests(CLOSE)
+		client.close()
 	}
 
 	@Test
@@ -380,22 +386,14 @@ class ReflectiveTelegramTdlibLoginClientTest {
 		assertInvalidPasswordFromPasswordEntry(client)
 
 		client.assertSuccessfulState(TelegramAuthState.CLOSED, client.close())
-		assertSentRequests(SET_PARAMETERS, SET_PHONE, CHECK_CODE, CHECK_PASSWORD, CLOSE)
+		assertPasswordFlowRequests(CLOSE)
 
 		client.assertSuccessfulState(TelegramAuthState.IDENTIFIER_ENTRY, client.start())
 		client.assertSuccessfulState(
 			TelegramAuthState.CODE_ENTRY,
 			client.submitIdentifier("test-login-identifier"),
 		)
-		assertSentRequests(
-			SET_PARAMETERS,
-			SET_PHONE,
-			CHECK_CODE,
-			CHECK_PASSWORD,
-			CLOSE,
-			SET_PARAMETERS,
-			SET_PHONE,
-		)
+		assertPasswordFlowRequests(CLOSE, SET_PARAMETERS, SET_PHONE)
 
 		client.close()
 	}
