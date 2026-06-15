@@ -1,6 +1,8 @@
 package org.briarproject.briar.telegram
 
+import org.briarproject.briar.api.connector.ConnectorMessage
 import org.briarproject.briar.api.connector.ConnectorSources
+import org.briarproject.briar.api.connector.ConnectorThread
 import org.briarproject.briar.api.telegram.TelegramChat
 import org.briarproject.briar.api.telegram.TelegramMessage
 import org.briarproject.briar.api.telegram.TelegramMessageIngestSnapshot
@@ -58,19 +60,16 @@ class TelegramConnectorMessageTest {
 		val connector = StubTelegramConnector(client)
 
 		assertEquals(ConnectorSources.TELEGRAM, connector.source)
-		val threads = connector.getRecentThreads(3)
-		assertEquals(ConnectorSources.TELEGRAM, threads[0].source)
-		assertEquals("10", threads[0].threadId)
-		assertEquals("synthetic", threads[0].title)
-		assertEquals("preview", threads[0].latestMessageText)
-		assertTrue(threads[0].isLatestMessageOutgoing)
-
-		val messages = connector.getRecentMessages("10", 2)
-		assertEquals(ConnectorSources.TELEGRAM, messages[0].source)
-		assertEquals("10", messages[0].threadId)
-		assertEquals("20", messages[0].messageId)
-		assertEquals(20L, messages[0].sourceMessageOrder)
-		assertEquals("body", messages[0].text)
+		assertEquals(
+				listOf(ConnectorThread(ConnectorSources.TELEGRAM, "10",
+						"synthetic", 1_700_000_000, "preview", true)),
+				connector.getRecentThreads(3),
+		)
+		assertEquals(
+				listOf(ConnectorMessage(ConnectorSources.TELEGRAM, "10", "20",
+						1_700_000_001, false, "body", 20L)),
+				connector.getRecentMessages("10", 2),
+		)
 	}
 
 	@Test
