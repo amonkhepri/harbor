@@ -86,9 +86,7 @@ class InboxThreadMergerTest {
 
 		InboxThreadMerger.sort(items)
 
-		assertEquals("newer", items[0].stableId)
-		assertEquals("middle", items[1].stableId)
-		assertEquals("older", items[2].stableId)
+		assertEquals(listOf("newer", "middle", "older"), items.map { it.stableId })
 	}
 
 	private class FakeInboxThreadItem(
