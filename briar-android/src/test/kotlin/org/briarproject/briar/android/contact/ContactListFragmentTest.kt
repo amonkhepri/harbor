@@ -7,30 +7,27 @@ import org.briarproject.briar.android.contact.TelegramInboxAvailabilityState.LOA
 import org.briarproject.briar.android.contact.TelegramInboxAvailabilityState.LOADING
 import org.briarproject.briar.android.contact.TelegramInboxAvailabilityState.NONE
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ContactListFragmentTest {
 
 	@Test
 	fun testManualRefreshActionIsRecognized() {
-		assertTrue(ContactListFragment.isManualRefreshAction(
-			R.id.action_refresh_telegram_threads))
-		assertFalse(ContactListFragment.isManualRefreshAction(android.R.id.home))
-		assertFalse(ContactListFragment.isManualRefreshAction(
-			R.id.action_add_contact_remotely))
+		listOf(R.id.action_refresh_telegram_threads to true,
+			android.R.id.home to false,
+			R.id.action_add_contact_remotely to false).forEach { (actionId, expected) ->
+			assertEquals(expected, ContactListFragment.isManualRefreshAction(actionId))
+		}
 	}
 
 	@Test
 	fun testManualRefreshVisibilityHidesWhileLoading() {
-		assertFalse(ContactListFragment.shouldShowManualRefreshAction(
-			true, LOADING))
-		listOf(NONE, EMPTY, ACCOUNT_UNAVAILABLE, LOAD_FAILED).forEach { state ->
-			assertTrue(ContactListFragment.shouldShowManualRefreshAction(
+		listOf(LOADING to false, NONE to true, EMPTY to true,
+			ACCOUNT_UNAVAILABLE to true, LOAD_FAILED to true).forEach { (state, expected) ->
+			assertEquals(expected, ContactListFragment.shouldShowManualRefreshAction(
 				true, state))
 		}
-		assertFalse(ContactListFragment.shouldShowManualRefreshAction(
+		assertEquals(false, ContactListFragment.shouldShowManualRefreshAction(
 			false, NONE))
 	}
 
