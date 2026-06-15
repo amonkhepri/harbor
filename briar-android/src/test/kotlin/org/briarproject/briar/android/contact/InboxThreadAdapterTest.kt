@@ -31,22 +31,16 @@ class InboxThreadAdapterTest {
 			latestActivityMillis = 1L,
 			previewText = "synthetic preview",
 		)
+		fun assertContentsChanged(changed: FakeConnectorInboxThreadItem) =
+			assertFalse(callback.areContentsTheSame(item, changed))
 
 		assertTrue(callback.areItemsTheSame(item, item.copy()))
 		assertTrue(callback.areContentsTheSame(item, item.copy()))
-		assertFalse(callback.areContentsTheSame(item, item.copy(title = "new")))
-		assertFalse(callback.areContentsTheSame(item, item.copy(
-			previewText = "new"
-		)))
-		assertFalse(callback.areContentsTheSame(item, item.copy(
-			isLastMessageOutgoing = true
-		)))
-		assertFalse(callback.areContentsTheSame(item, item.copy(
-			isPreviewLoading = true
-		)))
-		assertFalse(callback.areContentsTheSame(item, item.copy(
-			latestActivityMillis = 2L
-		)))
+		assertContentsChanged(item.copy(title = "new"))
+		assertContentsChanged(item.copy(previewText = "new"))
+		assertContentsChanged(item.copy(isLastMessageOutgoing = true))
+		assertContentsChanged(item.copy(isPreviewLoading = true))
+		assertContentsChanged(item.copy(latestActivityMillis = 2L))
 	}
 
 	private companion object {
