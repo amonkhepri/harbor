@@ -11,17 +11,13 @@ class ContactListViewModelTest {
 
 	@Test
 	fun testTelegramAvailabilityStateSelection() {
-		assertEquals(NONE, ContactListViewModel.telegramAvailabilityStateFor(
-			false, false, false, false))
-		assertEquals(ACCOUNT_UNAVAILABLE,
-			ContactListViewModel.telegramAvailabilityStateFor(
-				true, false, false, false))
-		assertEquals(EMPTY, ContactListViewModel.telegramAvailabilityStateFor(
-			true, true, false, false))
-		assertEquals(LOAD_FAILED,
-			ContactListViewModel.telegramAvailabilityStateFor(
-				true, true, true, false))
-		assertEquals(NONE, ContactListViewModel.telegramAvailabilityStateFor(
-			true, true, false, true))
+		val states = listOf(
+			ContactListViewModel.telegramAvailabilityStateFor(false, false, false, false),
+			ContactListViewModel.telegramAvailabilityStateFor(true, false, false, false),
+			ContactListViewModel.telegramAvailabilityStateFor(true, true, false, false),
+			ContactListViewModel.telegramAvailabilityStateFor(true, true, true, false),
+			ContactListViewModel.telegramAvailabilityStateFor(true, true, false, true)
+		)
+		assertEquals(listOf(NONE, ACCOUNT_UNAVAILABLE, EMPTY, LOAD_FAILED, NONE), states)
 	}
 }
