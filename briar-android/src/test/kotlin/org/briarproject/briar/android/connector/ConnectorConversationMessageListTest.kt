@@ -32,12 +32,13 @@ class ConnectorConversationMessageListTest {
 		))
 
 		assertEquals(
-			listOf("sample:thread-1:1", "sample:thread-1:20", "sample:thread-1:30"),
-			items.map { it.stableId },
+			listOf(
+				connectorMessageItem("1", false, "old", 10000L),
+				connectorMessageItem("20", false, "same time", 30000L),
+				connectorMessageItem("30", true, "new", 30000L),
+			),
+			items,
 		)
-		assertEquals(listOf("old", "same time", "new"), items.map { it.text })
-		assertEquals(listOf(10000L, 30000L, 30000L), items.map { it.dateMillis })
-		assertEquals(listOf(false, false, true), items.map { it.isOutgoing })
 	}
 
 	@Test
@@ -89,12 +90,13 @@ class ConnectorConversationMessageListTest {
 		messageId: String,
 		isOutgoing: Boolean,
 		text: String,
+		dateMillis: Long = 0L,
 	): ConnectorConversationMessageItem =
 		ConnectorConversationMessageItem(
 			connectorSource = CONNECTOR_SOURCE,
 			connectorThreadId = "thread-1",
 			connectorMessageId = messageId,
-			dateMillis = 0L,
+			dateMillis = dateMillis,
 			isOutgoing = isOutgoing,
 			text = text,
 		)
