@@ -21,25 +21,19 @@ class ConnectorInboxThreadViewHolderTest {
 	}
 
 	@Test
-	fun testTelegramConnectorSourceUsesTelegramIcon() {
-		val item = FakeConnectorInboxThreadItem(
-			connectorSource = ConnectorSources.TELEGRAM,
-		)
+	fun testConnectorSourceIcons() {
+		fun assertSourceIcon(item: ConnectorInboxThreadItem, expectedIconRes: Int) {
+			assertEquals(
+				expectedIconRes,
+				ConnectorInboxThreadViewHolder.sourceIconRes(item)
+			)
+		}
 
-		assertEquals(
-			R.drawable.ic_telegram,
-			ConnectorInboxThreadViewHolder.sourceIconRes(item)
+		assertSourceIcon(
+			FakeConnectorInboxThreadItem(connectorSource = ConnectorSources.TELEGRAM),
+			R.drawable.ic_telegram
 		)
-	}
-
-	@Test
-	fun testUnknownConnectorSourceUsesGenericIcon() {
-		val item = genericConnectorItem()
-
-		assertEquals(
-			R.drawable.ic_link_menu,
-			ConnectorInboxThreadViewHolder.sourceIconRes(item)
-		)
+		assertSourceIcon(genericConnectorItem(), R.drawable.ic_link_menu)
 	}
 
 	@Test
