@@ -25,6 +25,9 @@ class TelegramConnectorMessageTest {
 		assertEquals(requestNames.toList(), Client.getSentRequestNames())
 	}
 
+	private fun FakeTelegramTdlibMessageClient.lastRequestLimits() =
+			Triple(lastChatLimit, lastMessageChatId, lastMessageLimit)
+
 	@Test
 	fun testNoOpConnectorReturnsDisabledEmptyMessageLists() {
 		val connector = NoOpTelegramConnector()
@@ -43,10 +46,8 @@ class TelegramConnectorMessageTest {
 		assertTrue(connector.isEnabled())
 		assertTrue(connector.isAuthorized())
 		assertEquals(client.chats, connector.getRecentChats(3))
-		assertEquals(3, client.lastChatLimit)
 		assertEquals(client.messages, connector.getRecentMessages(10L, 2))
-		assertEquals(10L, client.lastMessageChatId)
-		assertEquals(2, client.lastMessageLimit)
+		assertEquals(Triple(3, 10L, 2), client.lastRequestLimits())
 	}
 
 	@Test
@@ -200,9 +201,7 @@ class TelegramConnectorMessageTest {
 		val snapshot = snapshotFor(client)
 
 		assertSnapshot(snapshot, TelegramMessageIngestStatus.MESSAGE_COUNT_AVAILABLE, 1, 1)
-		assertEquals(3, client.lastChatLimit)
-		assertEquals(10L, client.lastMessageChatId)
-		assertEquals(3, client.lastMessageLimit)
+		assertEquals(Triple(3, 10L, 3), client.lastRequestLimits())
 	}
 
 	@Test
