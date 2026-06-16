@@ -15,9 +15,7 @@ class ConnectorInboxThreadViewHolderTest {
 
 	@Test
 	fun testConnectorBadgeUsesSourceDisplayName() {
-		val item = FakeConnectorInboxThreadItem(
-			connectorSource = genericConnectorSource,
-		)
+		val item = genericConnectorItem()
 
 		assertEquals("Messenger", ConnectorInboxThreadViewHolder.sourceLabel(item))
 	}
@@ -36,9 +34,7 @@ class ConnectorInboxThreadViewHolderTest {
 
 	@Test
 	fun testUnknownConnectorSourceUsesGenericIcon() {
-		val item = FakeConnectorInboxThreadItem(
-			connectorSource = genericConnectorSource,
-		)
+		val item = genericConnectorItem()
 
 		assertEquals(
 			R.drawable.ic_link_menu,
@@ -49,9 +45,7 @@ class ConnectorInboxThreadViewHolderTest {
 	@Test
 	fun testConnectorSourceDescriptionUsesSourceDisplayName() {
 		val resources = mock(Resources::class.java)
-		val item = FakeConnectorInboxThreadItem(
-			connectorSource = genericConnectorSource,
-		)
+		val item = genericConnectorItem()
 		`when`(resources.getString(
 			R.string.connector_thread_source_content_description,
 			"Messenger"
@@ -63,5 +57,9 @@ class ConnectorInboxThreadViewHolderTest {
 				item
 			))
 	}
+
+	private fun genericConnectorItem() = FakeConnectorInboxThreadItem(
+		connectorSource = genericConnectorSource,
+	)
 
 }
