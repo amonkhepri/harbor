@@ -23,9 +23,8 @@ class ConnectorInboxThreadClickRouterTest {
 			skippedHandler
 		)).onItemClick(view, item)
 
-		assertEquals(listOf(view to item), ignoredHandler.clicks)
-		assertEquals(listOf(view to item), matchingHandler.clicks)
-		assertEquals(emptyList<Pair<View, ConnectorInboxThreadItem>>(), skippedHandler.clicks)
+		val handlerClicks = listOf(ignoredHandler.clicks, matchingHandler.clicks, skippedHandler.clicks)
+		assertEquals(listOf(listOf(view to item), listOf(view to item), emptyList()), handlerClicks)
 	}
 
 	@Test
