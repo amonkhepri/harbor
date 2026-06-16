@@ -56,17 +56,17 @@ class ConnectorConversationMessageListTest {
 
 		renderMessageList(listOf(incoming, outgoing))
 
-		assertTextCount("Incoming connector body")
-		assertTextCount("Outgoing connector body")
-		assertTextCount("Incoming")
-		assertTextCount("Outgoing")
+		assertRenderedTexts(
+			"Incoming connector body", "Outgoing connector body",
+			"Incoming", "Outgoing",
+		)
 	}
 
 	@Test
 	fun testMessageListRendersEmptyState() {
 		renderMessageList(emptyText = "No connector messages")
 
-		assertTextCount("No connector messages")
+		assertRenderedTexts("No connector messages")
 	}
 
 	private fun renderMessageList(
@@ -83,8 +83,8 @@ class ConnectorConversationMessageListTest {
 		composeRule.waitForIdle()
 	}
 
-	private fun assertTextCount(text: String, count: Int = 1) =
-		composeRule.onAllNodesWithText(text).assertCountEquals(count)
+	private fun assertRenderedTexts(vararg texts: String) =
+		texts.forEach { text -> composeRule.onAllNodesWithText(text).assertCountEquals(1) }
 
 	private fun connectorMessageItem(
 		messageId: String,
