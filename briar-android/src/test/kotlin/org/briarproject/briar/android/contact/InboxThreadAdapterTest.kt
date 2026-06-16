@@ -12,25 +12,14 @@ class InboxThreadAdapterTest {
 
 	@Test
 	fun testConnectorRowsUseGenericStableIds() {
-		val item = FakeConnectorInboxThreadItem(
-			connectorSource = MESSENGER,
-			connectorThreadId = "123",
-			title = "synthetic title",
-			latestActivityMillis = 1L,
-		)
+		val item = connectorItem()
 
 		assertEquals("messenger:123", item.stableId)
 	}
 
 	@Test
 	fun testConnectorContentsCompareGenericFields() {
-		val item = FakeConnectorInboxThreadItem(
-			connectorSource = MESSENGER,
-			connectorThreadId = "123",
-			title = "synthetic title",
-			latestActivityMillis = 1L,
-			previewText = "synthetic preview",
-		)
+		val item = connectorItem(previewText = "synthetic preview")
 		fun assertContentsChanged(changed: FakeConnectorInboxThreadItem) =
 			assertFalse(callback.areContentsTheSame(item, changed))
 
@@ -42,6 +31,14 @@ class InboxThreadAdapterTest {
 		assertContentsChanged(item.copy(isPreviewLoading = true))
 		assertContentsChanged(item.copy(latestActivityMillis = 2L))
 	}
+
+	private fun connectorItem(previewText: String = "") = FakeConnectorInboxThreadItem(
+		connectorSource = MESSENGER,
+		connectorThreadId = "123",
+		title = "synthetic title",
+		latestActivityMillis = 1L,
+		previewText = previewText,
+	)
 
 	private companion object {
 		val MESSENGER = ConnectorSource("messenger", "Messenger")
