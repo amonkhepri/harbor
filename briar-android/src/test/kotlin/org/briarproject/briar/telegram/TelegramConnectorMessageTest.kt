@@ -257,9 +257,8 @@ class TelegramConnectorMessageTest {
 		recentChatCount: Int,
 		sampledMessageCount: Int,
 	) {
-		assertEquals(status, snapshot.status)
-		assertEquals(recentChatCount, snapshot.recentChatCount)
-		assertEquals(sampledMessageCount, snapshot.sampledMessageCount)
+		assertEquals(Triple(status, recentChatCount, sampledMessageCount),
+				Triple(snapshot.status, snapshot.recentChatCount, snapshot.sampledMessageCount))
 	}
 
 	private class FakeTelegramTdlibMessageClient(
