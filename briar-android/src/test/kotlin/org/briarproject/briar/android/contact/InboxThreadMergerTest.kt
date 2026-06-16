@@ -12,7 +12,7 @@ class InboxThreadMergerTest {
 	fun testTelegramRowsMapSecondsToMillis() {
 		val items = InboxThreadMerger.merge(
 			emptyList(),
-			listOf(TelegramInboxThreadItem(TelegramChat(7L, "chat", 42)))
+			listOf(telegramItem())
 		)
 
 		val item = items[0] as TelegramInboxThreadItem
@@ -42,18 +42,14 @@ class InboxThreadMergerTest {
 
 	@Test
 	fun testTelegramRowsExposeCleanLatestPreview() {
-		val item = TelegramInboxThreadItem(
-			TelegramChat(7L, "chat", 42, "synthetic\npreview\ttext")
-		)
+		val item = telegramItem(text = "synthetic\npreview\ttext")
 
 		assertPreviewState(item, previewText = "synthetic preview text")
 	}
 
 	@Test
 	fun testTelegramRowsExposeOutgoingLatestPreviewDirection() {
-		val item = TelegramInboxThreadItem(
-			TelegramChat(7L, "chat", 42, "synthetic\npreview\ttext", true)
-		)
+		val item = telegramItem(text = "synthetic\npreview\ttext", outgoing = true)
 
 		assertPreviewState(
 			item,
@@ -64,7 +60,7 @@ class InboxThreadMergerTest {
 
 	@Test
 	fun testTelegramRowsExposeEmptyPreviewState() {
-		val item = TelegramInboxThreadItem(TelegramChat(7L, "chat", 42))
+		val item = telegramItem()
 
 		assertPreviewState(item)
 	}
@@ -94,6 +90,9 @@ class InboxThreadMergerTest {
 		override val latestActivityMillis: Long,
 		override val connectorSource: ConnectorSource?,
 	) : InboxThreadItem
+
+	private fun telegramItem(text: String = "", outgoing: Boolean = false) =
+		TelegramInboxThreadItem(TelegramChat(7L, "chat", 42, text, outgoing))
 
 	private fun assertPreviewState(
 		item: TelegramInboxThreadItem,
