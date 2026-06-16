@@ -50,6 +50,14 @@ class ReflectiveTelegramTdlibLoginClientTest {
 		assertSentRequests(SET_PARAMETERS, SET_PHONE, CHECK_CODE, CHECK_PASSWORD, *tail)
 	}
 
+	private fun assertPasswordFlowRequestsAndClose(
+		client: ReflectiveTelegramTdlibLoginClient,
+		vararg tail: String,
+	) {
+		assertPasswordFlowRequests(*tail)
+		client.close()
+	}
+
 	private fun assertSentRequestsAndClose(
 		client: ReflectiveTelegramTdlibLoginClient,
 		vararg requestNames: String,
@@ -322,8 +330,7 @@ class ReflectiveTelegramTdlibLoginClientTest {
 
 		startToPasswordEntry(client)
 		client.assertSuccessfulState(TelegramAuthState.READY, client.submitPassword("hunter2"))
-		assertPasswordFlowRequests()
-		client.close()
+		assertPasswordFlowRequestsAndClose(client)
 	}
 
 	@Test
@@ -346,9 +353,7 @@ class ReflectiveTelegramTdlibLoginClientTest {
 
 		submitPasswordThread.join()
 		assertEquals(TelegramAuthState.CLOSED, delayedPasswordResult[0])
-		assertPasswordFlowRequests(CLOSE)
-
-		client.close()
+		assertPasswordFlowRequestsAndClose(client, CLOSE)
 	}
 
 	@Test
@@ -359,9 +364,7 @@ class ReflectiveTelegramTdlibLoginClientTest {
 		assertPasswordFlowRequests()
 
 		client.assertSuccessfulState(TelegramAuthState.READY, client.submitPassword("hunter2"))
-		assertPasswordFlowRequests(CHECK_PASSWORD)
-
-		client.close()
+		assertPasswordFlowRequestsAndClose(client, CHECK_PASSWORD)
 	}
 
 	@Test
@@ -375,8 +378,7 @@ class ReflectiveTelegramTdlibLoginClientTest {
 		assertRecoverableTimeout(client, "password wait timeout") {
 			client.submitPassword("hunter2")
 		}
-		assertPasswordFlowRequests(CLOSE)
-		client.close()
+		assertPasswordFlowRequestsAndClose(client, CLOSE)
 	}
 
 	@Test
@@ -393,8 +395,6 @@ class ReflectiveTelegramTdlibLoginClientTest {
 			TelegramAuthState.CODE_ENTRY,
 			client.submitIdentifier("test-login-identifier"),
 		)
-		assertPasswordFlowRequests(CLOSE, SET_PARAMETERS, SET_PHONE)
-
-		client.close()
+		assertPasswordFlowRequestsAndClose(client, CLOSE, SET_PARAMETERS, SET_PHONE)
 	}
 }
