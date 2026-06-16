@@ -100,10 +100,8 @@ class InboxThreadMergerTest {
 		isPreviewLoading: Boolean = false,
 		isLastMessageOutgoing: Boolean = false,
 	) {
-		assertEquals(isPreviewLoading, item.isPreviewLoading)
-		assertEquals(isLastMessageOutgoing, item.isLastMessageOutgoing)
-		assertEquals(previewText.isNotEmpty(), item.hasPreviewText())
-		assertEquals(previewText, item.previewText)
+		assertEquals(listOf(isPreviewLoading, isLastMessageOutgoing, previewText.isNotEmpty(), previewText),
+				listOf(item.isPreviewLoading, item.isLastMessageOutgoing, item.hasPreviewText(), item.previewText))
 	}
 
 	private companion object {
