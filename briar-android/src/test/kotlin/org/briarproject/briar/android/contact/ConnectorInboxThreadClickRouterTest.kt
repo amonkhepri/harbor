@@ -36,8 +36,7 @@ class ConnectorInboxThreadClickRouterTest {
 
 		ConnectorInboxThreadClickRouter(listener).onItemClick(view, item)
 
-		assertEquals(0, listener.briarClickCount)
-		assertEquals(1, listener.telegramClickCount)
+		assertEquals(0 to 1, listener.briarAndTelegramClickCounts)
 		assertSame(view, listener.telegramView)
 		assertSame(item, listener.telegramItem)
 	}
@@ -50,8 +49,7 @@ class ConnectorInboxThreadClickRouterTest {
 
 		ConnectorInboxThreadClickRouter(listener).onItemClick(view, item)
 
-		assertEquals(0, listener.briarClickCount)
-		assertEquals(0, listener.telegramClickCount)
+		assertEquals(0 to 0, listener.briarAndTelegramClickCounts)
 		assertNull(listener.telegramView)
 		assertNull(listener.telegramItem)
 	}
@@ -59,6 +57,7 @@ class ConnectorInboxThreadClickRouterTest {
 	private class RecordingListener : OnInboxThreadClickListener {
 		var briarClickCount = 0
 		var telegramClickCount = 0
+		val briarAndTelegramClickCounts get() = briarClickCount to telegramClickCount
 		var telegramView: View? = null
 		var telegramItem: TelegramInboxThreadItem? = null
 
