@@ -230,8 +230,7 @@ class TelegramConnectorMessageTest {
 
 		assertSnapshot(snapshot, TelegramMessageIngestStatus.MESSAGE_COUNT_AVAILABLE, 2, 1)
 		// should call getRecentMessages for both chats
-		assertTrue(client.messageChatIds.contains(emptyChat.id))
-		assertTrue(client.messageChatIds.contains(textChat.id))
+		assertEquals(setOf(emptyChat.id, textChat.id), client.messageChatIds.toSet())
 	}
 
 	private fun readyReflectiveMessageClient(
