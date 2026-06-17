@@ -191,8 +191,7 @@ class ReflectiveTelegramTdlibLoginClientTest {
 		)
 
 		startToCodeEntry(client)
-		assertEquals(12345, Client.getLastApiId())
-		assertEquals("test-api-hash", Client.getLastApiHash())
+		assertEquals(12345 to "test-api-hash", Client.getLastApiId() to Client.getLastApiHash())
 
 		client.close()
 	}
