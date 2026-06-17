@@ -2,8 +2,6 @@ package org.briarproject.briar.android.contact
 
 import android.view.View
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertSame
-import org.junit.Assert.assertNull
 import org.junit.Test
 import org.mockito.Mockito.mock
 
@@ -36,8 +34,7 @@ class ConnectorInboxThreadClickRouterTest {
 		ConnectorInboxThreadClickRouter(listener).onItemClick(view, item)
 
 		assertEquals(0 to 1, listener.briarAndTelegramClickCounts)
-		assertSame(view, listener.telegramView)
-		assertSame(item, listener.telegramItem)
+		assertEquals(view to item, listener.telegramForwardedClick)
 	}
 
 	@Test
@@ -49,8 +46,7 @@ class ConnectorInboxThreadClickRouterTest {
 		ConnectorInboxThreadClickRouter(listener).onItemClick(view, item)
 
 		assertEquals(0 to 0, listener.briarAndTelegramClickCounts)
-		assertNull(listener.telegramView)
-		assertNull(listener.telegramItem)
+		assertEquals(null to null, listener.telegramForwardedClick)
 	}
 
 	private class RecordingListener : OnInboxThreadClickListener {
@@ -59,6 +55,7 @@ class ConnectorInboxThreadClickRouterTest {
 		val briarAndTelegramClickCounts get() = briarClickCount to telegramClickCount
 		var telegramView: View? = null
 		var telegramItem: TelegramInboxThreadItem? = null
+		val telegramForwardedClick get() = telegramView to telegramItem
 
 		override fun onBriarItemClick(view: View, item: ContactListItem) {
 			briarClickCount++
