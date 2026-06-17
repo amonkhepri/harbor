@@ -81,8 +81,7 @@ class TelegramConnectorMessageTest {
 		assertFalse(client.isAuthorized())
 		assertEquals(emptyList<TelegramChat>(), client.getRecentChats(5))
 		assertEquals(emptyList<TelegramMessage>(), client.getRecentMessages(10L, 5))
-		assertFalse(Client.getSentRequestNames().contains("GetChats"))
-		assertFalse(Client.getSentRequestNames().contains("GetChatHistory"))
+		assertTrue(Client.getSentRequestNames().none { it in listOf("GetChats", "GetChatHistory") })
 	}
 
 	@Test
