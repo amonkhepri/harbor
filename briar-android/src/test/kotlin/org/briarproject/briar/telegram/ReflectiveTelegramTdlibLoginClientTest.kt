@@ -176,10 +176,9 @@ class ReflectiveTelegramTdlibLoginClientTest {
 
 		startToCodeEntry(client)
 		assertEquals(
-			File(tdlibDir, "database").path,
-			Client.getLastDatabaseDirectory(),
+			File(tdlibDir, "database").path to File(tdlibDir, "files").path,
+			Client.getLastDatabaseDirectory() to Client.getLastFilesDirectory(),
 		)
-		assertEquals(File(tdlibDir, "files").path, Client.getLastFilesDirectory())
 
 		client.close()
 	}
