@@ -33,8 +33,7 @@ class ConnectorInboxThreadClickRouterTest {
 
 		ConnectorInboxThreadClickRouter(listener).onItemClick(view, item)
 
-		assertEquals(0 to 1, listener.briarAndTelegramClickCounts)
-		assertEquals(view to item, listener.telegramForwardedClick)
+		assertEquals((0 to 1) to (view to item), listener.callbackState)
 	}
 
 	@Test
@@ -45,8 +44,7 @@ class ConnectorInboxThreadClickRouterTest {
 
 		ConnectorInboxThreadClickRouter(listener).onItemClick(view, item)
 
-		assertEquals(0 to 0, listener.briarAndTelegramClickCounts)
-		assertEquals(null to null, listener.telegramForwardedClick)
+		assertEquals((0 to 0) to (null to null), listener.callbackState)
 	}
 
 	private class RecordingListener : OnInboxThreadClickListener {
@@ -56,6 +54,7 @@ class ConnectorInboxThreadClickRouterTest {
 		var telegramView: View? = null
 		var telegramItem: TelegramInboxThreadItem? = null
 		val telegramForwardedClick get() = telegramView to telegramItem
+		val callbackState get() = briarAndTelegramClickCounts to telegramForwardedClick
 
 		override fun onBriarItemClick(view: View, item: ContactListItem) {
 			briarClickCount++
