@@ -148,8 +148,7 @@ class TelegramConnectorMessageTest {
 
 		val messages = client.getRecentMessages(10L, 4)
 
-		assertEquals(listOf(40L, 30L, 20L, 10L), messages.map { it.messageId })
-		assertEquals(listOf("latest", "middle", "older", "oldest"), messages.map { it.text })
+		assertEquals(listOf(40L, 30L, 20L, 10L) to listOf("latest", "middle", "older", "oldest"), messages.map { it.messageId } to messages.map { it.text })
 		assertSentRequests("GetChatHistory", "GetChatHistory", "GetChatHistory", "Close")
 	}
 
