@@ -81,8 +81,8 @@ class TelegramConnectorMessageTest {
 	fun testReflectiveClientReportsAuthorizationReady() {
 		val client = readyReflectiveMessageClient()
 
-		assertTrue(client.isAuthorized())
-		assertSentRequests("Close")
+		assertEquals(true to listOf("Close"),
+				client.isAuthorized() to Client.getSentRequestNames())
 	}
 
 	@Test
