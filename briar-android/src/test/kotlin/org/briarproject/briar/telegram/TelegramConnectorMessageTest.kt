@@ -33,8 +33,7 @@ class TelegramConnectorMessageTest {
 		val connector = NoOpTelegramConnector()
 
 		assertEquals(listOf(false, false), listOf(connector.isEnabled(), connector.isAuthorized()))
-		assertEquals(emptyList<TelegramChat>(), connector.getRecentChats(5))
-		assertEquals(emptyList<TelegramMessage>(), connector.getRecentMessages(1L, 5))
+		assertEquals(emptyList<TelegramChat>() to emptyList<TelegramMessage>(), connector.getRecentChats(5) to connector.getRecentMessages(1L, 5))
 	}
 
 	@Test
