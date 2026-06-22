@@ -89,8 +89,8 @@ class ReflectiveTelegramTdlibLoginClientTest {
 		expectedDetail: RecoverableErrorDetail,
 		action: () -> TelegramAuthState,
 	) {
-		assertEquals(TelegramAuthState.RECOVERABLE_ERROR, action())
-		assertEquals(expectedDetail, client.getRecoverableErrorDetail())
+		assertEquals(TelegramAuthState.RECOVERABLE_ERROR to expectedDetail,
+			action() to client.getRecoverableErrorDetail())
 	}
 
 	private fun assertInvalidPasswordFromPasswordEntry(client: ReflectiveTelegramTdlibLoginClient) {
