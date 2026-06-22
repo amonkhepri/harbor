@@ -80,8 +80,8 @@ class ReflectiveTelegramTdlibLoginClientTest {
 		expectedState: TelegramAuthState,
 		actualState: TelegramAuthState,
 	) {
-		assertEquals(expectedState, actualState)
-		assertEquals(RecoverableErrorDetail.NONE, getRecoverableErrorDetail())
+		assertEquals(expectedState to RecoverableErrorDetail.NONE,
+			actualState to getRecoverableErrorDetail())
 	}
 
 	private fun assertRecoverableError(
