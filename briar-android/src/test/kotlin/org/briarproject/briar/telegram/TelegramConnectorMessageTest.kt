@@ -76,8 +76,7 @@ class TelegramConnectorMessageTest {
 		val client = ReflectiveTelegramTdlibMessageClient(requestTimeoutMs = 1_000L)
 
 		assertFalse(client.isAuthorized())
-		assertEquals(emptyList<TelegramChat>(), client.getRecentChats(5))
-		assertEquals(emptyList<TelegramMessage>(), client.getRecentMessages(10L, 5))
+		assertEquals(emptyList<TelegramChat>() to emptyList<TelegramMessage>(), client.getRecentChats(5) to client.getRecentMessages(10L, 5))
 		assertTrue(Client.getSentRequestNames().none { it in listOf("GetChats", "GetChatHistory") })
 	}
 
