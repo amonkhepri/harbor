@@ -42,8 +42,7 @@ class TelegramConnectorMessageTest {
 		val connector = StubTelegramConnector(client)
 
 		assertEquals(listOf(true, true), listOf(connector.isEnabled(), connector.isAuthorized()))
-		assertEquals(client.chats, connector.getRecentChats(3))
-		assertEquals(client.messages, connector.getRecentMessages(10L, 2))
+		assertEquals(client.chats to client.messages, connector.getRecentChats(3) to connector.getRecentMessages(10L, 2))
 		assertEquals(Triple(3, 10L, 2), client.lastRequestLimits())
 	}
 
