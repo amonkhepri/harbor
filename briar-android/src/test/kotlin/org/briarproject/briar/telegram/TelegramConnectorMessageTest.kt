@@ -59,13 +59,11 @@ class TelegramConnectorMessageTest {
 		assertEquals(ConnectorSources.TELEGRAM, connector.source)
 		assertEquals(
 				listOf(ConnectorThread(ConnectorSources.TELEGRAM, "10",
-						"synthetic", 1_700_000_000, "preview", true)),
-				connector.getRecentThreads(3),
-		)
-		assertEquals(
+						"synthetic", 1_700_000_000, "preview", true)) to
 				listOf(ConnectorMessage(ConnectorSources.TELEGRAM, "10", "20",
 						1_700_000_001, false, "body", 20L)),
-				connector.getRecentMessages("10", 2),
+				connector.getRecentThreads(3) to
+						connector.getRecentMessages("10", 2),
 		)
 	}
 
