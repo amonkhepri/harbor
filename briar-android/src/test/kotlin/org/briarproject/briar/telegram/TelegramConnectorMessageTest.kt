@@ -103,10 +103,7 @@ class TelegramConnectorMessageTest {
 
 		assertEquals(
 				listOf(TelegramChat(10L, "", 1_700_000_000,
-						"chat preview", true)),
-				client.getRecentChats(3),
-		)
-		assertEquals(
+						"chat preview", true)) to
 				listOf(
 						TelegramMessage(
 								chatId = 10L,
@@ -116,7 +113,7 @@ class TelegramConnectorMessageTest {
 								text = "",
 						),
 				),
-				client.getRecentMessages(10L, 3),
+				client.getRecentChats(3) to client.getRecentMessages(10L, 3),
 		)
 		assertSentRequests(
 				"GetChats",
