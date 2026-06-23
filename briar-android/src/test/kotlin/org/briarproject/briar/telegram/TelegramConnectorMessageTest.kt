@@ -10,7 +10,6 @@ import org.briarproject.briar.api.telegram.TelegramMessageIngestStatus
 import org.drinkless.tdlib.Client
 import org.drinkless.tdlib.TdApi
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -72,8 +71,8 @@ class TelegramConnectorMessageTest {
 		Client.resetTestState()
 		val client = ReflectiveTelegramTdlibMessageClient(requestTimeoutMs = 1_000L)
 
-		assertFalse(client.isAuthorized())
-		assertEquals(emptyList<TelegramChat>() to emptyList<TelegramMessage>(), client.getRecentChats(5) to client.getRecentMessages(10L, 5))
+		assertEquals(false to (emptyList<TelegramChat>() to emptyList<TelegramMessage>()),
+				client.isAuthorized() to (client.getRecentChats(5) to client.getRecentMessages(10L, 5)))
 		assertTrue(Client.getSentRequestNames().none { it in listOf("GetChats", "GetChatHistory") })
 	}
 
