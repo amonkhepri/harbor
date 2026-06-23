@@ -369,10 +369,7 @@ class ReflectiveTelegramTdlibLoginClientTest {
 		assertPasswordFlowRequests(CLOSE)
 
 		client.assertSuccessfulState(TelegramAuthState.IDENTIFIER_ENTRY, client.start())
-		client.assertSuccessfulState(
-			TelegramAuthState.CODE_ENTRY,
-			client.submitIdentifier("test-login-identifier"),
-		)
+		client.assertSuccessfulState(TelegramAuthState.CODE_ENTRY, client.submitIdentifier("test-login-identifier"))
 		assertPasswordFlowRequestsAndClose(client, CLOSE, SET_PARAMETERS, SET_PHONE)
 	}
 }
