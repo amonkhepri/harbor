@@ -100,8 +100,7 @@ class ReflectiveTelegramTdlibLoginClientTest {
 		val startTime = System.currentTimeMillis()
 		assertRecoverableError(client, RecoverableErrorDetail.NONE, action)
 		val elapsed = System.currentTimeMillis() - startTime
-		assertEquals("Expected $expectedWaitDescription around 1s, got ${elapsed}ms",
-			true, elapsed >= 900L)
+		assertEquals("Expected $expectedWaitDescription around 1s, got ${elapsed}ms", true, elapsed >= 900L)
 	}
 
 	private fun assertMissingCredentialsAfterIdentifierSubmit(
