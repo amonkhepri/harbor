@@ -2,7 +2,6 @@ package org.briarproject.briar.android.contact
 
 import org.briarproject.briar.api.connector.ConnectorSource
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Test
 
 class InboxThreadAdapterTest {
@@ -20,7 +19,7 @@ class InboxThreadAdapterTest {
 	fun testConnectorContentsCompareGenericFields() {
 		val item = connectorItem(previewText = "synthetic preview")
 		fun assertContentsChanged(changed: FakeConnectorInboxThreadItem) =
-			assertFalse(callback.areContentsTheSame(item, changed))
+			assertEquals(false, callback.areContentsTheSame(item, changed))
 
 		assertEquals(true to true, callback.areItemsTheSame(item, item.copy()) to
 				callback.areContentsTheSame(item, item.copy()))
