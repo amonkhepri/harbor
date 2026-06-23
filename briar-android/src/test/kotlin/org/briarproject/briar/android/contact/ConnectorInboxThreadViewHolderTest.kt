@@ -43,10 +43,7 @@ class ConnectorInboxThreadViewHolderTest {
 		)).thenReturn("Messenger source")
 
 		assertEquals("Messenger source",
-			ConnectorInboxThreadViewHolder.sourceContentDescription(
-				resources,
-				item
-			))
+			ConnectorInboxThreadViewHolder.sourceContentDescription(resources, item))
 	}
 
 	private fun genericConnectorItem() = FakeConnectorInboxThreadItem(
