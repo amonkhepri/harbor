@@ -37,10 +37,8 @@ class ConnectorInboxThreadViewHolderTest {
 	fun testConnectorSourceDescriptionUsesSourceDisplayName() {
 		val resources = mock(Resources::class.java)
 		val item = genericConnectorItem()
-		`when`(resources.getString(
-			R.string.connector_thread_source_content_description,
-			"Messenger"
-		)).thenReturn("Messenger source")
+		`when`(resources.getString(R.string.connector_thread_source_content_description,
+			"Messenger")).thenReturn("Messenger source")
 
 		assertEquals("Messenger source",
 			ConnectorInboxThreadViewHolder.sourceContentDescription(resources, item))
