@@ -23,10 +23,7 @@ class ConnectorInboxThreadViewHolderTest {
 	@Test
 	fun testConnectorSourceIcons() {
 		fun assertSourceIcon(item: ConnectorInboxThreadItem, expectedIconRes: Int) {
-			assertEquals(
-				expectedIconRes,
-				ConnectorInboxThreadViewHolder.sourceIconRes(item)
-			)
+			assertEquals(expectedIconRes, ConnectorInboxThreadViewHolder.sourceIconRes(item))
 		}
 
 		assertSourceIcon(
