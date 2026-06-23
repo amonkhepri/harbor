@@ -66,8 +66,7 @@ class ReflectiveTelegramTdlibLoginClientTest {
 		vararg requestNames: String,
 		expectedPhone: String = "test-login-identifier",
 	) {
-		assertEquals(requestNames.toList() to expectedPhone,
-			Client.getSentRequestNames() to Client.getLastPhoneNumber())
+		assertEquals(requestNames.toList() to expectedPhone, Client.getSentRequestNames() to Client.getLastPhoneNumber())
 		client.close()
 	}
 
