@@ -198,33 +198,25 @@ class ReflectiveTelegramTdlibLoginClientTest {
 
 	@Test
 	fun testSubmitIdentifierReturnsMissingCredentialsWithoutConfiguredApiId() {
-		val client = ReflectiveTelegramTdlibLoginClient(
-			apiId = 0,
-			apiHash = "test-api-hash",
+		assertMissingCredentialsAfterIdentifierSubmit(
+			ReflectiveTelegramTdlibLoginClient(apiId = 0, apiHash = "test-api-hash"),
 		)
-
-		assertMissingCredentialsAfterIdentifierSubmit(client)
 	}
 
 	@Test
 	fun testSubmitIdentifierReturnsMissingCredentialsWithoutConfiguredApiHash() {
-		val client = ReflectiveTelegramTdlibLoginClient(
-			apiId = 12345,
-			apiHash = "",
+		assertMissingCredentialsAfterIdentifierSubmit(
+			ReflectiveTelegramTdlibLoginClient(apiId = 12345, apiHash = ""),
 		)
-
-		assertMissingCredentialsAfterIdentifierSubmit(client)
 	}
 
 	@Test
 	fun testSubmitIdentifierReturnsMissingCredentialsWhenTdlibRejectsParameters() {
 		Client.setTdlibParametersError(true)
-		val client = ReflectiveTelegramTdlibLoginClient(
-			apiId = 12345,
-			apiHash = "test-api-hash",
+		assertMissingCredentialsAfterIdentifierSubmit(
+			ReflectiveTelegramTdlibLoginClient(apiId = 12345, apiHash = "test-api-hash"),
+			SET_PARAMETERS,
 		)
-
-		assertMissingCredentialsAfterIdentifierSubmit(client, SET_PARAMETERS)
 	}
 
 	@Test
