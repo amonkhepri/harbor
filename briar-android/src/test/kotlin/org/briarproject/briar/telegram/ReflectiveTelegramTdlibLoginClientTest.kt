@@ -5,7 +5,6 @@ import org.briarproject.briar.api.telegram.TelegramAuthState
 import org.drinkless.tdlib.Client
 import org.junit.After
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 
@@ -108,10 +107,8 @@ class ReflectiveTelegramTdlibLoginClientTest {
 		val startTime = System.currentTimeMillis()
 		assertRecoverableError(client, RecoverableErrorDetail.NONE, action)
 		val elapsed = System.currentTimeMillis() - startTime
-		assertTrue(
-			"Expected $expectedWaitDescription around 1s, got ${elapsed}ms",
-			elapsed >= 900L,
-		)
+		assertEquals("Expected $expectedWaitDescription around 1s, got ${elapsed}ms",
+			true, elapsed >= 900L)
 	}
 
 	private fun assertMissingCredentialsAfterIdentifierSubmit(
@@ -252,7 +249,8 @@ class ReflectiveTelegramTdlibLoginClientTest {
 			client.submitIdentifier("test-login-identifier"),
 		)
 		val elapsed = System.currentTimeMillis() - startTime
-		assertTrue("Expected delayed phone result, got ${elapsed}ms", elapsed >= 1_100L)
+		assertEquals("Expected delayed phone result, got ${elapsed}ms", true,
+			elapsed >= 1_100L)
 		assertPhoneRequestsAndClose(client, SET_PARAMETERS, SET_PHONE)
 	}
 
