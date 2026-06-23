@@ -57,11 +57,7 @@ class InboxThreadMergerTest {
 
 	@Test
 	fun testMixedItemsSortNewestFirst() {
-		val items = mutableListOf<InboxThreadItem>(
-			FakeInboxThreadItem("older", 1L, null),
-			FakeInboxThreadItem("newer", 3L, ConnectorSources.TELEGRAM),
-			FakeInboxThreadItem("middle", 2L, null),
-		)
+		val items = mutableListOf<InboxThreadItem>(FakeInboxThreadItem("older", 1L, null), FakeInboxThreadItem("newer", 3L, ConnectorSources.TELEGRAM), FakeInboxThreadItem("middle", 2L, null))
 
 		InboxThreadMerger.sort(items)
 
