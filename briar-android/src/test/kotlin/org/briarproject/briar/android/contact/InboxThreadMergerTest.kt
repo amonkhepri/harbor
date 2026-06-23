@@ -21,14 +21,7 @@ class InboxThreadMergerTest {
 
 	@Test
 	fun testMergeAcceptsGenericConnectorRows() {
-		val items = InboxThreadMerger.merge(
-			emptyList(),
-			listOf(FakeConnectorInboxThreadItem(
-				connectorSource = MESSENGER,
-				connectorThreadId = "123",
-				latestActivityMillis = 7L,
-			))
-		)
+		val items = InboxThreadMerger.merge(emptyList(), listOf(FakeConnectorInboxThreadItem(connectorSource = MESSENGER, connectorThreadId = "123", latestActivityMillis = 7L)))
 
 		val item = items[0] as ConnectorInboxThreadItem
 		assertEquals(MESSENGER to "messenger:123", item.connectorSource to item.stableId)
