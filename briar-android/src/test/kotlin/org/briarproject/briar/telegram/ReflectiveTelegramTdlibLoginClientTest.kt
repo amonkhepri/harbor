@@ -237,10 +237,7 @@ class ReflectiveTelegramTdlibLoginClientTest {
 
 		assertEquals(TelegramAuthState.IDENTIFIER_ENTRY, client.start())
 		val startTime = System.currentTimeMillis()
-		client.assertSuccessfulState(
-			TelegramAuthState.CODE_ENTRY,
-			client.submitIdentifier("test-login-identifier"),
-		)
+		client.assertSuccessfulState(TelegramAuthState.CODE_ENTRY, client.submitIdentifier("test-login-identifier"))
 		val elapsed = System.currentTimeMillis() - startTime
 		assertEquals("Expected delayed phone result, got ${elapsed}ms", true,
 			elapsed >= 1_100L)
