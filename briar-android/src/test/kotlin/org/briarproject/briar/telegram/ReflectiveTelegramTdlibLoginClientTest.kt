@@ -29,8 +29,7 @@ class ReflectiveTelegramTdlibLoginClientTest {
 		client: ReflectiveTelegramTdlibLoginClient,
 		identifier: String = "test-login-identifier",
 	) {
-		assertEquals(TelegramAuthState.IDENTIFIER_ENTRY to TelegramAuthState.CODE_ENTRY,
-			client.start() to client.submitIdentifier(identifier))
+		assertEquals(TelegramAuthState.IDENTIFIER_ENTRY to TelegramAuthState.CODE_ENTRY, client.start() to client.submitIdentifier(identifier))
 	}
 
 	private fun startToPasswordEntry(client: ReflectiveTelegramTdlibLoginClient) {
