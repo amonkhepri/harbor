@@ -64,11 +64,7 @@ class InboxThreadMergerTest {
 		assertEquals(listOf("newer", "middle", "older"), items.map { it.stableId })
 	}
 
-	private class FakeInboxThreadItem(
-		override val stableId: String,
-		override val latestActivityMillis: Long,
-		override val connectorSource: ConnectorSource?,
-	) : InboxThreadItem
+	private class FakeInboxThreadItem(override val stableId: String, override val latestActivityMillis: Long, override val connectorSource: ConnectorSource?) : InboxThreadItem
 
 	private fun telegramItem(text: String = "", outgoing: Boolean = false) =
 		TelegramInboxThreadItem(TelegramChat(7L, "chat", 42, text, outgoing))
