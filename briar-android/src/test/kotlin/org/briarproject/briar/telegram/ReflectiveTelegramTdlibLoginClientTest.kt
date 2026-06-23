@@ -35,10 +35,7 @@ class ReflectiveTelegramTdlibLoginClientTest {
 
 	private fun startToPasswordEntry(client: ReflectiveTelegramTdlibLoginClient) {
 		startToCodeEntry(client)
-		assertEquals(
-			TelegramAuthState.PASSWORD_ENTRY,
-			client.submitCode("password-required"),
-		)
+		assertEquals(TelegramAuthState.PASSWORD_ENTRY, client.submitCode("password-required"))
 	}
 
 	private fun assertSentRequests(vararg requestNames: String) {
