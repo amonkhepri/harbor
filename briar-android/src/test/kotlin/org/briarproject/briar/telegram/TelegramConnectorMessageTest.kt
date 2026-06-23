@@ -154,10 +154,7 @@ class TelegramConnectorMessageTest {
 				requestTimeoutMs = 1_000L,
 		)
 
-		assertEquals(
-				listOf(TelegramChat(11L, "", 1_700_000_003)),
-				client.getRecentChats(1),
-		)
+		assertEquals(listOf(TelegramChat(11L, "", 1_700_000_003)), client.getRecentChats(1))
 		assertSentRequests("SetTdlibParameters", "GetChats", "GetChat", "Close")
 	}
 
