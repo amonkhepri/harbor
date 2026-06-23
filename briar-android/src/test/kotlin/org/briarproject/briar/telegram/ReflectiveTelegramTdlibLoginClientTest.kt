@@ -155,10 +155,7 @@ class ReflectiveTelegramTdlibLoginClientTest {
 		val client = createClient()
 
 		client.assertSuccessfulState(TelegramAuthState.IDENTIFIER_ENTRY, client.start())
-		client.assertSuccessfulState(
-			TelegramAuthState.CODE_ENTRY,
-			client.submitIdentifier("test-login-identifier"),
-		)
+		client.assertSuccessfulState(TelegramAuthState.CODE_ENTRY, client.submitIdentifier("test-login-identifier"))
 		assertPhoneRequestsAndClose(client, SET_PARAMETERS, SET_PHONE)
 	}
 
