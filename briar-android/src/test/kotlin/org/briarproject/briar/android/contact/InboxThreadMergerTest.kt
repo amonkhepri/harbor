@@ -10,10 +10,7 @@ class InboxThreadMergerTest {
 
 	@Test
 	fun testTelegramRowsMapSecondsToMillis() {
-		val items = InboxThreadMerger.merge(
-			emptyList(),
-			listOf(telegramItem())
-		)
+		val items = InboxThreadMerger.merge(emptyList(), listOf(telegramItem()))
 
 		val item = items[0] as TelegramInboxThreadItem
 		val rowIdentity = Triple(item.chatId, item.title, item.latestActivityMillis)
