@@ -45,11 +45,7 @@ class InboxThreadMergerTest {
 	fun testTelegramRowsExposeOutgoingLatestPreviewDirection() {
 		val item = telegramItem(text = "synthetic\npreview\ttext", outgoing = true)
 
-		assertPreviewState(
-			item,
-			previewText = "synthetic preview text",
-			isLastMessageOutgoing = true,
-		)
+		assertPreviewState(item, previewText = "synthetic preview text", isLastMessageOutgoing = true)
 	}
 
 	@Test
