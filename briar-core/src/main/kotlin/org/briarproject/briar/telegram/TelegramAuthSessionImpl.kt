@@ -10,9 +10,8 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 
-class TelegramAuthSessionImpl(
-	private val tdlibLoginClient: TelegramTdlibLoginClient,
-) : TelegramAuthSession {
+class TelegramAuthSessionImpl(private val tdlibLoginClient: TelegramTdlibLoginClient) :
+	TelegramAuthSession {
 
 	private var currentState = TelegramAuthState.CLOSED
 
@@ -45,17 +44,13 @@ class TelegramAuthSessionImpl(
 class NoOpTelegramTdlibLoginClient : TelegramTdlibLoginClient {
 	override fun start(): TelegramAuthState = TelegramAuthState.CLOSED
 
-	override fun getRecoverableErrorDetail(): RecoverableErrorDetail =
-		RecoverableErrorDetail.NONE
+	override fun getRecoverableErrorDetail(): RecoverableErrorDetail = RecoverableErrorDetail.NONE
 
-	override fun submitIdentifier(identifier: String): TelegramAuthState =
-		TelegramAuthState.CLOSED
+	override fun submitIdentifier(identifier: String): TelegramAuthState = TelegramAuthState.CLOSED
 
-	override fun submitCode(code: String): TelegramAuthState =
-		TelegramAuthState.CLOSED
+	override fun submitCode(code: String): TelegramAuthState = TelegramAuthState.CLOSED
 
-	override fun submitPassword(password: String): TelegramAuthState =
-		TelegramAuthState.CLOSED
+	override fun submitPassword(password: String): TelegramAuthState = TelegramAuthState.CLOSED
 
 	override fun close(): TelegramAuthState = TelegramAuthState.CLOSED
 }
@@ -72,10 +67,18 @@ class ReflectiveTelegramTdlibLoginClient @JvmOverloads constructor(
 		val updateReceived = CountDownLatch(1)
 	}
 
+	private enum class CommandResult {
+		OK,
+		ERROR,
+		TIMEOUT,
+	}
+
 	private var lastAuthorizationStateClassName = ""
+
 	@Volatile
 	private var activeClientGeneration = 0L
 	private var nextClientGeneration = 0L
+
 	@Volatile
 	private var pendingAuthorizationUpdate: PendingAuthorizationUpdate? = null
 	private var recoverableErrorDetail = RecoverableErrorDetail.NONE
@@ -89,8 +92,7 @@ class ReflectiveTelegramTdlibLoginClient @JvmOverloads constructor(
 		return mapAuthorizationStateClassName(awaitAuthorizationStateClassName(true))
 	}
 
-	override fun getRecoverableErrorDetail(): RecoverableErrorDetail =
-		recoverableErrorDetail
+	override fun getRecoverableErrorDetail(): RecoverableErrorDetail = recoverableErrorDetail
 
 	override fun submitIdentifier(identifier: String): TelegramAuthState {
 		if (!hasText(identifier) || tdlibClient == null) {
@@ -102,11 +104,16 @@ class ReflectiveTelegramTdlibLoginClient @JvmOverloads constructor(
 					return recoverableError(RecoverableErrorDetail.MISSING_API_CREDENTIALS)
 				}
 				val tdlibParametersUpdate = prepareAuthorizationUpdate()
-				if (sendReturnsError(createSetTdlibParametersRequest())) {
-					return recoverableError(RecoverableErrorDetail.MISSING_API_CREDENTIALS)
+				when (sendForResult(createSetTdlibParametersRequest())) {
+					CommandResult.OK -> Unit
+					CommandResult.ERROR ->
+						return recoverableError(RecoverableErrorDetail.MISSING_API_CREDENTIALS)
+					CommandResult.TIMEOUT ->
+						return recoverableError(RecoverableErrorDetail.NONE)
 				}
 				if (awaitPreparedAuthorizationStateClassName(tdlibParametersUpdate) !=
-						"AuthorizationStateWaitPhoneNumber") {
+					"AuthorizationStateWaitPhoneNumber"
+				) {
 					return recoverableError(RecoverableErrorDetail.NONE)
 				}
 			}
@@ -114,11 +121,15 @@ class ReflectiveTelegramTdlibLoginClient @JvmOverloads constructor(
 				return recoverableError(RecoverableErrorDetail.NONE)
 			}
 			val phoneNumberUpdate = prepareAuthorizationUpdate()
-			if (sendReturnsError(createSetAuthenticationPhoneNumberRequest(identifier))) {
-				return recoverableError(RecoverableErrorDetail.INVALID_IDENTIFIER)
+			when (sendForResult(createSetAuthenticationPhoneNumberRequest(identifier))) {
+				CommandResult.OK -> Unit
+				CommandResult.ERROR ->
+					return recoverableError(RecoverableErrorDetail.INVALID_IDENTIFIER)
+				CommandResult.TIMEOUT ->
+					return recoverableError(RecoverableErrorDetail.NONE)
 			}
 			return mapAuthorizationStateClassName(
-					awaitPreparedAuthorizationStateClassName(phoneNumberUpdate),
+				awaitPreparedAuthorizationStateClassName(phoneNumberUpdate),
 			)
 		} catch (e: ReflectiveOperationException) {
 			closeTdlibClient()
@@ -134,14 +145,20 @@ class ReflectiveTelegramTdlibLoginClient @JvmOverloads constructor(
 	}
 
 	override fun submitCode(code: String): TelegramAuthState {
-		if (!hasText(code) || tdlibClient == null ||
-				lastAuthorizationStateClassName != "AuthorizationStateWaitCode") {
+		if (!hasText(code) ||
+			tdlibClient == null ||
+			lastAuthorizationStateClassName != "AuthorizationStateWaitCode"
+		) {
 			return recoverableError(RecoverableErrorDetail.NONE)
 		}
 		try {
 			val codeUpdate = prepareAuthorizationUpdate()
-			if (sendReturnsError(createCheckAuthenticationCodeRequest(code))) {
-				return recoverableError(RecoverableErrorDetail.INVALID_CODE)
+			when (sendForResult(createCheckAuthenticationCodeRequest(code))) {
+				CommandResult.OK -> Unit
+				CommandResult.ERROR ->
+					return recoverableError(RecoverableErrorDetail.INVALID_CODE)
+				CommandResult.TIMEOUT ->
+					return recoverableError(RecoverableErrorDetail.NONE)
 			}
 			return mapAuthorizationStateClassName(awaitPreparedAuthorizationStateClassName(codeUpdate))
 		} catch (e: ReflectiveOperationException) {
@@ -158,17 +175,23 @@ class ReflectiveTelegramTdlibLoginClient @JvmOverloads constructor(
 	}
 
 	override fun submitPassword(password: String): TelegramAuthState {
-		if (!hasText(password) || tdlibClient == null ||
-				lastAuthorizationStateClassName != "AuthorizationStateWaitPassword") {
+		if (!hasText(password) ||
+			tdlibClient == null ||
+			lastAuthorizationStateClassName != "AuthorizationStateWaitPassword"
+		) {
 			return recoverableError(RecoverableErrorDetail.NONE)
 		}
 		try {
 			val passwordUpdate = prepareAuthorizationUpdate()
-			if (sendReturnsError(createCheckAuthenticationPasswordRequest(password))) {
-				return recoverableError(RecoverableErrorDetail.INVALID_PASSWORD)
+			when (sendForResult(createCheckAuthenticationPasswordRequest(password))) {
+				CommandResult.OK -> Unit
+				CommandResult.ERROR ->
+					return recoverableError(RecoverableErrorDetail.INVALID_PASSWORD)
+				CommandResult.TIMEOUT ->
+					return recoverableError(RecoverableErrorDetail.NONE)
 			}
 			return mapAuthorizationStateClassName(
-					awaitPreparedAuthorizationStateClassName(passwordUpdate),
+				awaitPreparedAuthorizationStateClassName(passwordUpdate),
 			)
 		} catch (e: ReflectiveOperationException) {
 			closeTdlibClient()
@@ -206,20 +229,21 @@ class ReflectiveTelegramTdlibLoginClient @JvmOverloads constructor(
 		}
 	}
 
-	private fun prepareAuthorizationUpdate(): PendingAuthorizationUpdate {
-		return PendingAuthorizationUpdate().also {
+	private fun prepareAuthorizationUpdate(): PendingAuthorizationUpdate =
+		PendingAuthorizationUpdate().also {
 			pendingAuthorizationUpdate = it
 		}
-	}
 
 	@Throws(InterruptedException::class)
 	private fun awaitPreparedAuthorizationStateClassName(
 		pendingAuthorizationUpdate: PendingAuthorizationUpdate,
 	): String {
-		if (tdlibClient == null || !pendingAuthorizationUpdate.updateReceived.await(
-					authorizationUpdateTimeoutMs,
-					TimeUnit.MILLISECONDS,
-			)) {
+		if (tdlibClient == null ||
+			!pendingAuthorizationUpdate.updateReceived.await(
+				authorizationUpdateTimeoutMs,
+				TimeUnit.MILLISECONDS,
+			)
+		) {
 			closeTdlibClient()
 			return ""
 		}
@@ -236,26 +260,30 @@ class ReflectiveTelegramTdlibLoginClient @JvmOverloads constructor(
 		val resultHandlerClass = Class.forName("org.drinkless.tdlib.Client\$ResultHandler")
 		val exceptionHandlerClass = Class.forName("org.drinkless.tdlib.Client\$ExceptionHandler")
 		val updateHandler = Proxy.newProxyInstance(
-				resultHandlerClass.classLoader,
-				arrayOf(resultHandlerClass),
-			) { _, method, args ->
+			resultHandlerClass.classLoader,
+			arrayOf(resultHandlerClass),
+		) { _, method, args ->
 			val pendingAuthorizationUpdate = pendingAuthorizationUpdate
 			if (clientGeneration == activeClientGeneration &&
-					method.name == "onResult" && args != null && args.size == 1 &&
-					pendingAuthorizationUpdate != null) {
+				method.name == "onResult" &&
+				args != null &&
+				args.size == 1 &&
+				pendingAuthorizationUpdate != null
+			) {
 				val className = getAuthorizationStateClassName(args[0])
 				if (className.isNotEmpty() &&
-						pendingAuthorizationUpdate.authorizationStateClassName.compareAndSet("", className)) {
+					pendingAuthorizationUpdate.authorizationStateClassName.compareAndSet("", className)
+				) {
 					pendingAuthorizationUpdate.updateReceived.countDown()
 				}
 			}
 			null
 		}
 		val create = clientClass.getMethod(
-				"create",
-				resultHandlerClass,
-				exceptionHandlerClass,
-				exceptionHandlerClass,
+			"create",
+			resultHandlerClass,
+			exceptionHandlerClass,
+			exceptionHandlerClass,
 		)
 		return create.invoke(null, updateHandler, null, null)
 	}
@@ -267,8 +295,8 @@ class ReflectiveTelegramTdlibLoginClient @JvmOverloads constructor(
 		databaseDirectory.mkdirs()
 		filesDirectory.mkdirs()
 		val request = Class.forName("org.drinkless.tdlib.TdApi\$SetTdlibParameters")
-				.getConstructor()
-				.newInstance()
+			.getConstructor()
+			.newInstance()
 		setFieldIfPresent(request, "useTestDc", false)
 		setFieldIfPresent(request, "databaseDirectory", databaseDirectory.path)
 		setFieldIfPresent(request, "filesDirectory", filesDirectory.path)
@@ -289,27 +317,25 @@ class ReflectiveTelegramTdlibLoginClient @JvmOverloads constructor(
 	@Throws(ReflectiveOperationException::class)
 	private fun createSetAuthenticationPhoneNumberRequest(identifier: String): Any {
 		val settingsClass = Class.forName(
-				"org.drinkless.tdlib.TdApi\$PhoneNumberAuthenticationSettings",
+			"org.drinkless.tdlib.TdApi\$PhoneNumberAuthenticationSettings",
 		)
 		val settings = settingsClass.getConstructor().newInstance()
 		return Class.forName("org.drinkless.tdlib.TdApi\$SetAuthenticationPhoneNumber")
-				.getConstructor(String::class.java, settingsClass)
-				.newInstance(identifier, settings)
+			.getConstructor(String::class.java, settingsClass)
+			.newInstance(identifier, settings)
 	}
 
 	@Throws(ReflectiveOperationException::class)
-	private fun createCheckAuthenticationCodeRequest(code: String): Any {
-		return Class.forName("org.drinkless.tdlib.TdApi\$CheckAuthenticationCode")
-				.getConstructor(String::class.java)
-				.newInstance(code)
-	}
+	private fun createCheckAuthenticationCodeRequest(code: String): Any =
+		Class.forName("org.drinkless.tdlib.TdApi\$CheckAuthenticationCode")
+			.getConstructor(String::class.java)
+			.newInstance(code)
 
 	@Throws(ReflectiveOperationException::class)
-	private fun createCheckAuthenticationPasswordRequest(password: String): Any {
-		return Class.forName("org.drinkless.tdlib.TdApi\$CheckAuthenticationPassword")
-				.getConstructor(String::class.java)
-				.newInstance(password)
-	}
+	private fun createCheckAuthenticationPasswordRequest(password: String): Any =
+		Class.forName("org.drinkless.tdlib.TdApi\$CheckAuthenticationPassword")
+			.getConstructor(String::class.java)
+			.newInstance(password)
 
 	@Throws(ReflectiveOperationException::class)
 	private fun setFieldIfPresent(target: Any, name: String, value: Any) {
@@ -324,31 +350,39 @@ class ReflectiveTelegramTdlibLoginClient @JvmOverloads constructor(
 		val functionClass = Class.forName("org.drinkless.tdlib.TdApi\$Function")
 		val resultHandlerClass = Class.forName("org.drinkless.tdlib.Client\$ResultHandler")
 		tdlibClient!!.javaClass.getMethod("send", functionClass, resultHandlerClass)
-				.invoke(tdlibClient, request, null)
+			.invoke(tdlibClient, request, null)
 	}
 
 	@Throws(ReflectiveOperationException::class, InterruptedException::class)
-	private fun sendReturnsError(request: Any): Boolean {
+	private fun sendForResult(request: Any): CommandResult {
 		val resultClassName = AtomicReference("")
 		val resultReceived = CountDownLatch(1)
 		val functionClass = Class.forName("org.drinkless.tdlib.TdApi\$Function")
 		val resultHandlerClass = Class.forName("org.drinkless.tdlib.Client\$ResultHandler")
 		val resultHandler = Proxy.newProxyInstance(
-				resultHandlerClass.classLoader,
-				arrayOf(resultHandlerClass),
-			) { _, method, args ->
-			if (method.name == "onResult" && args != null && args.size == 1 &&
-					resultClassName.compareAndSet("", args[0]?.javaClass?.simpleName ?: "")) {
+			resultHandlerClass.classLoader,
+			arrayOf(resultHandlerClass),
+		) { _, method, args ->
+			if (method.name == "onResult" &&
+				args != null &&
+				args.size == 1 &&
+				resultClassName.compareAndSet("", args[0]?.javaClass?.simpleName ?: "")
+			) {
 				resultReceived.countDown()
 			}
 			null
 		}
 		tdlibClient!!.javaClass.getMethod("send", functionClass, resultHandlerClass)
-				.invoke(tdlibClient, request, resultHandler)
+			.invoke(tdlibClient, request, resultHandler)
 		if (!resultReceived.await(authorizationUpdateTimeoutMs, TimeUnit.MILLISECONDS)) {
 			closeTdlibClient()
+			return CommandResult.TIMEOUT
 		}
-		return resultClassName.get() == "Error"
+		return if (resultClassName.get() == "Error") {
+			CommandResult.ERROR
+		} else {
+			CommandResult.OK
+		}
 	}
 
 	@Throws(ReflectiveOperationException::class)
@@ -360,10 +394,13 @@ class ReflectiveTelegramTdlibLoginClient @JvmOverloads constructor(
 		return authorizationState?.javaClass?.simpleName ?: ""
 	}
 
-	private fun mapAuthorizationStateClassName(className: String): TelegramAuthState {
-		return when (className) {
+	private fun mapAuthorizationStateClassName(className: String): TelegramAuthState =
+		when (className) {
 			"AuthorizationStateWaitTdlibParameters",
-			"AuthorizationStateWaitPhoneNumber" -> clearRecoverableErrorDetail(TelegramAuthState.IDENTIFIER_ENTRY)
+			"AuthorizationStateWaitPhoneNumber",
+			-> clearRecoverableErrorDetail(
+				TelegramAuthState.IDENTIFIER_ENTRY,
+			)
 			"AuthorizationStateWaitCode" -> clearRecoverableErrorDetail(TelegramAuthState.CODE_ENTRY)
 			"AuthorizationStateWaitPassword" -> clearRecoverableErrorDetail(TelegramAuthState.PASSWORD_ENTRY)
 			"AuthorizationStateReady" -> clearRecoverableErrorDetail(TelegramAuthState.READY)
@@ -373,7 +410,6 @@ class ReflectiveTelegramTdlibLoginClient @JvmOverloads constructor(
 				recoverableError(RecoverableErrorDetail.NONE)
 			}
 		}
-	}
 
 	private fun clearRecoverableErrorDetail(state: TelegramAuthState): TelegramAuthState {
 		recoverableErrorDetail = RecoverableErrorDetail.NONE
@@ -395,8 +431,8 @@ class ReflectiveTelegramTdlibLoginClient @JvmOverloads constructor(
 			val resultHandlerClass = Class.forName("org.drinkless.tdlib.Client\$ResultHandler")
 			val send: Method = client.javaClass.getMethod("send", functionClass, resultHandlerClass)
 			val closeRequest = Class.forName("org.drinkless.tdlib.TdApi\$Close")
-					.getConstructor()
-					.newInstance()
+				.getConstructor()
+				.newInstance()
 			send.invoke(client, closeRequest, null)
 		} catch (_: ReflectiveOperationException) {
 		} catch (_: LinkageError) {
@@ -413,18 +449,16 @@ class ReflectiveTelegramTdlibLoginClient @JvmOverloads constructor(
 
 	private fun hasText(value: String): Boolean = value.trim().isNotEmpty()
 
-	private fun tdlibClientClassExists(): Boolean {
-		return try {
-			Class.forName(
-					"org.drinkless.tdlib.Client",
-					false,
-					ReflectiveTelegramTdlibLoginClient::class.java.classLoader,
-			)
-			true
-		} catch (_: ClassNotFoundException) {
-			false
-		} catch (_: LinkageError) {
-			false
-		}
+	private fun tdlibClientClassExists(): Boolean = try {
+		Class.forName(
+			"org.drinkless.tdlib.Client",
+			false,
+			ReflectiveTelegramTdlibLoginClient::class.java.classLoader,
+		)
+		true
+	} catch (_: ClassNotFoundException) {
+		false
+	} catch (_: LinkageError) {
+		false
 	}
 }

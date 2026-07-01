@@ -1,8 +1,6 @@
 package org.drinkless.tdlib
 
-class Client private constructor(
-	private val updateHandler: ResultHandler,
-) {
+class Client private constructor(private val updateHandler: ResultHandler) {
 
 	fun interface ResultHandler {
 		fun onResult(obj: Any?)
@@ -45,7 +43,7 @@ class Client private constructor(
 					resultHandler?.onResult(TdApi.Error())
 					return
 				}
-				resultHandler?.onResult(TdApi.Ok())
+				emitResult(resultHandler, TdApi.Ok(), authenticationCodeResultDelayMs)
 				if (request.code.contains("password-required")) {
 					emitAuthorizationState(TdApi.AuthorizationStateWaitPassword())
 				} else {
@@ -62,33 +60,37 @@ class Client private constructor(
 			}
 			is TdApi.GetChats -> {
 				val chatIds = chatsById.keys.take(request.limit).toLongArray()
-				resultHandler?.onResult(TdApi.Chats().also {
-					it.totalCount = chatIds.size
-					it.chatIds = chatIds
-				})
+				resultHandler?.onResult(
+					TdApi.Chats().also {
+						it.totalCount = chatIds.size
+						it.chatIds = chatIds
+					},
+				)
 			}
 			is TdApi.GetChat -> {
 				resultHandler?.onResult(chatsById[request.chatId] ?: TdApi.Error())
 			}
 			is TdApi.GetChatHistory -> {
 				val messages = messagesByChatId[request.chatId]
-						.orEmpty()
-						.drop(historyStartIndex(request))
-						.take(request.limit)
-						.take(maxHistoryPageSize)
-						.toTypedArray()
-				resultHandler?.onResult(TdApi.Messages().also {
-					it.totalCount = messages.size
-					it.messages = messages
-				})
+					.orEmpty()
+					.drop(historyStartIndex(request))
+					.take(request.limit)
+					.take(maxHistoryPageSize)
+					.toTypedArray()
+				resultHandler?.onResult(
+					TdApi.Messages().also {
+						it.totalCount = messages.size
+						it.messages = messages
+					},
+				)
 			}
 			is TdApi.Close -> {
 				resultHandler?.onResult(TdApi.Ok())
 				emitAuthorizationState(TdApi.AuthorizationStateClosed())
 			}
 			else -> resultHandler?.onResult(TdApi.Ok())
+		}
 	}
-}
 
 	private fun emitAuthorizationState(authorizationState: Any) {
 		val delayMs = getAuthorizationUpdateDelayMs()
@@ -132,6 +134,7 @@ class Client private constructor(
 		private val authorizationUpdateDelaySequenceMs = mutableListOf<Long>()
 		private var authorizationUpdateDelayMs = 0L
 		private var phoneNumberResultDelayMs = 0L
+		private var authenticationCodeResultDelayMs = 0L
 		private var lastPhoneNumber = ""
 		private var lastDatabaseDirectory = ""
 		private var lastFilesDirectory = ""
@@ -159,6 +162,7 @@ class Client private constructor(
 			authorizationUpdateDelaySequenceMs.clear()
 			authorizationUpdateDelayMs = 0L
 			phoneNumberResultDelayMs = 0L
+			authenticationCodeResultDelayMs = 0L
 			lastPhoneNumber = ""
 			lastDatabaseDirectory = ""
 			lastFilesDirectory = ""
@@ -187,6 +191,11 @@ class Client private constructor(
 		@JvmStatic
 		fun setPhoneNumberResultDelayMs(delayMs: Long) {
 			phoneNumberResultDelayMs = delayMs
+		}
+
+		@JvmStatic
+		fun setAuthenticationCodeResultDelayMs(delayMs: Long) {
+			authenticationCodeResultDelayMs = delayMs
 		}
 
 		@JvmStatic
