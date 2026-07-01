@@ -18,10 +18,9 @@ interface TelegramConnector : ReadOnlyConnector {
 	override fun getRecentThreads(limit: Int): List<ConnectorThread> =
 		getRecentChats(limit).map { it.toConnectorThread() }
 
-	override fun getRecentMessages(
-		threadId: String,
-		limit: Int,
-	): List<ConnectorMessage> =
-		getRecentMessages(threadId.toLong(), limit)
+	override fun getRecentMessages(threadId: String, limit: Int): List<ConnectorMessage> {
+		val chatId = threadId.toLongOrNull() ?: return emptyList()
+		return getRecentMessages(chatId, limit)
 			.map { it.toConnectorMessage() }
+	}
 }
