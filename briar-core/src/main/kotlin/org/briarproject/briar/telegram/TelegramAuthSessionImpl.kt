@@ -111,10 +111,10 @@ class ReflectiveTelegramTdlibLoginClient @JvmOverloads constructor(
 					CommandResult.TIMEOUT ->
 						return recoverableError(RecoverableErrorDetail.NONE)
 				}
-				if (awaitPreparedAuthorizationStateClassName(tdlibParametersUpdate) !=
-					"AuthorizationStateWaitPhoneNumber"
-				) {
-					return recoverableError(RecoverableErrorDetail.NONE)
+				val authorizationStateAfterParameters =
+					awaitPreparedAuthorizationStateClassName(tdlibParametersUpdate)
+				if (authorizationStateAfterParameters != "AuthorizationStateWaitPhoneNumber") {
+					return mapAuthorizationStateClassName(authorizationStateAfterParameters)
 				}
 			}
 			if (lastAuthorizationStateClassName != "AuthorizationStateWaitPhoneNumber") {
