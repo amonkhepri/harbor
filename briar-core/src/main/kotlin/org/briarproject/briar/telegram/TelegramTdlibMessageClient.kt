@@ -31,9 +31,21 @@ class ReflectiveTelegramTdlibMessageClient @JvmOverloads constructor(
 	private val requestTimeoutMs: Long = 30_000L,
 ) : TelegramTdlibMessageClient {
 
-	private class PendingAuthorizationUpdate {
+	private class PendingAuthorizationUpdate(private val acceptedClassName: String? = null) {
 		val authorizationStateClassName = AtomicReference("")
 		val updateReceived = CountDownLatch(1)
+
+		fun capture(className: String) {
+			if (className.isEmpty() ||
+				acceptedClassName != null &&
+				className != acceptedClassName
+			) {
+				return
+			}
+			if (authorizationStateClassName.compareAndSet("", className)) {
+				updateReceived.countDown()
+			}
+		}
 	}
 
 	override fun isAuthorized(): Boolean = withReadyClient(false) { true }
@@ -118,7 +130,8 @@ class ReflectiveTelegramTdlibMessageClient @JvmOverloads constructor(
 
 	private fun prepareAuthorizationUpdate(
 		pendingAuthorizationUpdate: AtomicReference<PendingAuthorizationUpdate?>,
-	): PendingAuthorizationUpdate = PendingAuthorizationUpdate().also {
+		acceptedClassName: String? = null,
+	): PendingAuthorizationUpdate = PendingAuthorizationUpdate(acceptedClassName).also {
 		pendingAuthorizationUpdate.set(it)
 	}
 
@@ -149,12 +162,7 @@ class ReflectiveTelegramTdlibMessageClient @JvmOverloads constructor(
 			if (method.name == "onResult" && args != null && args.size == 1) {
 				val className = getAuthorizationStateClassName(args[0])
 				val pendingUpdate = pendingAuthorizationUpdate.get()
-				if (className.isNotEmpty() &&
-					pendingUpdate != null &&
-					pendingUpdate.authorizationStateClassName.compareAndSet("", className)
-				) {
-					pendingUpdate.updateReceived.countDown()
-				}
+				pendingUpdate?.capture(className)
 			}
 			null
 		}
@@ -331,7 +339,10 @@ class ReflectiveTelegramTdlibMessageClient @JvmOverloads constructor(
 		pendingAuthorizationUpdate: AtomicReference<PendingAuthorizationUpdate?>,
 	) {
 		try {
-			val closeUpdate = prepareAuthorizationUpdate(pendingAuthorizationUpdate)
+			val closeUpdate = prepareAuthorizationUpdate(
+				pendingAuthorizationUpdate,
+				"AuthorizationStateClosed",
+			)
 			val functionClass = Class.forName("org.drinkless.tdlib.TdApi\$Function")
 			val resultHandlerClass = Class.forName("org.drinkless.tdlib.Client\$ResultHandler")
 			val send: Method = client.javaClass.getMethod("send", functionClass, resultHandlerClass)
