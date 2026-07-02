@@ -21,8 +21,7 @@ class NoOpTelegramTdlibMessageClient : TelegramTdlibMessageClient {
 
 	override fun getRecentChats(limit: Int): List<TelegramChat> = emptyList()
 
-	override fun getRecentMessages(chatId: Long, limit: Int): List<TelegramMessage> =
-		emptyList()
+	override fun getRecentMessages(chatId: Long, limit: Int): List<TelegramMessage> = emptyList()
 }
 
 class ReflectiveTelegramTdlibMessageClient @JvmOverloads constructor(
@@ -44,8 +43,8 @@ class ReflectiveTelegramTdlibMessageClient @JvmOverloads constructor(
 		if (safeLimit == 0) return emptyList()
 		return withReadyClient(emptyList()) { client ->
 			val chatIds = sendAndAwait(client, createGetChatsRequest(safeLimit))
-					?.let { getLongArrayField(it, "chatIds") }
-					?: LongArray(0)
+				?.let { getLongArrayField(it, "chatIds") }
+				?: LongArray(0)
 			chatIds.take(safeLimit).mapNotNull { chatId ->
 				sendAndAwait(client, createGetChatRequest(chatId))?.let { mapChat(it) }
 			}
@@ -62,10 +61,10 @@ class ReflectiveTelegramTdlibMessageClient @JvmOverloads constructor(
 			var requestCount = 0
 			while (messages.size < safeLimit && requestCount < MAX_TDLIB_HISTORY_REQUESTS) {
 				val rawMessages = sendAndAwait(
-						client,
-						createGetChatHistoryRequest(chatId, fromMessageId, safeLimit),
+					client,
+					createGetChatHistoryRequest(chatId, fromMessageId, safeLimit),
 				)?.let { getObjectArrayField(it, "messages") }
-						?: emptyArray<Any>()
+					?: emptyArray<Any>()
 				if (rawMessages.isEmpty()) break
 				var newRawMessage = false
 				for (rawMessage in rawMessages) {
@@ -77,8 +76,10 @@ class ReflectiveTelegramTdlibMessageClient @JvmOverloads constructor(
 				}
 				requestCount++
 				val nextFromMessageId = rawMessages.mapNotNull { getMessageId(it) }.lastOrNull()
-				if (!newRawMessage || nextFromMessageId == null ||
-						nextFromMessageId == fromMessageId) {
+				if (!newRawMessage ||
+					nextFromMessageId == null ||
+					nextFromMessageId == fromMessageId
+				) {
 					break
 				}
 				fromMessageId = nextFromMessageId
@@ -90,8 +91,8 @@ class ReflectiveTelegramTdlibMessageClient @JvmOverloads constructor(
 	private fun <T> withReadyClient(fallback: T, read: (Any) -> T): T {
 		if (!tdlibClientClassExists()) return fallback
 		var client: Any? = null
+		val pendingAuthorizationUpdate = AtomicReference<PendingAuthorizationUpdate?>()
 		return try {
-			val pendingAuthorizationUpdate = AtomicReference<PendingAuthorizationUpdate?>()
 			val firstUpdate = prepareAuthorizationUpdate(pendingAuthorizationUpdate)
 			client = createTdlibClient(pendingAuthorizationUpdate)
 			var authorizationState = awaitPreparedAuthorizationStateClassName(firstUpdate)
@@ -111,30 +112,28 @@ class ReflectiveTelegramTdlibMessageClient @JvmOverloads constructor(
 			Thread.currentThread().interrupt()
 			fallback
 		} finally {
-			client?.let { closeTdlibClient(it) }
+			client?.let { closeTdlibClient(it, pendingAuthorizationUpdate) }
 		}
 	}
 
 	private fun prepareAuthorizationUpdate(
 		pendingAuthorizationUpdate: AtomicReference<PendingAuthorizationUpdate?>,
-	): PendingAuthorizationUpdate {
-		return PendingAuthorizationUpdate().also {
-			pendingAuthorizationUpdate.set(it)
-		}
+	): PendingAuthorizationUpdate = PendingAuthorizationUpdate().also {
+		pendingAuthorizationUpdate.set(it)
 	}
 
 	@Throws(InterruptedException::class)
 	private fun awaitPreparedAuthorizationStateClassName(
 		pendingAuthorizationUpdate: PendingAuthorizationUpdate,
-	): String =
-		if (pendingAuthorizationUpdate.updateReceived.await(
-					requestTimeoutMs,
-					TimeUnit.MILLISECONDS,
-			)) {
-			pendingAuthorizationUpdate.authorizationStateClassName.get()
-		} else {
-			""
-		}
+	): String = if (pendingAuthorizationUpdate.updateReceived.await(
+			requestTimeoutMs,
+			TimeUnit.MILLISECONDS,
+		)
+	) {
+		pendingAuthorizationUpdate.authorizationStateClassName.get()
+	} else {
+		""
+	}
 
 	@Throws(ReflectiveOperationException::class)
 	private fun createTdlibClient(
@@ -144,57 +143,50 @@ class ReflectiveTelegramTdlibMessageClient @JvmOverloads constructor(
 		val resultHandlerClass = Class.forName("org.drinkless.tdlib.Client\$ResultHandler")
 		val exceptionHandlerClass = Class.forName("org.drinkless.tdlib.Client\$ExceptionHandler")
 		val updateHandler = Proxy.newProxyInstance(
-				resultHandlerClass.classLoader,
-				arrayOf(resultHandlerClass),
-			) { _, method, args ->
+			resultHandlerClass.classLoader,
+			arrayOf(resultHandlerClass),
+		) { _, method, args ->
 			if (method.name == "onResult" && args != null && args.size == 1) {
 				val className = getAuthorizationStateClassName(args[0])
 				val pendingUpdate = pendingAuthorizationUpdate.get()
-				if (className.isNotEmpty() && pendingUpdate != null &&
-						pendingUpdate.authorizationStateClassName.compareAndSet("", className)) {
+				if (className.isNotEmpty() &&
+					pendingUpdate != null &&
+					pendingUpdate.authorizationStateClassName.compareAndSet("", className)
+				) {
 					pendingUpdate.updateReceived.countDown()
 				}
 			}
 			null
 		}
 		val create = clientClass.getMethod(
-				"create",
-				resultHandlerClass,
-				exceptionHandlerClass,
-				exceptionHandlerClass,
+			"create",
+			resultHandlerClass,
+			exceptionHandlerClass,
+			exceptionHandlerClass,
 		)
 		return create.invoke(null, updateHandler, null, null)
 	}
 
 	@Throws(ReflectiveOperationException::class)
-	private fun createGetChatsRequest(limit: Int): Any {
-		return createTdApiObject("GetChats").also {
-			setFieldIfPresent(it, "chatList", null)
-			setFieldIfPresent(it, "limit", limit)
-		}
+	private fun createGetChatsRequest(limit: Int): Any = createTdApiObject("GetChats").also {
+		setFieldIfPresent(it, "chatList", null)
+		setFieldIfPresent(it, "limit", limit)
 	}
 
 	@Throws(ReflectiveOperationException::class)
-	private fun createGetChatRequest(chatId: Long): Any {
-		return createTdApiObject("GetChat").also {
-			setFieldIfPresent(it, "chatId", chatId)
-		}
+	private fun createGetChatRequest(chatId: Long): Any = createTdApiObject("GetChat").also {
+		setFieldIfPresent(it, "chatId", chatId)
 	}
 
 	@Throws(ReflectiveOperationException::class)
-	private fun createGetChatHistoryRequest(
-		chatId: Long,
-		fromMessageId: Long,
-		limit: Int,
-	): Any {
-		return createTdApiObject("GetChatHistory").also {
+	private fun createGetChatHistoryRequest(chatId: Long, fromMessageId: Long, limit: Int): Any =
+		createTdApiObject("GetChatHistory").also {
 			setFieldIfPresent(it, "chatId", chatId)
 			setFieldIfPresent(it, "fromMessageId", fromMessageId)
 			setFieldIfPresent(it, "offset", 0)
 			setFieldIfPresent(it, "limit", limit)
 			setFieldIfPresent(it, "onlyLocal", false)
 		}
-	}
 
 	@Throws(ReflectiveOperationException::class)
 	private fun createSetTdlibParametersRequest(): Any {
@@ -223,8 +215,8 @@ class ReflectiveTelegramTdlibMessageClient @JvmOverloads constructor(
 	@Throws(ReflectiveOperationException::class)
 	private fun createTdApiObject(className: String): Any =
 		Class.forName("org.drinkless.tdlib.TdApi\$$className")
-				.getConstructor()
-				.newInstance()
+			.getConstructor()
+			.newInstance()
 
 	@Throws(ReflectiveOperationException::class)
 	private fun setFieldIfPresent(target: Any, name: String, value: Any?) {
@@ -241,17 +233,20 @@ class ReflectiveTelegramTdlibMessageClient @JvmOverloads constructor(
 		val functionClass = Class.forName("org.drinkless.tdlib.TdApi\$Function")
 		val resultHandlerClass = Class.forName("org.drinkless.tdlib.Client\$ResultHandler")
 		val resultHandler = Proxy.newProxyInstance(
-				resultHandlerClass.classLoader,
-				arrayOf(resultHandlerClass),
-			) { _, method, args ->
-			if (method.name == "onResult" && args != null && args.size == 1 &&
-					result.compareAndSet(null, args[0])) {
+			resultHandlerClass.classLoader,
+			arrayOf(resultHandlerClass),
+		) { _, method, args ->
+			if (method.name == "onResult" &&
+				args != null &&
+				args.size == 1 &&
+				result.compareAndSet(null, args[0])
+			) {
 				resultReceived.countDown()
 			}
 			null
 		}
 		client.javaClass.getMethod("send", functionClass, resultHandlerClass)
-				.invoke(client, request, resultHandler)
+			.invoke(client, request, resultHandler)
 		if (!resultReceived.await(requestTimeoutMs, TimeUnit.MILLISECONDS)) return null
 		return result.get().takeUnless { it?.javaClass?.simpleName == "Error" }
 	}
@@ -275,11 +270,11 @@ class ReflectiveTelegramTdlibMessageClient @JvmOverloads constructor(
 		val lastMessage = getObjectField(chat, "lastMessage")
 		val lastTextMessage = mapTextMessage(lastMessage)
 		return TelegramChat(
-				id = getLongField(chat, "id"),
-				title = getStringField(chat, "title"),
-				lastMessageDateSeconds = lastMessage?.let { getIntField(it, "date") } ?: 0,
-				lastMessageText = lastTextMessage?.text.orEmpty(),
-				lastMessageIsOutgoing = lastTextMessage?.isOutgoing ?: false,
+			id = getLongField(chat, "id"),
+			title = getStringField(chat, "title"),
+			lastMessageDateSeconds = lastMessage?.let { getIntField(it, "date") } ?: 0,
+			lastMessageText = lastTextMessage?.text.orEmpty(),
+			lastMessageIsOutgoing = lastTextMessage?.isOutgoing ?: false,
 		)
 	}
 
@@ -290,11 +285,11 @@ class ReflectiveTelegramTdlibMessageClient @JvmOverloads constructor(
 		if (content?.javaClass?.simpleName != "MessageText") return null
 		val formattedText = getObjectField(content, "text")
 		return TelegramMessage(
-				chatId = getLongField(message, "chatId"),
-				messageId = getLongField(message, "id"),
-				dateSeconds = getIntField(message, "date"),
-				isOutgoing = getBooleanField(message, "isOutgoing"),
-				text = formattedText?.let { getStringField(it, "text") }.orEmpty(),
+			chatId = getLongField(message, "chatId"),
+			messageId = getLongField(message, "id"),
+			dateSeconds = getIntField(message, "date"),
+			isOutgoing = getBooleanField(message, "isOutgoing"),
+			text = formattedText?.let { getStringField(it, "text") }.orEmpty(),
 		)
 	}
 
@@ -317,8 +312,7 @@ class ReflectiveTelegramTdlibMessageClient @JvmOverloads constructor(
 		getObjectField(target, name) as? Long ?: 0L
 
 	@Throws(ReflectiveOperationException::class)
-	private fun getIntField(target: Any, name: String): Int =
-		getObjectField(target, name) as? Int ?: 0
+	private fun getIntField(target: Any, name: String): Int = getObjectField(target, name) as? Int ?: 0
 
 	@Throws(ReflectiveOperationException::class)
 	private fun getBooleanField(target: Any, name: String): Boolean =
@@ -332,35 +326,41 @@ class ReflectiveTelegramTdlibMessageClient @JvmOverloads constructor(
 	private fun getObjectArrayField(target: Any, name: String): Array<*> =
 		getObjectField(target, name) as? Array<*> ?: emptyArray<Any>()
 
-	private fun closeTdlibClient(client: Any) {
+	private fun closeTdlibClient(
+		client: Any,
+		pendingAuthorizationUpdate: AtomicReference<PendingAuthorizationUpdate?>,
+	) {
 		try {
+			val closeUpdate = prepareAuthorizationUpdate(pendingAuthorizationUpdate)
 			val functionClass = Class.forName("org.drinkless.tdlib.TdApi\$Function")
 			val resultHandlerClass = Class.forName("org.drinkless.tdlib.Client\$ResultHandler")
 			val send: Method = client.javaClass.getMethod("send", functionClass, resultHandlerClass)
 			val closeRequest = createTdApiObject("Close")
 			send.invoke(client, closeRequest, null)
+			awaitPreparedAuthorizationStateClassName(closeUpdate)
 		} catch (_: ReflectiveOperationException) {
 		} catch (_: LinkageError) {
+		} catch (e: InterruptedException) {
+			Thread.currentThread().interrupt()
+		} finally {
+			pendingAuthorizationUpdate.set(null)
 		}
 	}
 
-	private fun tdlibClientClassExists(): Boolean {
-		return try {
-			Class.forName(
-					"org.drinkless.tdlib.Client",
-					false,
-					ReflectiveTelegramTdlibMessageClient::class.java.classLoader,
-			)
-			true
-		} catch (_: ClassNotFoundException) {
-			false
-		} catch (_: LinkageError) {
-			false
-		}
+	private fun tdlibClientClassExists(): Boolean = try {
+		Class.forName(
+			"org.drinkless.tdlib.Client",
+			false,
+			ReflectiveTelegramTdlibMessageClient::class.java.classLoader,
+		)
+		true
+	} catch (_: ClassNotFoundException) {
+		false
+	} catch (_: LinkageError) {
+		false
 	}
 
-	private fun safeLimit(limit: Int): Int =
-		limit.coerceIn(0, MAX_TDLIB_MESSAGE_LIMIT)
+	private fun safeLimit(limit: Int): Int = limit.coerceIn(0, MAX_TDLIB_MESSAGE_LIMIT)
 
 	private fun hasText(value: String): Boolean = value.trim().isNotEmpty()
 

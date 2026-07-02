@@ -1,6 +1,7 @@
 package org.drinkless.tdlib
 
 class Client private constructor(private val updateHandler: ResultHandler) {
+	private var databaseDirectory = ""
 
 	fun interface ResultHandler {
 		fun onResult(obj: Any?)
@@ -18,7 +19,13 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 		sentRequestNames += request.javaClass.simpleName
 		when (request) {
 			is TdApi.SetTdlibParameters -> {
-				lastDatabaseDirectory = request.databaseDirectory.orEmpty()
+				val requestedDatabaseDirectory = request.databaseDirectory.orEmpty()
+				if (!activateDatabaseDirectory(requestedDatabaseDirectory)) {
+					resultHandler?.onResult(TdApi.Error())
+					return
+				}
+				databaseDirectory = requestedDatabaseDirectory
+				lastDatabaseDirectory = requestedDatabaseDirectory
 				lastFilesDirectory = request.filesDirectory.orEmpty()
 				lastApiId = request.apiId
 				lastApiHash = request.apiHash.orEmpty()
@@ -86,7 +93,7 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 			}
 			is TdApi.Close -> {
 				resultHandler?.onResult(TdApi.Ok())
-				emitAuthorizationState(TdApi.AuthorizationStateClosed())
+				emitCloseAuthorizationState()
 			}
 			else -> resultHandler?.onResult(TdApi.Ok())
 		}
@@ -106,6 +113,27 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 		Thread {
 			try {
 				Thread.sleep(delayMs)
+			} catch (e: InterruptedException) {
+				Thread.currentThread().interrupt()
+			}
+			emit()
+		}.start()
+	}
+
+	private fun emitCloseAuthorizationState() {
+		val emit = {
+			clearActiveDatabaseDirectory(databaseDirectory)
+			updateHandler.onResult(
+				TdApi.UpdateAuthorizationState(TdApi.AuthorizationStateClosed()),
+			)
+		}
+		if (closeAuthorizationUpdateDelayMs <= 0L) {
+			emit()
+			return
+		}
+		Thread {
+			try {
+				Thread.sleep(closeAuthorizationUpdateDelayMs)
 			} catch (e: InterruptedException) {
 				Thread.currentThread().interrupt()
 			}
@@ -133,6 +161,7 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 		private val sentRequestNames = mutableListOf<String>()
 		private val authorizationUpdateDelaySequenceMs = mutableListOf<Long>()
 		private var authorizationUpdateDelayMs = 0L
+		private var closeAuthorizationUpdateDelayMs = 0L
 		private var phoneNumberResultDelayMs = 0L
 		private var authenticationCodeResultDelayMs = 0L
 		private var lastPhoneNumber = ""
@@ -148,6 +177,7 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 		private val chatsById = linkedMapOf<Long, TdApi.Chat>()
 		private val messagesByChatId = mutableMapOf<Long, List<TdApi.Message?>>()
 		private var maxHistoryPageSize = Int.MAX_VALUE
+		private var activeDatabaseDirectory = ""
 
 		@JvmStatic
 		fun create(
@@ -161,6 +191,7 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 			sentRequestNames.clear()
 			authorizationUpdateDelaySequenceMs.clear()
 			authorizationUpdateDelayMs = 0L
+			closeAuthorizationUpdateDelayMs = 0L
 			phoneNumberResultDelayMs = 0L
 			authenticationCodeResultDelayMs = 0L
 			lastPhoneNumber = ""
@@ -175,11 +206,17 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 			chatsById.clear()
 			messagesByChatId.clear()
 			maxHistoryPageSize = Int.MAX_VALUE
+			activeDatabaseDirectory = ""
 		}
 
 		@JvmStatic
 		fun setAuthorizationUpdateDelayMs(delayMs: Long) {
 			authorizationUpdateDelayMs = delayMs
+		}
+
+		@JvmStatic
+		fun setCloseAuthorizationUpdateDelayMs(delayMs: Long) {
+			closeAuthorizationUpdateDelayMs = delayMs
 		}
 
 		@JvmStatic
@@ -253,6 +290,27 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 			} else {
 				authorizationUpdateDelayMs
 			}
+
+		private fun activateDatabaseDirectory(databaseDirectory: String): Boolean = synchronized(this) {
+			if (databaseDirectory.isEmpty()) return@synchronized true
+			if (activeDatabaseDirectory.isNotEmpty() &&
+				activeDatabaseDirectory != databaseDirectory
+			) {
+				activeDatabaseDirectory = databaseDirectory
+				return@synchronized true
+			}
+			if (activeDatabaseDirectory == databaseDirectory) return@synchronized false
+			activeDatabaseDirectory = databaseDirectory
+			true
+		}
+
+		private fun clearActiveDatabaseDirectory(databaseDirectory: String) {
+			synchronized(this) {
+				if (activeDatabaseDirectory == databaseDirectory) {
+					activeDatabaseDirectory = ""
+				}
+			}
+		}
 
 		private fun historyStartIndex(request: TdApi.GetChatHistory): Int {
 			if (request.fromMessageId == 0L) return 0
