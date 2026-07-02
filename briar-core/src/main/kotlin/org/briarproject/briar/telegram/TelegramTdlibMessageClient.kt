@@ -31,6 +31,8 @@ class ReflectiveTelegramTdlibMessageClient @JvmOverloads constructor(
 	private val requestTimeoutMs: Long = 30_000L,
 ) : TelegramTdlibMessageClient {
 
+	private val tdlibReadLock = Any()
+
 	private class PendingAuthorizationUpdate(private val acceptedClassName: String? = null) {
 		val authorizationStateClassName = AtomicReference("")
 		val updateReceived = CountDownLatch(1)
@@ -100,7 +102,7 @@ class ReflectiveTelegramTdlibMessageClient @JvmOverloads constructor(
 		}
 	}
 
-	private fun <T> withReadyClient(fallback: T, read: (Any) -> T): T {
+	private fun <T> withReadyClient(fallback: T, read: (Any) -> T): T = synchronized(tdlibReadLock) {
 		if (!tdlibClientClassExists()) return fallback
 		var client: Any? = null
 		val pendingAuthorizationUpdate = AtomicReference<PendingAuthorizationUpdate?>()

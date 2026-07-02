@@ -1,5 +1,8 @@
 package org.drinkless.tdlib
 
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+
 class Client private constructor(private val updateHandler: ResultHandler) {
 	private var databaseDirectory = ""
 
@@ -16,7 +19,7 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 	}
 
 	fun send(request: TdApi.Function, resultHandler: ResultHandler?) {
-		sentRequestNames += request.javaClass.simpleName
+		recordSentRequest(request.javaClass.simpleName)
 		when (request) {
 			is TdApi.SetTdlibParameters -> {
 				val requestedDatabaseDirectory = request.databaseDirectory.orEmpty()
@@ -29,6 +32,7 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 				lastFilesDirectory = request.filesDirectory.orEmpty()
 				lastApiId = request.apiId
 				lastApiHash = request.apiHash.orEmpty()
+				setTdlibParametersAcceptedLatch?.countDown()
 				if (tdlibParametersError) {
 					resultHandler?.onResult(TdApi.Error())
 					return
@@ -161,6 +165,7 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 	}
 
 	companion object {
+		private val stateLock = Any()
 		private val sentRequestNames = mutableListOf<String>()
 		private val authorizationUpdateDelaySequenceMs = mutableListOf<Long>()
 		private var authorizationUpdateDelayMs = 0L
@@ -182,6 +187,7 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 		private val messagesByChatId = mutableMapOf<Long, List<TdApi.Message?>>()
 		private var maxHistoryPageSize = Int.MAX_VALUE
 		private var activeDatabaseDirectory = ""
+		private var setTdlibParametersAcceptedLatch: CountDownLatch? = null
 
 		@JvmStatic
 		fun create(
@@ -212,6 +218,7 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 			messagesByChatId.clear()
 			maxHistoryPageSize = Int.MAX_VALUE
 			activeDatabaseDirectory = ""
+			setTdlibParametersAcceptedLatch = null
 		}
 
 		@JvmStatic
@@ -277,7 +284,18 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 		}
 
 		@JvmStatic
-		fun getSentRequestNames(): List<String> = sentRequestNames.toList()
+		fun prepareSetTdlibParametersAcceptedLatch() {
+			setTdlibParametersAcceptedLatch = CountDownLatch(1)
+		}
+
+		@JvmStatic
+		fun awaitSetTdlibParametersAccepted(timeoutMs: Long): Boolean =
+			setTdlibParametersAcceptedLatch?.await(timeoutMs, TimeUnit.MILLISECONDS) ?: false
+
+		@JvmStatic
+		fun getSentRequestNames(): List<String> = synchronized(stateLock) {
+			sentRequestNames.toList()
+		}
 
 		@JvmStatic
 		fun getLastPhoneNumber(): String = lastPhoneNumber
@@ -294,12 +312,19 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 		@JvmStatic
 		fun getLastApiHash(): String = lastApiHash
 
-		private fun getAuthorizationUpdateDelayMs(): Long =
+		private fun getAuthorizationUpdateDelayMs(): Long = synchronized(stateLock) {
 			if (authorizationUpdateDelaySequenceMs.isNotEmpty()) {
 				authorizationUpdateDelaySequenceMs.removeAt(0)
 			} else {
 				authorizationUpdateDelayMs
 			}
+		}
+
+		private fun recordSentRequest(requestName: String) {
+			synchronized(stateLock) {
+				sentRequestNames += requestName
+			}
+		}
 
 		private fun activateDatabaseDirectory(databaseDirectory: String): Boolean = synchronized(this) {
 			if (databaseDirectory.isEmpty()) return@synchronized true

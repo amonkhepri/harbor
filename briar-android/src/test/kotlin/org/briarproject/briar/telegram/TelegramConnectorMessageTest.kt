@@ -281,6 +281,43 @@ class TelegramConnectorMessageTest {
 	}
 
 	@Test
+	fun testReflectiveClientSerializesConcurrentReadsForSharedTdlibDirectory() {
+		Client.resetTestState()
+		Client.setAuthorizationStateAfterTdlibParameters(TdApi.AuthorizationStateReady())
+		Client.setAuthorizationUpdateDelaySequenceMs(0L, 1_000L, 0L, 0L)
+		Client.setChats(chat(11L, 1_700_000_003, body = "preview"))
+		Client.setMessages(
+			11L,
+			textMessage(11L, 21L, 1_700_000_004, isOutgoing = false, body = "body"),
+		)
+		Client.prepareSetTdlibParametersAcceptedLatch()
+		val client = ReflectiveTelegramTdlibMessageClient(
+			tdlibDirectory = testFolder.newFolder("tdlib-concurrent"),
+			apiId = 1,
+			apiHash = "x",
+			requestTimeoutMs = 2_000L,
+		)
+		val chatsResult = arrayOf<List<TelegramChat>?>(null)
+		val chatsThread = Thread {
+			chatsResult[0] = client.getRecentChats(1)
+		}
+
+		chatsThread.start()
+		assertEquals(true, Client.awaitSetTdlibParametersAccepted(1_000L))
+		val messages = client.getRecentMessages(11L, 1)
+		chatsThread.join()
+
+		assertEquals(
+			listOf(TelegramChat(11L, "", 1_700_000_003, "preview", false)),
+			chatsResult[0],
+		)
+		assertEquals(
+			listOf(TelegramMessage(11L, 21L, 1_700_000_004, false, "body")),
+			messages,
+		)
+	}
+
+	@Test
 	fun testMessageIngestDiagnosticsReturnsDisabledSnapshot() {
 		val snapshot = TelegramMessageIngestDiagnostics(NoOpTelegramConnector())
 			.readSnapshot(5, 5)
