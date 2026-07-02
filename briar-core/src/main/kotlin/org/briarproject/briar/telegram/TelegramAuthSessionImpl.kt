@@ -62,9 +62,21 @@ class ReflectiveTelegramTdlibLoginClient @JvmOverloads constructor(
 	private val authorizationUpdateTimeoutMs: Long = 30_000L,
 ) : TelegramTdlibLoginClient {
 
-	private class PendingAuthorizationUpdate {
+	private class PendingAuthorizationUpdate(private val acceptedClassName: String? = null) {
 		val authorizationStateClassName = AtomicReference("")
 		val updateReceived = CountDownLatch(1)
+
+		fun capture(className: String) {
+			if (className.isEmpty() ||
+				acceptedClassName != null &&
+				className != acceptedClassName
+			) {
+				return
+			}
+			if (authorizationStateClassName.compareAndSet("", className)) {
+				updateReceived.countDown()
+			}
+		}
 	}
 
 	private enum class CommandResult {
@@ -229,22 +241,34 @@ class ReflectiveTelegramTdlibLoginClient @JvmOverloads constructor(
 		}
 	}
 
-	private fun prepareAuthorizationUpdate(): PendingAuthorizationUpdate =
-		PendingAuthorizationUpdate().also {
-			pendingAuthorizationUpdate = it
-		}
+	private fun prepareAuthorizationUpdate(
+		acceptedClassName: String? = null,
+	): PendingAuthorizationUpdate = PendingAuthorizationUpdate(acceptedClassName).also {
+		pendingAuthorizationUpdate = it
+	}
 
 	@Throws(InterruptedException::class)
 	private fun awaitPreparedAuthorizationStateClassName(
 		pendingAuthorizationUpdate: PendingAuthorizationUpdate,
 	): String {
-		if (tdlibClient == null ||
-			!pendingAuthorizationUpdate.updateReceived.await(
+		if (tdlibClient == null) {
+			closeTdlibClient()
+			return ""
+		}
+		return awaitAuthorizationUpdate(pendingAuthorizationUpdate).also {
+			if (it.isEmpty()) closeTdlibClient()
+		}
+	}
+
+	@Throws(InterruptedException::class)
+	private fun awaitAuthorizationUpdate(
+		pendingAuthorizationUpdate: PendingAuthorizationUpdate,
+	): String {
+		if (!pendingAuthorizationUpdate.updateReceived.await(
 				authorizationUpdateTimeoutMs,
 				TimeUnit.MILLISECONDS,
 			)
 		) {
-			closeTdlibClient()
 			return ""
 		}
 		return pendingAuthorizationUpdate.authorizationStateClassName.get().also {
@@ -271,11 +295,7 @@ class ReflectiveTelegramTdlibLoginClient @JvmOverloads constructor(
 				pendingAuthorizationUpdate != null
 			) {
 				val className = getAuthorizationStateClassName(args[0])
-				if (className.isNotEmpty() &&
-					pendingAuthorizationUpdate.authorizationStateClassName.compareAndSet("", className)
-				) {
-					pendingAuthorizationUpdate.updateReceived.countDown()
-				}
+				pendingAuthorizationUpdate.capture(className)
 			}
 			null
 		}
@@ -426,6 +446,7 @@ class ReflectiveTelegramTdlibLoginClient @JvmOverloads constructor(
 		completePendingAuthorizationUpdate("AuthorizationStateClosed")
 		val client = tdlibClient ?: return
 		tdlibClient = null
+		val closeUpdate = prepareAuthorizationUpdate("AuthorizationStateClosed")
 		try {
 			val functionClass = Class.forName("org.drinkless.tdlib.TdApi\$Function")
 			val resultHandlerClass = Class.forName("org.drinkless.tdlib.Client\$ResultHandler")
@@ -434,16 +455,21 @@ class ReflectiveTelegramTdlibLoginClient @JvmOverloads constructor(
 				.getConstructor()
 				.newInstance()
 			send.invoke(client, closeRequest, null)
+			awaitAuthorizationUpdate(closeUpdate)
 		} catch (_: ReflectiveOperationException) {
 		} catch (_: LinkageError) {
+		} catch (e: InterruptedException) {
+			Thread.currentThread().interrupt()
+		} finally {
+			if (pendingAuthorizationUpdate === closeUpdate) {
+				pendingAuthorizationUpdate = null
+			}
 		}
 	}
 
 	private fun completePendingAuthorizationUpdate(className: String) {
 		pendingAuthorizationUpdate?.let {
-			if (it.authorizationStateClassName.compareAndSet("", className)) {
-				it.updateReceived.countDown()
-			}
+			it.capture(className)
 		}
 	}
 
