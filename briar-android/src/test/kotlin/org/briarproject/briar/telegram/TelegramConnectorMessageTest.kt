@@ -190,7 +190,7 @@ class TelegramConnectorMessageTest {
 	@Test
 	fun testReflectiveClientPaginatesPartialHistoryPages() {
 		val client = readyReflectiveMessageClient {
-			Client.setMaxHistoryPageSize(2)
+			Client.setMaxHistoryPageSize(1)
 			Client.setMessages(
 				10L,
 				textMessage(10L, 40L, 1_700_000_004, isOutgoing = false, body = "latest"),
@@ -206,7 +206,13 @@ class TelegramConnectorMessageTest {
 			listOf(40L, 30L, 20L, 10L) to listOf("latest", "middle", "older", "oldest"),
 			messages.map { it.messageId } to messages.map { it.text },
 		)
-		assertSentRequests("GetChatHistory", "GetChatHistory", "GetChatHistory", "Close")
+		assertSentRequests(
+			"GetChatHistory",
+			"GetChatHistory",
+			"GetChatHistory",
+			"GetChatHistory",
+			"Close",
+		)
 	}
 
 	@Test

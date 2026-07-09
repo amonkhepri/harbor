@@ -352,7 +352,7 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 			val messages = messagesByChatId[request.chatId].orEmpty()
 			val index = messages.indexOfFirst { it?.id == request.fromMessageId }
 			if (index == -1) return messages.size
-			return (index + request.offset).coerceIn(0, messages.size)
+			return (index + request.offset + 1).coerceIn(0, messages.size)
 		}
 	}
 }
