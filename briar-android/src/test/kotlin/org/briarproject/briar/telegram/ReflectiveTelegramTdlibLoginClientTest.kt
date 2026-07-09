@@ -340,6 +340,34 @@ class ReflectiveTelegramTdlibLoginClientTest {
 	}
 
 	@Test
+	fun testSubmitIdentifierRestartsClientAfterCodeResultTimeout() {
+		val client = createClient(
+			authorizationUpdateTimeoutMs = 1_000L,
+		)
+
+		startToCodeEntry(client)
+		Client.setAuthenticationCodeResultDelayMs(1_200L)
+		Client.setAuthorizationUpdateDelaySequenceMs(1_200L)
+		assertRecoverableTimeout(client, "code result timeout") {
+			client.submitCode("12345")
+		}
+
+		client.assertSuccessfulState(
+			TelegramAuthState.CODE_ENTRY,
+			client.submitIdentifier("test-login-identifier"),
+		)
+		assertSentRequestsAndClose(
+			client,
+			SET_PARAMETERS,
+			SET_PHONE,
+			CHECK_CODE,
+			CLOSE,
+			SET_PARAMETERS,
+			SET_PHONE,
+		)
+	}
+
+	@Test
 	fun testSubmitCodeReturnsRecoverableErrorWhenPasswordUpdateExceedsTimeout() {
 		assertSubmitCodeTimeout("password-required", "password-entry wait timeout")
 	}

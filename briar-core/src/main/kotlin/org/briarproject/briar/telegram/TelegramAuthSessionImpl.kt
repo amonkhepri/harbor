@@ -107,8 +107,12 @@ class ReflectiveTelegramTdlibLoginClient @JvmOverloads constructor(
 	override fun getRecoverableErrorDetail(): RecoverableErrorDetail = recoverableErrorDetail
 
 	override fun submitIdentifier(identifier: String): TelegramAuthState {
-		if (!hasText(identifier) || tdlibClient == null) {
+		if (!hasText(identifier)) {
 			return recoverableError(RecoverableErrorDetail.NONE)
+		}
+		if (tdlibClient == null) {
+			val restartedState = start()
+			if (restartedState != TelegramAuthState.IDENTIFIER_ENTRY) return restartedState
 		}
 		try {
 			if (lastAuthorizationStateClassName == "AuthorizationStateWaitTdlibParameters") {
