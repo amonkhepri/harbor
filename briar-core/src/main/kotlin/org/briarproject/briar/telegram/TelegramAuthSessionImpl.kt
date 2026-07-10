@@ -64,23 +64,6 @@ class ReflectiveTelegramTdlibLoginClient @JvmOverloads constructor(
 	private val authorizationUpdateTimeoutMs: Long = 30_000L,
 ) : TelegramTdlibLoginClient {
 
-	private class PendingAuthorizationUpdate(private val acceptedClassName: String? = null) {
-		val authorizationStateClassName = AtomicReference("")
-		val updateReceived = CountDownLatch(1)
-
-		fun capture(className: String) {
-			if (className.isEmpty() ||
-				acceptedClassName != null &&
-				className != acceptedClassName
-			) {
-				return
-			}
-			if (authorizationStateClassName.compareAndSet("", className)) {
-				updateReceived.countDown()
-			}
-		}
-	}
-
 	private enum class CommandResult {
 		OK,
 		ERROR,
@@ -454,20 +437,5 @@ class ReflectiveTelegramTdlibLoginClient @JvmOverloads constructor(
 		pendingAuthorizationUpdate?.let {
 			it.capture(className)
 		}
-	}
-
-	private fun hasText(value: String): Boolean = value.trim().isNotEmpty()
-
-	private fun tdlibClientClassExists(): Boolean = try {
-		Class.forName(
-			"org.drinkless.tdlib.Client",
-			false,
-			ReflectiveTelegramTdlibLoginClient::class.java.classLoader,
-		)
-		true
-	} catch (_: ClassNotFoundException) {
-		false
-	} catch (_: LinkageError) {
-		false
 	}
 }

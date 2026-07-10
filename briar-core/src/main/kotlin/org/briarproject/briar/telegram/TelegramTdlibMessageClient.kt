@@ -35,23 +35,6 @@ class ReflectiveTelegramTdlibMessageClient @JvmOverloads constructor(
 
 	private val tdlibReadLock = Any()
 
-	private class PendingAuthorizationUpdate(private val acceptedClassName: String? = null) {
-		val authorizationStateClassName = AtomicReference("")
-		val updateReceived = CountDownLatch(1)
-
-		fun capture(className: String) {
-			if (className.isEmpty() ||
-				acceptedClassName != null &&
-				className != acceptedClassName
-			) {
-				return
-			}
-			if (authorizationStateClassName.compareAndSet("", className)) {
-				updateReceived.countDown()
-			}
-		}
-	}
-
 	override fun isAuthorized(): Boolean = withReadyClient(false) { true }
 
 	override fun getRecentChats(limit: Int): List<TelegramChat> {
@@ -344,22 +327,7 @@ class ReflectiveTelegramTdlibMessageClient @JvmOverloads constructor(
 		}
 	}
 
-	private fun tdlibClientClassExists(): Boolean = try {
-		Class.forName(
-			"org.drinkless.tdlib.Client",
-			false,
-			ReflectiveTelegramTdlibMessageClient::class.java.classLoader,
-		)
-		true
-	} catch (_: ClassNotFoundException) {
-		false
-	} catch (_: LinkageError) {
-		false
-	}
-
 	private fun safeLimit(limit: Int): Int = limit.coerceIn(0, MAX_TDLIB_MESSAGE_LIMIT)
-
-	private fun hasText(value: String): Boolean = value.trim().isNotEmpty()
 
 	private companion object {
 		const val MAX_TDLIB_MESSAGE_LIMIT = 100
