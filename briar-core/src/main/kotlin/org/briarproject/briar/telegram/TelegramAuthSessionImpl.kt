@@ -121,8 +121,12 @@ class ReflectiveTelegramTdlibLoginClient @JvmOverloads constructor(
 				if (apiId <= 0 || !hasText(apiHash)) {
 					return recoverableError(RecoverableErrorDetail.MISSING_API_CREDENTIALS)
 				}
-				val parametersRequest =
-					createSetTdlibParametersRequest() ?: return recoverableDatabaseKeyUnavailable()
+				val parametersRequest = createTelegramTdlibParametersRequest(
+					tdlibKeyProvider,
+					tdlibDirectory,
+					apiId,
+					apiHash,
+				) ?: return recoverableDatabaseKeyUnavailable()
 				val tdlibParametersUpdate = prepareAuthorizationUpdate()
 				when (sendForResult(parametersRequest)) {
 					CommandResult.OK -> Unit
@@ -317,34 +321,6 @@ class ReflectiveTelegramTdlibLoginClient @JvmOverloads constructor(
 	}
 
 	@Throws(ReflectiveOperationException::class)
-	private fun createSetTdlibParametersRequest(): Any? {
-		val databaseEncryptionKey =
-			tdlibKeyProvider.getDatabaseEncryptionKey(tdlibDirectory) ?: return null
-		val databaseDirectory = File(tdlibDirectory, "database")
-		val filesDirectory = File(tdlibDirectory, "files")
-		databaseDirectory.mkdirs()
-		filesDirectory.mkdirs()
-		val request = Class.forName("org.drinkless.tdlib.TdApi\$SetTdlibParameters")
-			.getConstructor()
-			.newInstance()
-		setFieldIfPresent(request, "useTestDc", false)
-		setFieldIfPresent(request, "databaseDirectory", databaseDirectory.path)
-		setFieldIfPresent(request, "filesDirectory", filesDirectory.path)
-		setFieldIfPresent(request, "databaseEncryptionKey", databaseEncryptionKey)
-		setFieldIfPresent(request, "useFileDatabase", true)
-		setFieldIfPresent(request, "useChatInfoDatabase", true)
-		setFieldIfPresent(request, "useMessageDatabase", true)
-		setFieldIfPresent(request, "useSecretChats", true)
-		setFieldIfPresent(request, "apiId", apiId)
-		setFieldIfPresent(request, "apiHash", apiHash)
-		setFieldIfPresent(request, "systemLanguageCode", "en")
-		setFieldIfPresent(request, "deviceModel", "Harbor Android")
-		setFieldIfPresent(request, "systemVersion", "Android")
-		setFieldIfPresent(request, "applicationVersion", "Harbor")
-		return request
-	}
-
-	@Throws(ReflectiveOperationException::class)
 	private fun createSetAuthenticationPhoneNumberRequest(identifier: String): Any {
 		val settingsClass = Class.forName(
 			"org.drinkless.tdlib.TdApi\$PhoneNumberAuthenticationSettings",
@@ -366,14 +342,6 @@ class ReflectiveTelegramTdlibLoginClient @JvmOverloads constructor(
 		Class.forName("org.drinkless.tdlib.TdApi\$CheckAuthenticationPassword")
 			.getConstructor(String::class.java)
 			.newInstance(password)
-
-	@Throws(ReflectiveOperationException::class)
-	private fun setFieldIfPresent(target: Any, name: String, value: Any) {
-		try {
-			target.javaClass.getField(name).set(target, value)
-		} catch (_: NoSuchFieldException) {
-		}
-	}
 
 	@Throws(ReflectiveOperationException::class)
 	private fun send(request: Any) {

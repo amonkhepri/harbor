@@ -202,6 +202,7 @@ class ReflectiveTelegramTdlibLoginClientTest {
 		val client = ReflectiveTelegramTdlibLoginClient(
 			apiId = 12345,
 			apiHash = "test-api-hash",
+			tdlibKeyProvider = StaticTelegramTdlibDatabaseKeyProvider(TDLIB_KEY),
 		)
 
 		startToCodeEntry(client)

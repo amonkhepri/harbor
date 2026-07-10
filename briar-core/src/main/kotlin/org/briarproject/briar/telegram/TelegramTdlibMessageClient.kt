@@ -114,7 +114,12 @@ class ReflectiveTelegramTdlibMessageClient @JvmOverloads constructor(
 			var authorizationState = awaitPreparedAuthorizationStateClassName(firstUpdate)
 			if (authorizationState == "AuthorizationStateWaitTdlibParameters") {
 				if (apiId <= 0 || !hasText(apiHash)) return fallback
-				val parametersRequest = createSetTdlibParametersRequest() ?: return fallback
+				val parametersRequest = createTelegramTdlibParametersRequest(
+					tdlibKeyProvider,
+					tdlibDirectory,
+					apiId,
+					apiHash,
+				) ?: return fallback
 				val readyUpdate = prepareAuthorizationUpdate(pendingAuthorizationUpdate)
 				if (sendReturnsError(client, parametersRequest)) return fallback
 				authorizationState = awaitPreparedAuthorizationStateClassName(readyUpdate)
@@ -200,32 +205,6 @@ class ReflectiveTelegramTdlibMessageClient @JvmOverloads constructor(
 			setFieldIfPresent(it, "limit", limit)
 			setFieldIfPresent(it, "onlyLocal", false)
 		}
-
-	@Throws(ReflectiveOperationException::class)
-	private fun createSetTdlibParametersRequest(): Any? {
-		val databaseEncryptionKey =
-			tdlibKeyProvider.getDatabaseEncryptionKey(tdlibDirectory) ?: return null
-		val databaseDirectory = File(tdlibDirectory, "database")
-		val filesDirectory = File(tdlibDirectory, "files")
-		databaseDirectory.mkdirs()
-		filesDirectory.mkdirs()
-		val request = createTdApiObject("SetTdlibParameters")
-		setFieldIfPresent(request, "useTestDc", false)
-		setFieldIfPresent(request, "databaseDirectory", databaseDirectory.path)
-		setFieldIfPresent(request, "filesDirectory", filesDirectory.path)
-		setFieldIfPresent(request, "databaseEncryptionKey", databaseEncryptionKey)
-		setFieldIfPresent(request, "useFileDatabase", true)
-		setFieldIfPresent(request, "useChatInfoDatabase", true)
-		setFieldIfPresent(request, "useMessageDatabase", true)
-		setFieldIfPresent(request, "useSecretChats", true)
-		setFieldIfPresent(request, "apiId", apiId)
-		setFieldIfPresent(request, "apiHash", apiHash)
-		setFieldIfPresent(request, "systemLanguageCode", "en")
-		setFieldIfPresent(request, "deviceModel", "Harbor Android")
-		setFieldIfPresent(request, "systemVersion", "Android")
-		setFieldIfPresent(request, "applicationVersion", "Harbor")
-		return request
-	}
 
 	@Throws(ReflectiveOperationException::class)
 	private fun createTdApiObject(className: String): Any =
