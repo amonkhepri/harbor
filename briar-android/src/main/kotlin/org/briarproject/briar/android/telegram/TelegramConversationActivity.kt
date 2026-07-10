@@ -101,7 +101,7 @@ class TelegramConversationActivity : BriarActivity() {
 		}
 
 		list = findViewById(R.id.connectorConversationList)
-		list.setLayoutManager(LinearLayoutManager(this))
+		list.setLayoutManager(LinearLayoutManager(this).apply { stackFromEnd = true })
 		list.setAdapter(adapter)
 		loadMessages()
 	}
