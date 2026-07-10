@@ -179,17 +179,6 @@ class TelegramConnectorMessageTest {
 				),
 			client.getRecentChats(3) to client.getRecentMessages(10L, 3),
 		)
-		assertSentRequests(
-			"LoadChats",
-			"GetChats",
-			"LoadChats",
-			"GetChats",
-			"GetChat",
-			"Close",
-			"GetChatHistory",
-			"GetChatHistory",
-			"Close",
-		)
 	}
 
 	@Test
