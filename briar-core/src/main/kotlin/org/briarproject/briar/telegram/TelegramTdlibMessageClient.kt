@@ -41,6 +41,7 @@ class ReflectiveTelegramTdlibMessageClient @JvmOverloads constructor(
 		val safeLimit = safeLimit(limit)
 		if (safeLimit == 0) return emptyList()
 		return withReadyClient(emptyList()) { client ->
+			sendAndAwait(client, createLoadChatsRequest(safeLimit))
 			val chatIds = sendAndAwait(client, createGetChatsRequest(safeLimit))
 				?.let { getLongArrayField(it, "chatIds") }
 				?: LongArray(0)
@@ -166,6 +167,12 @@ class ReflectiveTelegramTdlibMessageClient @JvmOverloads constructor(
 			exceptionHandlerClass,
 		)
 		return create.invoke(null, updateHandler, null, null)
+	}
+
+	@Throws(ReflectiveOperationException::class)
+	private fun createLoadChatsRequest(limit: Int): Any = createTdApiObject("LoadChats").also {
+		setFieldIfPresent(it, "chatList", null)
+		setFieldIfPresent(it, "limit", limit)
 	}
 
 	@Throws(ReflectiveOperationException::class)

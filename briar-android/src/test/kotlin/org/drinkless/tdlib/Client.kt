@@ -5,6 +5,7 @@ import java.util.concurrent.TimeUnit
 
 class Client private constructor(private val updateHandler: ResultHandler) {
 	private var databaseDirectory = ""
+	private var chatListLoaded = false
 
 	fun interface ResultHandler {
 		fun onResult(obj: Any?)
@@ -70,8 +71,16 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 				resultHandler?.onResult(TdApi.Ok())
 				emitAuthorizationState(TdApi.AuthorizationStateReady())
 			}
+			is TdApi.LoadChats -> {
+				chatListLoaded = true
+				resultHandler?.onResult(TdApi.Ok())
+			}
 			is TdApi.GetChats -> {
-				val chatIds = chatsById.keys.take(request.limit).toLongArray()
+				val chatIds = if (chatListLoaded) {
+					chatsById.keys.take(request.limit).toLongArray()
+				} else {
+					LongArray(0)
+				}
 				resultHandler?.onResult(
 					TdApi.Chats().also {
 						it.totalCount = chatIds.size
