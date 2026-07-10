@@ -40,19 +40,6 @@ class TelegramConnectorMessageTest {
 	}
 
 	@Test
-	fun testEnabledConnectorDelegatesRecentChatsAndMessagesToClient() {
-		val client = FakeTelegramTdlibMessageClient()
-		val connector = StubTelegramConnector(client)
-
-		assertEquals(listOf(true, true), listOf(connector.isEnabled(), connector.isAuthorized()))
-		assertEquals(
-			client.chats to client.messages,
-			connector.getRecentChats(3) to connector.getRecentMessages(10L, 2),
-		)
-		assertEquals(Triple(3, 10L, 2), client.lastRequestLimits())
-	}
-
-	@Test
 	fun testEnabledConnectorExposesReadOnlyConnectorContract() {
 		val client = FakeTelegramTdlibMessageClient(
 			chats = listOf(
@@ -76,6 +63,7 @@ class TelegramConnectorMessageTest {
 		)
 		val connector = StubTelegramConnector(client)
 
+		assertEquals(listOf(true, true), listOf(connector.isEnabled(), connector.isAuthorized()))
 		assertEquals(ConnectorSources.TELEGRAM, connector.source)
 		assertEquals(
 			listOf(
@@ -102,6 +90,7 @@ class TelegramConnectorMessageTest {
 			connector.getRecentThreads(3) to
 				connector.getRecentMessages("10", 2),
 		)
+		assertEquals(Triple(3, 10L, 2), client.lastRequestLimits())
 	}
 
 	@Test
