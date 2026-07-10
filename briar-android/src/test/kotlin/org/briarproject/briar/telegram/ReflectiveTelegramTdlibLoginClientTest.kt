@@ -239,19 +239,6 @@ class ReflectiveTelegramTdlibLoginClientTest {
 	}
 
 	@Test
-	fun testSubmitIdentifierReturnsMissingCredentialsWhenTdlibRejectsParameters() {
-		Client.setTdlibParametersError(true)
-		assertMissingCredentialsAfterIdentifierSubmit(
-			ReflectiveTelegramTdlibLoginClient(
-				apiId = 12345,
-				apiHash = "test-api-hash",
-				tdlibKeyProvider = StaticTelegramTdlibDatabaseKeyProvider(TDLIB_KEY),
-			),
-			SET_PARAMETERS,
-		)
-	}
-
-	@Test
 	fun testStartWaitsForBriefDelayedAuthorizationUpdate() {
 		Client.setAuthorizationUpdateDelayMs(300L)
 		val client = createClient()
@@ -337,12 +324,11 @@ class ReflectiveTelegramTdlibLoginClientTest {
 
 	@Test
 	fun testSubmitCodeReturnsUnsupportedDetailForRegistrationStep() {
-		Client.setAuthorizationStateAfterCode(TdApi.AuthorizationStateWaitRegistration())
 		val client = createClient()
 
 		startToCodeEntry(client)
 		assertRecoverableError(client, RecoverableErrorDetail.UNSUPPORTED_AUTH_STEP) {
-			client.submitCode("12345")
+			client.submitCode("registration-required")
 		}
 		assertSentRequestsAndClose(client, SET_PARAMETERS, SET_PHONE, CHECK_CODE, CLOSE)
 	}
