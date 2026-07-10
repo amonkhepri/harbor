@@ -5,8 +5,6 @@ import org.briarproject.briar.api.connector.ConnectorSources
 import org.briarproject.briar.api.connector.ConnectorThread
 import org.briarproject.briar.api.telegram.TelegramChat
 import org.briarproject.briar.api.telegram.TelegramMessage
-import org.briarproject.briar.api.telegram.TelegramMessageIngestSnapshot
-import org.briarproject.briar.api.telegram.TelegramMessageIngestStatus
 import org.drinkless.tdlib.Client
 import org.drinkless.tdlib.TdApi
 import org.junit.Assert.assertArrayEquals
@@ -227,21 +225,6 @@ class TelegramConnectorMessageTest {
 	}
 
 	@Test
-	fun testDiagnosticsIgnoresNonClosedAuthorizationUpdateBeforeReadCloseCompletes() {
-		Client.resetTestState()
-		Client.setAuthorizationStateAfterTdlibParameters(TdApi.AuthorizationStateReady())
-		Client.setCloseAuthorizationStatePrelude(TdApi.AuthorizationStateReady())
-		Client.setCloseAuthorizationUpdateDelayMs(200L)
-		Client.setChats(chat(11L, lastMessageDateSeconds = 1_700_000_003))
-		val client = configuredReflectiveMessageClient()
-
-		val snapshot = TelegramMessageIngestDiagnostics(StubTelegramConnector(client))
-			.readSnapshot(chatLimit = 1, messageLimit = 0)
-
-		assertSnapshot(snapshot, TelegramMessageIngestStatus.CHAT_COUNT_ONLY, 1, 0)
-	}
-
-	@Test
 	fun testReflectiveClientSerializesConcurrentReadsForSharedTdlibDirectory() {
 		Client.resetTestState()
 		Client.setAuthorizationStateAfterTdlibParameters(TdApi.AuthorizationStateReady())
@@ -276,77 +259,6 @@ class TelegramConnectorMessageTest {
 		)
 	}
 
-	@Test
-	fun testMessageIngestDiagnosticsReturnsDisabledSnapshot() {
-		val snapshot = TelegramMessageIngestDiagnostics(NoOpTelegramConnector())
-			.readSnapshot(5, 5)
-
-		assertSnapshot(snapshot, TelegramMessageIngestStatus.DISABLED, 0, 0)
-	}
-
-	@Test
-	fun testMessageIngestDiagnosticsReportsAuthorizationUnavailable() {
-		val snapshot = snapshotFor(FakeTelegramTdlibMessageClient(authorized = false))
-
-		assertSnapshot(
-			snapshot,
-			TelegramMessageIngestStatus.AUTHORIZATION_UNAVAILABLE,
-			0,
-			0,
-		)
-	}
-
-	@Test
-	fun testMessageIngestDiagnosticsReportsCountsOnly() {
-		val client = FakeTelegramTdlibMessageClient()
-		val snapshot = snapshotFor(client)
-
-		assertSnapshot(snapshot, TelegramMessageIngestStatus.MESSAGE_COUNT_AVAILABLE, 1, 1)
-		assertEquals(Triple(3, 10L, 3), client.lastRequestLimits())
-	}
-
-	@Test
-	fun testMessageIngestDiagnosticsTreatsAuthorizedEmptyAsNoContent() {
-		val snapshot = snapshotFor(
-			FakeTelegramTdlibMessageClient(
-				chats = emptyList(),
-				messages = emptyList(),
-			),
-		)
-
-		assertSnapshot(snapshot, TelegramMessageIngestStatus.NO_CONTENT, 0, 0)
-	}
-
-	@Test
-	fun testMessageIngestDiagnosticsSamplesMessagesAcrossChats() {
-		val emptyChat = TelegramChat(1L, "", 0)
-		val textChat = TelegramChat(10L, "", 1_700_000_000)
-		val client = FakeTelegramTdlibMessageClient(
-			chats = listOf(emptyChat, textChat),
-			messages = emptyList(),
-			messagesByChat = mapOf(
-				textChat.id to listOf(
-					TelegramMessage(10L, 20L, 1_700_000_001, false, ""),
-				),
-			),
-		)
-
-		val snapshot = snapshotFor(client, 2, 3)
-
-		assertSnapshot(snapshot, TelegramMessageIngestStatus.MESSAGE_COUNT_AVAILABLE, 2, 1)
-		// should call getRecentMessages for both chats
-		assertEquals(setOf(emptyChat.id, textChat.id), client.messageChatIds.toSet())
-	}
-
-	@Test
-	fun testMessageIngestDiagnosticsHonorsZeroMessageLimit() {
-		val client = FakeTelegramTdlibMessageClient()
-		val snapshot = snapshotFor(client, messageLimit = 0)
-
-		assertSnapshot(snapshot, TelegramMessageIngestStatus.CHAT_COUNT_ONLY, 1, 0)
-		assertEquals(emptyList<Long>(), client.messageChatIds)
-	}
-
 	private fun readyReflectiveMessageClient(
 		configureClientState: () -> Unit = {},
 	): ReflectiveTelegramTdlibMessageClient {
@@ -372,37 +284,16 @@ class TelegramConnectorMessageTest {
 		override fun getDatabaseEncryptionKey(tdlibDirectory: File): ByteArray = key.copyOf()
 	}
 
-	private fun snapshotFor(
-		client: FakeTelegramTdlibMessageClient,
-		chatLimit: Int = 3,
-		messageLimit: Int = 3,
-	) = TelegramMessageIngestDiagnostics(StubTelegramConnector(client))
-		.readSnapshot(chatLimit, messageLimit)
-
-	private fun assertSnapshot(
-		snapshot: TelegramMessageIngestSnapshot,
-		status: TelegramMessageIngestStatus,
-		recentChatCount: Int,
-		sampledMessageCount: Int,
-	) {
-		assertEquals(
-			Triple(status, recentChatCount, sampledMessageCount),
-			Triple(snapshot.status, snapshot.recentChatCount, snapshot.sampledMessageCount),
-		)
-	}
-
 	private class FakeTelegramTdlibMessageClient(
 		val authorized: Boolean = true,
 		val chats: List<TelegramChat> = listOf(TelegramChat(10L, "", 1_700_000_000)),
 		val messages: List<TelegramMessage> = listOf(
 			TelegramMessage(10L, 20L, 1_700_000_001, false, ""),
 		),
-		val messagesByChat: Map<Long, List<TelegramMessage>> = emptyMap(),
 	) : TelegramTdlibMessageClient {
 		var lastChatLimit = 0
 		var lastMessageChatId = 0L
 		var lastMessageLimit = 0
-		val messageChatIds = mutableListOf<Long>()
 
 		override fun isAuthorized(): Boolean = authorized
 
@@ -414,8 +305,7 @@ class TelegramConnectorMessageTest {
 		override fun getRecentMessages(chatId: Long, limit: Int): List<TelegramMessage> {
 			lastMessageChatId = chatId
 			lastMessageLimit = limit
-			messageChatIds.add(chatId)
-			return messagesByChat.getOrDefault(chatId, messages)
+			return messages
 		}
 	}
 
