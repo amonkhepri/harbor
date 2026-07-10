@@ -138,12 +138,16 @@ class TelegramLoginPlaceholderFragmentTest {
 	}
 
 	@Test
-	fun testUnsupportedAuthStepShowsSpecificMessage() {
+	fun testUnsupportedAuthStepShowsSpecificMessageAndAllowsRetry() {
 		assertIdentifierRecoverableErrorMessage(
 			RecoverableErrorDetail.UNSUPPORTED_AUTH_STEP,
 			"Telegram returned an account step Harbor does not support in this build. " +
 				"Use Harbor password instead.",
 		)
+		composeRule.onNodeWithTag(TELEGRAM_LOGIN_CONTINUE_TAG)
+			.assertIsEnabled()
+			.performClick()
+		assertEquals(2, telegramAuthSession.identifierSubmitCalls)
 	}
 
 	@Test
@@ -228,6 +232,7 @@ class TelegramLoginPlaceholderFragmentTest {
 		var detailAfterSubmitIdentifier = RecoverableErrorDetail.NONE
 		var stateAfterSubmitCode = TelegramAuthState.CODE_ENTRY
 		var lastIdentifier = ""
+		var identifierSubmitCalls = 0
 		var closeCalls = 0
 
 		override fun getCurrentState(): TelegramAuthState = currentAuthState
@@ -240,6 +245,7 @@ class TelegramLoginPlaceholderFragmentTest {
 		}
 
 		override fun submitIdentifier(identifier: String) {
+			identifierSubmitCalls++
 			lastIdentifier = identifier
 			currentAuthState = stateAfterSubmitIdentifier
 			currentRecoverableErrorDetail = detailAfterSubmitIdentifier

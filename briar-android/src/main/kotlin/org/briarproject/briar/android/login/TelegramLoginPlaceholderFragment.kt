@@ -137,8 +137,6 @@ internal fun TelegramLoginScreen(viewModel: StartupViewModel) {
 	val hasPassword = password.trim().isNotEmpty()
 	val missingTdlib = authState == TelegramAuthState.RECOVERABLE_ERROR &&
 		errorDetail == RecoverableErrorDetail.MISSING_TDLIB
-	val unsupportedAuthStep = authState == TelegramAuthState.RECOVERABLE_ERROR &&
-		errorDetail == RecoverableErrorDetail.UNSUPPORTED_AUTH_STEP
 	val deviceKeystoreUnavailable = authState == TelegramAuthState.RECOVERABLE_ERROR &&
 		errorDetail == RecoverableErrorDetail.DEVICE_KEYSTORE_UNAVAILABLE
 	val tdlibDatabaseKeyMismatch = authState == TelegramAuthState.RECOVERABLE_ERROR &&
@@ -222,7 +220,6 @@ internal fun TelegramLoginScreen(viewModel: StartupViewModel) {
 						},
 						enabled = hasIdentifier &&
 							!missingTdlib &&
-							!unsupportedAuthStep &&
 							!deviceKeystoreUnavailable &&
 							!tdlibDatabaseKeyMismatch,
 						onContinue = viewModel::submitTelegramLoginIdentifier,
