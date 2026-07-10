@@ -326,14 +326,6 @@ class ReflectiveTelegramTdlibLoginClient @JvmOverloads constructor(
 			.getConstructor(String::class.java)
 			.newInstance(password)
 
-	@Throws(ReflectiveOperationException::class)
-	private fun send(request: Any) {
-		val functionClass = Class.forName("org.drinkless.tdlib.TdApi\$Function")
-		val resultHandlerClass = Class.forName("org.drinkless.tdlib.Client\$ResultHandler")
-		tdlibClient!!.javaClass.getMethod("send", functionClass, resultHandlerClass)
-			.invoke(tdlibClient, request, null)
-	}
-
 	@Throws(ReflectiveOperationException::class, InterruptedException::class)
 	private fun sendForResult(request: Any): CommandResult {
 		val resultClassName = AtomicReference("")
@@ -364,15 +356,6 @@ class ReflectiveTelegramTdlibLoginClient @JvmOverloads constructor(
 		} else {
 			CommandResult.OK
 		}
-	}
-
-	@Throws(ReflectiveOperationException::class)
-	private fun getAuthorizationStateClassName(update: Any?): String {
-		if (update?.javaClass?.simpleName != "UpdateAuthorizationState") {
-			return ""
-		}
-		val authorizationState = update.javaClass.getField("authorizationState").get(update)
-		return authorizationState?.javaClass?.simpleName ?: ""
 	}
 
 	private fun mapAuthorizationStateClassName(className: String): TelegramAuthState =

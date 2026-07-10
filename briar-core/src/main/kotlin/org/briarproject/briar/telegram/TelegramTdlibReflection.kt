@@ -33,4 +33,13 @@ internal fun tdlibClientClassExists(): Boolean = try {
 	false
 }
 
+@Throws(ReflectiveOperationException::class)
+internal fun getAuthorizationStateClassName(update: Any?): String {
+	if (update?.javaClass?.simpleName != "UpdateAuthorizationState") {
+		return ""
+	}
+	val authorizationState = update.javaClass.getField("authorizationState").get(update)
+	return authorizationState?.javaClass?.simpleName ?: ""
+}
+
 internal fun hasText(value: String): Boolean = value.trim().isNotEmpty()

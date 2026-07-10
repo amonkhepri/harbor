@@ -233,15 +233,6 @@ class ReflectiveTelegramTdlibMessageClient @JvmOverloads constructor(
 		sendAndAwait(client, request) == null
 
 	@Throws(ReflectiveOperationException::class)
-	private fun getAuthorizationStateClassName(update: Any?): String {
-		if (update?.javaClass?.simpleName != "UpdateAuthorizationState") {
-			return ""
-		}
-		val authorizationState = update.javaClass.getField("authorizationState").get(update)
-		return authorizationState?.javaClass?.simpleName ?: ""
-	}
-
-	@Throws(ReflectiveOperationException::class)
 	private fun mapChat(chat: Any): TelegramChat? {
 		if (chat.javaClass.simpleName != "Chat") return null
 		val lastMessage = getObjectField(chat, "lastMessage")
