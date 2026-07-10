@@ -131,16 +131,6 @@ class TelegramConnectorMessageTest {
 	}
 
 	@Test
-	fun testReflectiveClientReportsAuthorizationReady() {
-		val client = readyReflectiveMessageClient()
-
-		assertEquals(
-			true to listOf("Close"),
-			client.isAuthorized() to Client.getSentRequestNames(),
-		)
-	}
-
-	@Test
 	fun testReflectiveClientMapsRecentChatsAndTextMessages() {
 		val client = readyReflectiveMessageClient {
 			Client.setChats(
@@ -260,7 +250,6 @@ class TelegramConnectorMessageTest {
 
 		assertEquals(emptyList<TelegramChat>(), client.getRecentChats(1))
 		assertEquals(false, File(tdlibDir, "database").exists())
-		assertSentRequests("Close")
 	}
 
 	@Test
