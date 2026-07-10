@@ -5,7 +5,7 @@ import java.util.concurrent.TimeUnit
 
 class Client private constructor(private val updateHandler: ResultHandler) {
 	private var databaseDirectory = ""
-	private var chatListLoaded = false
+	private var loadedChatCount = 0
 
 	fun interface ResultHandler {
 		fun onResult(obj: Any?)
@@ -72,15 +72,17 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 				emitAuthorizationState(TdApi.AuthorizationStateReady())
 			}
 			is TdApi.LoadChats -> {
-				chatListLoaded = true
+				if (loadedChatCount >= chatsById.size) {
+					resultHandler?.onResult(TdApi.Error())
+					return
+				}
+				loadedChatCount += chatLoadCount(request.limit)
 				resultHandler?.onResult(TdApi.Ok())
 			}
 			is TdApi.GetChats -> {
-				val chatIds = if (chatListLoaded) {
-					chatsById.keys.take(request.limit).toLongArray()
-				} else {
-					LongArray(0)
-				}
+				val chatIds = chatsById.keys
+					.take(minOf(request.limit.coerceAtLeast(0), loadedChatCount))
+					.toLongArray()
 				resultHandler?.onResult(
 					TdApi.Chats().also {
 						it.totalCount = chatIds.size
@@ -174,6 +176,12 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 		}.start()
 	}
 
+	private fun chatLoadCount(limit: Int): Int {
+		val remaining = chatsById.size - loadedChatCount
+		if (remaining <= 0 || limit <= 0) return 0
+		return minOf(remaining, limit, maxChatLoadPageSize)
+	}
+
 	companion object {
 		private val stateLock = Any()
 		private val sentRequestNames = mutableListOf<String>()
@@ -196,6 +204,7 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 			TdApi.AuthorizationStateWaitPhoneNumber()
 		private val chatsById = linkedMapOf<Long, TdApi.Chat>()
 		private val messagesByChatId = mutableMapOf<Long, List<TdApi.Message?>>()
+		private var maxChatLoadPageSize = Int.MAX_VALUE
 		private var maxHistoryPageSize = Int.MAX_VALUE
 		private var activeDatabaseDirectory = ""
 		private var setTdlibParametersAcceptedLatch: CountDownLatch? = null
@@ -228,6 +237,7 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 				TdApi.AuthorizationStateWaitPhoneNumber()
 			chatsById.clear()
 			messagesByChatId.clear()
+			maxChatLoadPageSize = Int.MAX_VALUE
 			maxHistoryPageSize = Int.MAX_VALUE
 			activeDatabaseDirectory = ""
 			setTdlibParametersAcceptedLatch = null
@@ -288,6 +298,11 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 		@JvmStatic
 		fun setMessages(chatId: Long, vararg messages: TdApi.Message?) {
 			messagesByChatId[chatId] = messages.toList()
+		}
+
+		@JvmStatic
+		fun setMaxChatLoadPageSize(limit: Int) {
+			maxChatLoadPageSize = limit.coerceAtLeast(0)
 		}
 
 		@JvmStatic

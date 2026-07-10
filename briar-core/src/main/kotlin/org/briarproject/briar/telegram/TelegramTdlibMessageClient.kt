@@ -41,11 +41,7 @@ class ReflectiveTelegramTdlibMessageClient @JvmOverloads constructor(
 		val safeLimit = safeLimit(limit)
 		if (safeLimit == 0) return emptyList()
 		return withReadyClient(emptyList()) { client ->
-			sendAndAwait(client, createLoadChatsRequest(safeLimit))
-			val chatIds = sendAndAwait(client, createGetChatsRequest(safeLimit))
-				?.let { getLongArrayField(it, "chatIds") }
-				?: LongArray(0)
-			chatIds.take(safeLimit).mapNotNull { chatId ->
+			loadRecentChatIds(client, safeLimit).take(safeLimit).mapNotNull { chatId ->
 				sendAndAwait(client, createGetChatRequest(chatId))?.let { mapChat(it) }
 			}
 		}
@@ -86,6 +82,23 @@ class ReflectiveTelegramTdlibMessageClient @JvmOverloads constructor(
 			}
 			messages
 		}
+	}
+
+	@Throws(ReflectiveOperationException::class, InterruptedException::class)
+	private fun loadRecentChatIds(client: Any, safeLimit: Int): LongArray {
+		var chatIds = LongArray(0)
+		var requestCount = 0
+		while (chatIds.size < safeLimit && requestCount < MAX_TDLIB_CHAT_LOAD_REQUESTS) {
+			val loadResult = sendAndAwait(client, createLoadChatsRequest(safeLimit))
+			val loadedChatIds = sendAndAwait(client, createGetChatsRequest(safeLimit))
+				?.let { getLongArrayField(it, "chatIds") }
+				?: LongArray(0)
+			requestCount++
+			val countStoppedGrowing = loadedChatIds.size <= chatIds.size
+			chatIds = loadedChatIds
+			if (countStoppedGrowing || loadResult == null) break
+		}
+		return chatIds
 	}
 
 	private fun <T> withReadyClient(fallback: T, read: (Any) -> T): T = synchronized(tdlibReadLock) {
@@ -315,6 +328,7 @@ class ReflectiveTelegramTdlibMessageClient @JvmOverloads constructor(
 
 	private companion object {
 		const val MAX_TDLIB_MESSAGE_LIMIT = 100
+		const val MAX_TDLIB_CHAT_LOAD_REQUESTS = 5
 		const val MAX_TDLIB_HISTORY_REQUESTS = 5
 	}
 }

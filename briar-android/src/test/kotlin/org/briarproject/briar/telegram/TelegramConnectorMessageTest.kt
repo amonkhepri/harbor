@@ -182,10 +182,38 @@ class TelegramConnectorMessageTest {
 		assertSentRequests(
 			"LoadChats",
 			"GetChats",
+			"LoadChats",
+			"GetChats",
 			"GetChat",
 			"Close",
 			"GetChatHistory",
 			"GetChatHistory",
+			"Close",
+		)
+	}
+
+	@Test
+	fun testReflectiveClientLoadsPartialChatPagesUntilLimit() {
+		val client = readyReflectiveMessageClient {
+			Client.setMaxChatLoadPageSize(1)
+			Client.setChats(
+				chat(10L, lastMessageDateSeconds = 1_700_000_003),
+				chat(11L, lastMessageDateSeconds = 1_700_000_002),
+				chat(12L, lastMessageDateSeconds = 1_700_000_001),
+			)
+		}
+
+		assertEquals(listOf(10L, 11L, 12L), client.getRecentChats(3).map { it.id })
+		assertSentRequests(
+			"LoadChats",
+			"GetChats",
+			"LoadChats",
+			"GetChats",
+			"LoadChats",
+			"GetChats",
+			"GetChat",
+			"GetChat",
+			"GetChat",
 			"Close",
 		)
 	}
