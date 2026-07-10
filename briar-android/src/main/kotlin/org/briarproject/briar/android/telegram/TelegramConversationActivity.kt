@@ -17,6 +17,7 @@ import org.briarproject.briar.android.connector.ConnectorConversationAvailabilit
 import org.briarproject.briar.android.connector.ConnectorConversationAdapter
 import org.briarproject.briar.android.connector.ConnectorConversationMessageListState
 import org.briarproject.briar.android.connector.getConversationMessageListState
+import org.briarproject.briar.android.connector.withAvailabilityState
 import org.briarproject.briar.android.view.BriarRecyclerView
 import org.briarproject.briar.api.connector.ReadOnlyConnector
 import org.briarproject.briar.api.telegram.TelegramConnector
@@ -35,9 +36,7 @@ class TelegramConversationActivity : BriarActivity() {
 
 		private const val MESSAGE_LIMIT = 50
 
-		private fun emptyTextForState(
-			state: ConnectorConversationAvailabilityState,
-		): Int = when (state) {
+		private fun emptyTextForState(state: ConnectorConversationAvailabilityState): Int = when (state) {
 			LOADING ->
 				R.string.telegram_conversation_loading
 			DISABLED ->
@@ -57,8 +56,7 @@ class TelegramConversationActivity : BriarActivity() {
 			connectorEnabled: Boolean,
 			chatId: Long,
 			state: ConnectorConversationMessageListState,
-		): Boolean =
-			connectorEnabled && hasValidChatId(chatId) && !state.isLoading
+		): Boolean = connectorEnabled && hasValidChatId(chatId) && !state.isLoading
 
 		private fun hasValidChatId(chatId: Long): Boolean = chatId != 0L
 
@@ -93,7 +91,7 @@ class TelegramConversationActivity : BriarActivity() {
 		chatId = intent.getLongExtra(CHAT_ID, 0L)
 		val title = titleText(
 			intent.getStringExtra(CHAT_TITLE),
-			getString(R.string.telegram_conversation_title)
+			getString(R.string.telegram_conversation_title),
 		)
 
 		supportActionBar?.apply {
@@ -118,7 +116,7 @@ class TelegramConversationActivity : BriarActivity() {
 			shouldShowManualRefreshAction(
 				readOnlyConnector.isEnabled(),
 				chatId,
-				messageState
+				messageState,
 			)
 		return super.onPrepareOptionsMenu(menu)
 	}
@@ -159,7 +157,7 @@ class TelegramConversationActivity : BriarActivity() {
 			try {
 				val state = readOnlyConnector.getConversationMessageListState(
 					chatId.toString(),
-					MESSAGE_LIMIT
+					MESSAGE_LIMIT,
 				)
 				showMessages(state)
 			} catch (e: RuntimeException) {
@@ -173,9 +171,13 @@ class TelegramConversationActivity : BriarActivity() {
 		availabilityState: ConnectorConversationAvailabilityState = EMPTY,
 	) {
 		runOnUiThread {
-			submitMessageState(state.copy(
-				emptyText = getString(emptyTextForState(availabilityState))
-			))
+			submitMessageState(
+				state.withAvailabilityState(
+					availabilityState,
+					messageState,
+					getString(emptyTextForState(availabilityState)),
+				),
+			)
 		}
 	}
 

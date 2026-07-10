@@ -13,3 +13,21 @@ internal enum class ConnectorConversationAvailabilityState {
 	EMPTY,
 	LOAD_FAILED,
 }
+
+internal fun ConnectorConversationMessageListState.withAvailabilityState(
+	availabilityState: ConnectorConversationAvailabilityState,
+	previousState: ConnectorConversationMessageListState,
+	emptyText: String,
+): ConnectorConversationMessageListState = copy(
+	messages = if (availabilityState.shouldKeepPreviousMessages()) {
+		previousState.messages.ifEmpty { messages }
+	} else {
+		messages
+	},
+	emptyText = emptyText,
+	isLoading = false,
+)
+
+private fun ConnectorConversationAvailabilityState.shouldKeepPreviousMessages(): Boolean =
+	this == ConnectorConversationAvailabilityState.ACCOUNT_UNAVAILABLE ||
+		this == ConnectorConversationAvailabilityState.LOAD_FAILED
