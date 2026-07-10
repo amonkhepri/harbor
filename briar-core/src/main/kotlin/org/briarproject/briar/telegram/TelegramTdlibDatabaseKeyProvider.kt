@@ -8,16 +8,22 @@ import java.security.SecureRandom
 
 interface TelegramTdlibDatabaseKeyProvider {
 	fun getDatabaseEncryptionKey(tdlibDirectory: File): ByteArray?
+
+	fun isKeyStrengtheningAvailable(): Boolean = true
 }
 
 object NoOpTelegramTdlibDatabaseKeyProvider : TelegramTdlibDatabaseKeyProvider {
 	override fun getDatabaseEncryptionKey(tdlibDirectory: File): ByteArray? = null
+
+	override fun isKeyStrengtheningAvailable(): Boolean = false
 }
 
 class ProtectedTelegramTdlibDatabaseKeyProvider @JvmOverloads constructor(
 	private val databaseConfig: DatabaseConfig,
 	private val random: SecureRandom = SecureRandom(),
 ) : TelegramTdlibDatabaseKeyProvider {
+
+	override fun isKeyStrengtheningAvailable(): Boolean = databaseConfig.keyStrengthener != null
 
 	@Synchronized
 	override fun getDatabaseEncryptionKey(tdlibDirectory: File): ByteArray? {

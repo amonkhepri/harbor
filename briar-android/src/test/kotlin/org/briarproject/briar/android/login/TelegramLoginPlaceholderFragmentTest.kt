@@ -158,6 +158,27 @@ class TelegramLoginPlaceholderFragmentTest {
 			.assertIsNotEnabled()
 	}
 
+	@Test
+	fun testDeviceKeystoreUnavailableShowsSpecificMessageAndDisablesRetry() {
+		telegramAuthSession.stateAfterSubmitIdentifier =
+			TelegramAuthState.RECOVERABLE_ERROR
+		telegramAuthSession.detailAfterSubmitIdentifier =
+			RecoverableErrorDetail.DEVICE_KEYSTORE_UNAVAILABLE
+
+		composeRule.onNodeWithTag(TELEGRAM_LOGIN_IDENTIFIER_TAG)
+			.performTextInput("+123456789")
+		composeRule.onNodeWithTag(TELEGRAM_LOGIN_CONTINUE_TAG)
+			.performClick()
+		composeRule.waitForIdle()
+
+		composeRule.onNodeWithText(
+			"Telegram login in Harbor needs Android 6.0+ device-backed encryption. " +
+				"Use Harbor password instead.",
+		).assertIsDisplayed()
+		composeRule.onNodeWithTag(TELEGRAM_LOGIN_CONTINUE_TAG)
+			.assertIsNotEnabled()
+	}
+
 	private fun androidx.compose.ui.test.SemanticsNodeInteraction.assertEditableTextEquals(
 		expected: String,
 	) {

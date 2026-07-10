@@ -392,7 +392,12 @@ class ReflectiveTelegramTdlibLoginClient @JvmOverloads constructor(
 
 	private fun recoverableDatabaseKeyUnavailable(): TelegramAuthState {
 		closeTdlibClient()
-		return recoverableError(RecoverableErrorDetail.NONE)
+		val detail = if (tdlibKeyProvider.isKeyStrengtheningAvailable()) {
+			RecoverableErrorDetail.NONE
+		} else {
+			RecoverableErrorDetail.DEVICE_KEYSTORE_UNAVAILABLE
+		}
+		return recoverableError(detail)
 	}
 
 	private fun closeTdlibClient() {

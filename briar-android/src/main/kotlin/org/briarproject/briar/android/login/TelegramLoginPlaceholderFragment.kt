@@ -139,6 +139,8 @@ internal fun TelegramLoginScreen(viewModel: StartupViewModel) {
 		errorDetail == RecoverableErrorDetail.MISSING_TDLIB
 	val unsupportedAuthStep = authState == TelegramAuthState.RECOVERABLE_ERROR &&
 		errorDetail == RecoverableErrorDetail.UNSUPPORTED_AUTH_STEP
+	val deviceKeystoreUnavailable = authState == TelegramAuthState.RECOVERABLE_ERROR &&
+		errorDetail == RecoverableErrorDetail.DEVICE_KEYSTORE_UNAVAILABLE
 
 	Column(
 		modifier = Modifier
@@ -216,7 +218,10 @@ internal fun TelegramLoginScreen(viewModel: StartupViewModel) {
 							identifier = it
 							viewModel.setTelegramLoginIdentifier(it)
 						},
-						enabled = hasIdentifier && !missingTdlib && !unsupportedAuthStep,
+						enabled = hasIdentifier &&
+							!missingTdlib &&
+							!unsupportedAuthStep &&
+							!deviceKeystoreUnavailable,
 						onContinue = viewModel::submitTelegramLoginIdentifier,
 					)
 				}
@@ -478,6 +483,8 @@ private fun loginMessage(authState: TelegramAuthState, errorDetail: RecoverableE
 			R.string.telegram_connector_login_password_invalid_message
 		RecoverableErrorDetail.UNSUPPORTED_AUTH_STEP ->
 			R.string.telegram_connector_login_unsupported_auth_step_message
+		RecoverableErrorDetail.DEVICE_KEYSTORE_UNAVAILABLE ->
+			R.string.telegram_connector_login_device_keystore_unavailable_message
 		else -> R.string.telegram_connector_login_retry_message
 	}
 }

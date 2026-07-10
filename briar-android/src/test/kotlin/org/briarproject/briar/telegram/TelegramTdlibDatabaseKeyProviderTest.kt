@@ -28,13 +28,25 @@ class TelegramTdlibDatabaseKeyProviderTest {
 		val secondKey = checkNotNull(provider.getDatabaseEncryptionKey(tdlibDirectory))
 
 		assertEquals(false, oldState.exists())
+		assertEquals(true, provider.isKeyStrengtheningAvailable())
 		assertEquals(SecretKey.LENGTH, firstKey.size)
 		assertArrayEquals(firstKey, secondKey)
 	}
 
 	@Test
 	fun testReturnsNoKeyWithoutStrengthener() {
-		assertEquals(null, provider(null).getDatabaseEncryptionKey(testFolder.newFolder("tdlib")))
+		val provider = provider(null)
+
+		assertEquals(false, provider.isKeyStrengtheningAvailable())
+		assertEquals(null, provider.getDatabaseEncryptionKey(testFolder.newFolder("tdlib")))
+	}
+
+	@Test
+	fun testReturnsNoKeyWhenStrengthenerIsNotInitialised() {
+		val provider = provider(FakeKeyStrengthener(initialised = false))
+
+		assertEquals(true, provider.isKeyStrengtheningAvailable())
+		assertEquals(null, provider.getDatabaseEncryptionKey(testFolder.newFolder("tdlib")))
 	}
 
 	private fun provider(strengthener: KeyStrengthener?) = ProtectedTelegramTdlibDatabaseKeyProvider(
@@ -48,8 +60,8 @@ class TelegramTdlibDatabaseKeyProviderTest {
 			override fun getKeyStrengthener(): KeyStrengthener? = strengthener
 		}
 
-	private class FakeKeyStrengthener : KeyStrengthener {
-		override fun isInitialised(): Boolean = true
+	private class FakeKeyStrengthener(private val initialised: Boolean = true) : KeyStrengthener {
+		override fun isInitialised(): Boolean = initialised
 
 		override fun strengthenKey(k: SecretKey): SecretKey = SecretKey(
 			k.bytes.mapIndexed { index, byte ->

@@ -170,6 +170,14 @@ class ReflectiveTelegramTdlibLoginClientTest {
 		override fun getDatabaseEncryptionKey(tdlibDirectory: File): ByteArray = key.copyOf()
 	}
 
+	private class UnavailableTelegramTdlibDatabaseKeyProvider(
+		private val keyStrengtheningAvailable: Boolean,
+	) : TelegramTdlibDatabaseKeyProvider {
+		override fun getDatabaseEncryptionKey(tdlibDirectory: File): ByteArray? = null
+
+		override fun isKeyStrengtheningAvailable(): Boolean = keyStrengtheningAvailable
+	}
+
 	@Test
 	fun testStartThenSubmitIdentifierTransitionsToCodeEntry() {
 		val client = createClient()
@@ -209,6 +217,34 @@ class ReflectiveTelegramTdlibLoginClientTest {
 		assertEquals(12345 to "test-api-hash", Client.getLastApiId() to Client.getLastApiHash())
 
 		client.close()
+	}
+
+	@Test
+	fun testSubmitIdentifierReturnsDeviceKeystoreUnavailableWithoutKeyStrengthener() {
+		val client = createClient(
+			tdlibKeyProvider = UnavailableTelegramTdlibDatabaseKeyProvider(false),
+		)
+
+		assertEquals(TelegramAuthState.IDENTIFIER_ENTRY, client.start())
+		assertRecoverableError(
+			client,
+			RecoverableErrorDetail.DEVICE_KEYSTORE_UNAVAILABLE,
+		) { client.submitIdentifier("test-login-identifier") }
+		assertSentRequestsAndClose(client, CLOSE)
+	}
+
+	@Test
+	fun testSubmitIdentifierKeepsGenericRetryWhenKeyIsTransientlyUnavailable() {
+		val client = createClient(
+			tdlibKeyProvider = UnavailableTelegramTdlibDatabaseKeyProvider(true),
+		)
+
+		assertEquals(TelegramAuthState.IDENTIFIER_ENTRY, client.start())
+		assertRecoverableError(
+			client,
+			RecoverableErrorDetail.NONE,
+		) { client.submitIdentifier("test-login-identifier") }
+		assertSentRequestsAndClose(client, CLOSE)
 	}
 
 	@Test
