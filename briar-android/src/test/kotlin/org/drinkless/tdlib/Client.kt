@@ -30,6 +30,7 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 				databaseDirectory = requestedDatabaseDirectory
 				lastDatabaseDirectory = requestedDatabaseDirectory
 				lastFilesDirectory = request.filesDirectory.orEmpty()
+				lastDatabaseEncryptionKey = request.databaseEncryptionKey?.copyOf() ?: ByteArray(0)
 				lastApiId = request.apiId
 				lastApiHash = request.apiHash.orEmpty()
 				setTdlibParametersAcceptedLatch?.countDown()
@@ -176,6 +177,7 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 		private var lastPhoneNumber = ""
 		private var lastDatabaseDirectory = ""
 		private var lastFilesDirectory = ""
+		private var lastDatabaseEncryptionKey = ByteArray(0)
 		private var lastApiId = 0
 		private var lastApiHash = ""
 		private var tdlibParametersError = false
@@ -208,6 +210,7 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 			lastPhoneNumber = ""
 			lastDatabaseDirectory = ""
 			lastFilesDirectory = ""
+			lastDatabaseEncryptionKey = ByteArray(0)
 			lastApiId = 0
 			lastApiHash = ""
 			tdlibParametersError = false
@@ -305,6 +308,9 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 
 		@JvmStatic
 		fun getLastFilesDirectory(): String = lastFilesDirectory
+
+		@JvmStatic
+		fun getLastDatabaseEncryptionKey(): ByteArray = lastDatabaseEncryptionKey.copyOf()
 
 		@JvmStatic
 		fun getLastApiId(): Int = lastApiId

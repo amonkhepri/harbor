@@ -59,6 +59,8 @@ class ReflectiveTelegramTdlibLoginClient @JvmOverloads constructor(
 	private val tdlibDirectory: File = File("harbor-telegram"),
 	private val apiId: Int = 0,
 	private val apiHash: String = "",
+	private val tdlibKeyProvider: TelegramTdlibDatabaseKeyProvider =
+		NoOpTelegramTdlibDatabaseKeyProvider,
 	private val authorizationUpdateTimeoutMs: Long = 30_000L,
 ) : TelegramTdlibLoginClient {
 
@@ -119,8 +121,10 @@ class ReflectiveTelegramTdlibLoginClient @JvmOverloads constructor(
 				if (apiId <= 0 || !hasText(apiHash)) {
 					return recoverableError(RecoverableErrorDetail.MISSING_API_CREDENTIALS)
 				}
+				val parametersRequest =
+					createSetTdlibParametersRequest() ?: return recoverableDatabaseKeyUnavailable()
 				val tdlibParametersUpdate = prepareAuthorizationUpdate()
-				when (sendForResult(createSetTdlibParametersRequest())) {
+				when (sendForResult(parametersRequest)) {
 					CommandResult.OK -> Unit
 					CommandResult.ERROR ->
 						return recoverableError(RecoverableErrorDetail.MISSING_API_CREDENTIALS)
@@ -313,7 +317,9 @@ class ReflectiveTelegramTdlibLoginClient @JvmOverloads constructor(
 	}
 
 	@Throws(ReflectiveOperationException::class)
-	private fun createSetTdlibParametersRequest(): Any {
+	private fun createSetTdlibParametersRequest(): Any? {
+		val databaseEncryptionKey =
+			tdlibKeyProvider.getDatabaseEncryptionKey(tdlibDirectory) ?: return null
 		val databaseDirectory = File(tdlibDirectory, "database")
 		val filesDirectory = File(tdlibDirectory, "files")
 		databaseDirectory.mkdirs()
@@ -324,7 +330,7 @@ class ReflectiveTelegramTdlibLoginClient @JvmOverloads constructor(
 		setFieldIfPresent(request, "useTestDc", false)
 		setFieldIfPresent(request, "databaseDirectory", databaseDirectory.path)
 		setFieldIfPresent(request, "filesDirectory", filesDirectory.path)
-		setFieldIfPresent(request, "databaseEncryptionKey", ByteArray(0))
+		setFieldIfPresent(request, "databaseEncryptionKey", databaseEncryptionKey)
 		setFieldIfPresent(request, "useFileDatabase", true)
 		setFieldIfPresent(request, "useChatInfoDatabase", true)
 		setFieldIfPresent(request, "useMessageDatabase", true)
@@ -443,6 +449,11 @@ class ReflectiveTelegramTdlibLoginClient @JvmOverloads constructor(
 	private fun recoverableError(detail: RecoverableErrorDetail): TelegramAuthState {
 		recoverableErrorDetail = detail
 		return TelegramAuthState.RECOVERABLE_ERROR
+	}
+
+	private fun recoverableDatabaseKeyUnavailable(): TelegramAuthState {
+		closeTdlibClient()
+		return recoverableError(RecoverableErrorDetail.NONE)
 	}
 
 	private fun closeTdlibClient() {

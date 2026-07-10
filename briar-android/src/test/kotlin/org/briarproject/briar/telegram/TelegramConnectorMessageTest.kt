@@ -9,10 +9,12 @@ import org.briarproject.briar.api.telegram.TelegramMessageIngestSnapshot
 import org.briarproject.briar.api.telegram.TelegramMessageIngestStatus
 import org.drinkless.tdlib.Client
 import org.drinkless.tdlib.TdApi
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
+import java.io.File
 
 class TelegramConnectorMessageTest {
 
@@ -224,11 +226,30 @@ class TelegramConnectorMessageTest {
 			tdlibDirectory = testFolder.newFolder("tdlib"),
 			apiId = 1,
 			apiHash = "x",
+			tdlibKeyProvider = StaticTelegramTdlibDatabaseKeyProvider(TDLIB_KEY),
 			requestTimeoutMs = 1_000L,
 		)
 
 		assertEquals(listOf(TelegramChat(11L, "", 1_700_000_003)), client.getRecentChats(1))
+		assertArrayEquals(TDLIB_KEY, Client.getLastDatabaseEncryptionKey())
 		assertSentRequests("SetTdlibParameters", "GetChats", "GetChat", "Close")
+	}
+
+	@Test
+	fun testReflectiveClientStopsBeforeParametersWithoutDatabaseEncryptionKey() {
+		Client.resetTestState()
+		Client.setAuthorizationStateAfterTdlibParameters(TdApi.AuthorizationStateReady())
+		val tdlibDir = testFolder.newFolder("tdlib-no-key")
+		val client = ReflectiveTelegramTdlibMessageClient(
+			tdlibDirectory = tdlibDir,
+			apiId = 1,
+			apiHash = "x",
+			requestTimeoutMs = 1_000L,
+		)
+
+		assertEquals(emptyList<TelegramChat>(), client.getRecentChats(1))
+		assertEquals(false, File(tdlibDir, "database").exists())
+		assertSentRequests("Close")
 	}
 
 	@Test
@@ -241,6 +262,7 @@ class TelegramConnectorMessageTest {
 			tdlibDirectory = testFolder.newFolder("tdlib"),
 			apiId = 1,
 			apiHash = "x",
+			tdlibKeyProvider = StaticTelegramTdlibDatabaseKeyProvider(TDLIB_KEY),
 			requestTimeoutMs = 1_000L,
 		)
 
@@ -269,6 +291,7 @@ class TelegramConnectorMessageTest {
 			tdlibDirectory = testFolder.newFolder("tdlib"),
 			apiId = 1,
 			apiHash = "x",
+			tdlibKeyProvider = StaticTelegramTdlibDatabaseKeyProvider(TDLIB_KEY),
 			requestTimeoutMs = 1_000L,
 		)
 
@@ -301,6 +324,7 @@ class TelegramConnectorMessageTest {
 			tdlibDirectory = testFolder.newFolder("tdlib-concurrent"),
 			apiId = 1,
 			apiHash = "x",
+			tdlibKeyProvider = StaticTelegramTdlibDatabaseKeyProvider(TDLIB_KEY),
 			requestTimeoutMs = 2_000L,
 		)
 		val chatsResult = arrayOf<List<TelegramChat>?>(null)
@@ -403,6 +427,11 @@ class TelegramConnectorMessageTest {
 		return ReflectiveTelegramTdlibMessageClient(requestTimeoutMs = 1_000L)
 	}
 
+	private class StaticTelegramTdlibDatabaseKeyProvider(private val key: ByteArray) :
+		TelegramTdlibDatabaseKeyProvider {
+		override fun getDatabaseEncryptionKey(tdlibDirectory: File): ByteArray = key.copyOf()
+	}
+
 	private fun snapshotFor(
 		client: FakeTelegramTdlibMessageClient,
 		chatLimit: Int = 3,
@@ -492,4 +521,8 @@ class TelegramConnectorMessageTest {
 			it.date = dateSeconds
 			it.content = TdApi.MessagePhoto()
 		}
+
+	private companion object {
+		private val TDLIB_KEY = ByteArray(32) { (it + 2).toByte() }
+	}
 }

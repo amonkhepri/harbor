@@ -5,6 +5,7 @@ import org.briarproject.briar.api.telegram.TelegramAuthState
 import org.drinkless.tdlib.Client
 import org.drinkless.tdlib.TdApi
 import org.junit.After
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Test
 import java.io.File
@@ -18,11 +19,14 @@ class ReflectiveTelegramTdlibLoginClientTest {
 
 	private fun createClient(
 		tdlibDirectory: File = File("harbor-telegram"),
+		tdlibKeyProvider: TelegramTdlibDatabaseKeyProvider =
+			StaticTelegramTdlibDatabaseKeyProvider(TDLIB_KEY),
 		authorizationUpdateTimeoutMs: Long = 10_000L,
 	) = ReflectiveTelegramTdlibLoginClient(
 		tdlibDirectory = tdlibDirectory,
 		apiId = 12345,
 		apiHash = "test-api-hash",
+		tdlibKeyProvider = tdlibKeyProvider,
 		authorizationUpdateTimeoutMs = authorizationUpdateTimeoutMs,
 	)
 
@@ -158,6 +162,12 @@ class ReflectiveTelegramTdlibLoginClientTest {
 		private const val CHECK_CODE = "CheckAuthenticationCode"
 		private const val CHECK_PASSWORD = "CheckAuthenticationPassword"
 		private const val CLOSE = "Close"
+		private val TDLIB_KEY = ByteArray(32) { (it + 1).toByte() }
+	}
+
+	private class StaticTelegramTdlibDatabaseKeyProvider(private val key: ByteArray) :
+		TelegramTdlibDatabaseKeyProvider {
+		override fun getDatabaseEncryptionKey(tdlibDirectory: File): ByteArray = key.copyOf()
 	}
 
 	@Test
@@ -182,6 +192,7 @@ class ReflectiveTelegramTdlibLoginClientTest {
 			File(tdlibDir, "database").path to File(tdlibDir, "files").path,
 			Client.getLastDatabaseDirectory() to Client.getLastFilesDirectory(),
 		)
+		assertArrayEquals(TDLIB_KEY, Client.getLastDatabaseEncryptionKey())
 
 		client.close()
 	}
@@ -230,7 +241,11 @@ class ReflectiveTelegramTdlibLoginClientTest {
 	fun testSubmitIdentifierReturnsMissingCredentialsWhenTdlibRejectsParameters() {
 		Client.setTdlibParametersError(true)
 		assertMissingCredentialsAfterIdentifierSubmit(
-			ReflectiveTelegramTdlibLoginClient(apiId = 12345, apiHash = "test-api-hash"),
+			ReflectiveTelegramTdlibLoginClient(
+				apiId = 12345,
+				apiHash = "test-api-hash",
+				tdlibKeyProvider = StaticTelegramTdlibDatabaseKeyProvider(TDLIB_KEY),
+			),
 			SET_PARAMETERS,
 		)
 	}

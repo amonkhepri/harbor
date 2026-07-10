@@ -28,6 +28,8 @@ class ReflectiveTelegramTdlibMessageClient @JvmOverloads constructor(
 	private val tdlibDirectory: File = File("harbor-telegram"),
 	private val apiId: Int = 0,
 	private val apiHash: String = "",
+	private val tdlibKeyProvider: TelegramTdlibDatabaseKeyProvider =
+		NoOpTelegramTdlibDatabaseKeyProvider,
 	private val requestTimeoutMs: Long = 30_000L,
 ) : TelegramTdlibMessageClient {
 
@@ -112,8 +114,9 @@ class ReflectiveTelegramTdlibMessageClient @JvmOverloads constructor(
 			var authorizationState = awaitPreparedAuthorizationStateClassName(firstUpdate)
 			if (authorizationState == "AuthorizationStateWaitTdlibParameters") {
 				if (apiId <= 0 || !hasText(apiHash)) return fallback
+				val parametersRequest = createSetTdlibParametersRequest() ?: return fallback
 				val readyUpdate = prepareAuthorizationUpdate(pendingAuthorizationUpdate)
-				if (sendReturnsError(client, createSetTdlibParametersRequest())) return fallback
+				if (sendReturnsError(client, parametersRequest)) return fallback
 				authorizationState = awaitPreparedAuthorizationStateClassName(readyUpdate)
 			}
 			if (authorizationState != "AuthorizationStateReady") return fallback
@@ -199,7 +202,9 @@ class ReflectiveTelegramTdlibMessageClient @JvmOverloads constructor(
 		}
 
 	@Throws(ReflectiveOperationException::class)
-	private fun createSetTdlibParametersRequest(): Any {
+	private fun createSetTdlibParametersRequest(): Any? {
+		val databaseEncryptionKey =
+			tdlibKeyProvider.getDatabaseEncryptionKey(tdlibDirectory) ?: return null
 		val databaseDirectory = File(tdlibDirectory, "database")
 		val filesDirectory = File(tdlibDirectory, "files")
 		databaseDirectory.mkdirs()
@@ -208,7 +213,7 @@ class ReflectiveTelegramTdlibMessageClient @JvmOverloads constructor(
 		setFieldIfPresent(request, "useTestDc", false)
 		setFieldIfPresent(request, "databaseDirectory", databaseDirectory.path)
 		setFieldIfPresent(request, "filesDirectory", filesDirectory.path)
-		setFieldIfPresent(request, "databaseEncryptionKey", ByteArray(0))
+		setFieldIfPresent(request, "databaseEncryptionKey", databaseEncryptionKey)
 		setFieldIfPresent(request, "useFileDatabase", true)
 		setFieldIfPresent(request, "useChatInfoDatabase", true)
 		setFieldIfPresent(request, "useMessageDatabase", true)
