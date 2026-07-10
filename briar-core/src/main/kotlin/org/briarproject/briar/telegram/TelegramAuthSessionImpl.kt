@@ -305,24 +305,22 @@ class ReflectiveTelegramTdlibLoginClient @JvmOverloads constructor(
 
 	@Throws(ReflectiveOperationException::class)
 	private fun createSetAuthenticationPhoneNumberRequest(identifier: String): Any {
-		val settingsClass = Class.forName(
-			"org.drinkless.tdlib.TdApi\$PhoneNumberAuthenticationSettings",
-		)
+		val settingsClass = tdApiClass("PhoneNumberAuthenticationSettings")
 		val settings = settingsClass.getConstructor().newInstance()
-		return Class.forName("org.drinkless.tdlib.TdApi\$SetAuthenticationPhoneNumber")
+		return tdApiClass("SetAuthenticationPhoneNumber")
 			.getConstructor(String::class.java, settingsClass)
 			.newInstance(identifier, settings)
 	}
 
 	@Throws(ReflectiveOperationException::class)
 	private fun createCheckAuthenticationCodeRequest(code: String): Any =
-		Class.forName("org.drinkless.tdlib.TdApi\$CheckAuthenticationCode")
+		tdApiClass("CheckAuthenticationCode")
 			.getConstructor(String::class.java)
 			.newInstance(code)
 
 	@Throws(ReflectiveOperationException::class)
 	private fun createCheckAuthenticationPasswordRequest(password: String): Any =
-		Class.forName("org.drinkless.tdlib.TdApi\$CheckAuthenticationPassword")
+		tdApiClass("CheckAuthenticationPassword")
 			.getConstructor(String::class.java)
 			.newInstance(password)
 
@@ -330,7 +328,7 @@ class ReflectiveTelegramTdlibLoginClient @JvmOverloads constructor(
 	private fun sendForResult(request: Any): CommandResult {
 		val resultClassName = AtomicReference("")
 		val resultReceived = CountDownLatch(1)
-		val functionClass = Class.forName("org.drinkless.tdlib.TdApi\$Function")
+		val functionClass = tdApiClass("Function")
 		val resultHandlerClass = Class.forName("org.drinkless.tdlib.Client\$ResultHandler")
 		val resultHandler = Proxy.newProxyInstance(
 			resultHandlerClass.classLoader,
@@ -397,12 +395,10 @@ class ReflectiveTelegramTdlibLoginClient @JvmOverloads constructor(
 		tdlibClient = null
 		val closeUpdate = prepareAuthorizationUpdate("AuthorizationStateClosed")
 		try {
-			val functionClass = Class.forName("org.drinkless.tdlib.TdApi\$Function")
+			val functionClass = tdApiClass("Function")
 			val resultHandlerClass = Class.forName("org.drinkless.tdlib.Client\$ResultHandler")
 			val send: Method = client.javaClass.getMethod("send", functionClass, resultHandlerClass)
-			val closeRequest = Class.forName("org.drinkless.tdlib.TdApi\$Close")
-				.getConstructor()
-				.newInstance()
+			val closeRequest = createTdApiObject("Close")
 			send.invoke(client, closeRequest, null)
 			awaitAuthorizationUpdate(closeUpdate)
 		} catch (_: ReflectiveOperationException) {

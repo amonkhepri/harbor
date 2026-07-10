@@ -189,25 +189,11 @@ class ReflectiveTelegramTdlibMessageClient @JvmOverloads constructor(
 			setFieldIfPresent(it, "onlyLocal", false)
 		}
 
-	@Throws(ReflectiveOperationException::class)
-	private fun createTdApiObject(className: String): Any =
-		Class.forName("org.drinkless.tdlib.TdApi\$$className")
-			.getConstructor()
-			.newInstance()
-
-	@Throws(ReflectiveOperationException::class)
-	private fun setFieldIfPresent(target: Any, name: String, value: Any?) {
-		try {
-			target.javaClass.getField(name).set(target, value)
-		} catch (_: NoSuchFieldException) {
-		}
-	}
-
 	@Throws(ReflectiveOperationException::class, InterruptedException::class)
 	private fun sendAndAwait(client: Any, request: Any): Any? {
 		val result = AtomicReference<Any?>()
 		val resultReceived = CountDownLatch(1)
-		val functionClass = Class.forName("org.drinkless.tdlib.TdApi\$Function")
+		val functionClass = tdApiClass("Function")
 		val resultHandlerClass = Class.forName("org.drinkless.tdlib.Client\$ResultHandler")
 		val resultHandler = Proxy.newProxyInstance(
 			resultHandlerClass.classLoader,
@@ -303,7 +289,7 @@ class ReflectiveTelegramTdlibMessageClient @JvmOverloads constructor(
 				pendingAuthorizationUpdate,
 				"AuthorizationStateClosed",
 			)
-			val functionClass = Class.forName("org.drinkless.tdlib.TdApi\$Function")
+			val functionClass = tdApiClass("Function")
 			val resultHandlerClass = Class.forName("org.drinkless.tdlib.Client\$ResultHandler")
 			val send: Method = client.javaClass.getMethod("send", functionClass, resultHandlerClass)
 			val closeRequest = createTdApiObject("Close")

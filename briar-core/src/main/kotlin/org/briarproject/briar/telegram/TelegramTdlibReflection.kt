@@ -42,4 +42,21 @@ internal fun getAuthorizationStateClassName(update: Any?): String {
 	return authorizationState?.javaClass?.simpleName ?: ""
 }
 
+@Throws(ReflectiveOperationException::class)
+internal fun tdApiClass(className: String): Class<*> =
+	Class.forName("org.drinkless.tdlib.TdApi\$$className")
+
+@Throws(ReflectiveOperationException::class)
+internal fun createTdApiObject(className: String): Any = tdApiClass(className)
+	.getConstructor()
+	.newInstance()
+
+@Throws(ReflectiveOperationException::class)
+internal fun setFieldIfPresent(target: Any, name: String, value: Any?) {
+	try {
+		target.javaClass.getField(name).set(target, value)
+	} catch (_: NoSuchFieldException) {
+	}
+}
+
 internal fun hasText(value: String): Boolean = value.trim().isNotEmpty()
