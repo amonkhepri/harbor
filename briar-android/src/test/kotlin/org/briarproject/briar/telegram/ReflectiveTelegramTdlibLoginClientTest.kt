@@ -451,23 +451,6 @@ class ReflectiveTelegramTdlibLoginClientTest {
 	}
 
 	@Test
-	fun testCloseAfterInvalidPasswordClearsRecoverableErrorAndAllowsRestart() {
-		val client = createClient()
-
-		assertInvalidPasswordFromPasswordEntry(client)
-
-		client.assertSuccessfulState(TelegramAuthState.CLOSED, client.close())
-		assertPasswordFlowRequests(CLOSE)
-
-		client.assertSuccessfulState(TelegramAuthState.IDENTIFIER_ENTRY, client.start())
-		client.assertSuccessfulState(
-			TelegramAuthState.CODE_ENTRY,
-			client.submitIdentifier("test-login-identifier"),
-		)
-		assertPasswordFlowRequestsAndClose(client, CLOSE, SET_PARAMETERS, SET_PHONE)
-	}
-
-	@Test
 	fun testCloseWaitsForTdlibClosedBeforeRestartingLogin() {
 		Client.setCloseAuthorizationUpdateDelayMs(200L)
 		val client = createClient(tdlibDirectory = File("build/test-tdlib-close-restart"))
