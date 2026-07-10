@@ -222,13 +222,7 @@ class TelegramConnectorMessageTest {
 		Client.resetTestState()
 		Client.setAuthorizationStateAfterTdlibParameters(TdApi.AuthorizationStateReady())
 		Client.setChats(chat(11L, lastMessageDateSeconds = 1_700_000_003))
-		val client = ReflectiveTelegramTdlibMessageClient(
-			tdlibDirectory = testFolder.newFolder("tdlib"),
-			apiId = 1,
-			apiHash = "x",
-			tdlibKeyProvider = StaticTelegramTdlibDatabaseKeyProvider(TDLIB_KEY),
-			requestTimeoutMs = 1_000L,
-		)
+		val client = configuredReflectiveMessageClient()
 
 		assertEquals(listOf(TelegramChat(11L, "", 1_700_000_003)), client.getRecentChats(1))
 		assertArrayEquals(TDLIB_KEY, Client.getLastDatabaseEncryptionKey())
@@ -258,13 +252,7 @@ class TelegramConnectorMessageTest {
 		Client.setAuthorizationStateAfterTdlibParameters(TdApi.AuthorizationStateReady())
 		Client.setCloseAuthorizationUpdateDelayMs(200L)
 		Client.setChats(chat(11L, lastMessageDateSeconds = 1_700_000_003))
-		val client = ReflectiveTelegramTdlibMessageClient(
-			tdlibDirectory = testFolder.newFolder("tdlib"),
-			apiId = 1,
-			apiHash = "x",
-			tdlibKeyProvider = StaticTelegramTdlibDatabaseKeyProvider(TDLIB_KEY),
-			requestTimeoutMs = 1_000L,
-		)
+		val client = configuredReflectiveMessageClient()
 
 		val snapshot = TelegramMessageIngestDiagnostics(StubTelegramConnector(client))
 			.readSnapshot(chatLimit = 1, messageLimit = 0)
@@ -287,13 +275,7 @@ class TelegramConnectorMessageTest {
 		Client.setCloseAuthorizationStatePrelude(TdApi.AuthorizationStateReady())
 		Client.setCloseAuthorizationUpdateDelayMs(200L)
 		Client.setChats(chat(11L, lastMessageDateSeconds = 1_700_000_003))
-		val client = ReflectiveTelegramTdlibMessageClient(
-			tdlibDirectory = testFolder.newFolder("tdlib"),
-			apiId = 1,
-			apiHash = "x",
-			tdlibKeyProvider = StaticTelegramTdlibDatabaseKeyProvider(TDLIB_KEY),
-			requestTimeoutMs = 1_000L,
-		)
+		val client = configuredReflectiveMessageClient()
 
 		val snapshot = TelegramMessageIngestDiagnostics(StubTelegramConnector(client))
 			.readSnapshot(chatLimit = 1, messageLimit = 0)
@@ -320,11 +302,8 @@ class TelegramConnectorMessageTest {
 			textMessage(11L, 21L, 1_700_000_004, isOutgoing = false, body = "body"),
 		)
 		Client.prepareSetTdlibParametersAcceptedLatch()
-		val client = ReflectiveTelegramTdlibMessageClient(
+		val client = configuredReflectiveMessageClient(
 			tdlibDirectory = testFolder.newFolder("tdlib-concurrent"),
-			apiId = 1,
-			apiHash = "x",
-			tdlibKeyProvider = StaticTelegramTdlibDatabaseKeyProvider(TDLIB_KEY),
 			requestTimeoutMs = 2_000L,
 		)
 		val chatsResult = arrayOf<List<TelegramChat>?>(null)
@@ -426,6 +405,17 @@ class TelegramConnectorMessageTest {
 		configureClientState()
 		return ReflectiveTelegramTdlibMessageClient(requestTimeoutMs = 1_000L)
 	}
+
+	private fun configuredReflectiveMessageClient(
+		tdlibDirectory: File = testFolder.newFolder("tdlib"),
+		requestTimeoutMs: Long = 1_000L,
+	) = ReflectiveTelegramTdlibMessageClient(
+		tdlibDirectory = tdlibDirectory,
+		apiId = 1,
+		apiHash = "x",
+		tdlibKeyProvider = StaticTelegramTdlibDatabaseKeyProvider(TDLIB_KEY),
+		requestTimeoutMs = requestTimeoutMs,
+	)
 
 	private class StaticTelegramTdlibDatabaseKeyProvider(private val key: ByteArray) :
 		TelegramTdlibDatabaseKeyProvider {
