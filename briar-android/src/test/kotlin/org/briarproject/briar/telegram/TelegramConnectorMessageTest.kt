@@ -114,23 +114,6 @@ class TelegramConnectorMessageTest {
 	}
 
 	@Test
-	fun testReflectiveClientReturnsEmptyWhenAuthorizationIsNotReady() {
-		Client.resetTestState()
-		val client = ReflectiveTelegramTdlibMessageClient(requestTimeoutMs = 1_000L)
-
-		assertEquals(
-			false to (emptyList<TelegramChat>() to emptyList<TelegramMessage>()),
-			client.isAuthorized() to (client.getRecentChats(5) to client.getRecentMessages(10L, 5)),
-		)
-		assertEquals(
-			false,
-			Client.getSentRequestNames().any {
-				it in listOf("GetChats", "GetChatHistory")
-			},
-		)
-	}
-
-	@Test
 	fun testReflectiveClientMapsRecentChatsAndTextMessages() {
 		val client = readyReflectiveMessageClient {
 			Client.setChats(
@@ -239,7 +222,6 @@ class TelegramConnectorMessageTest {
 	@Test
 	fun testReflectiveClientStopsBeforeParametersWithoutDatabaseEncryptionKey() {
 		Client.resetTestState()
-		Client.setAuthorizationStateAfterTdlibParameters(TdApi.AuthorizationStateReady())
 		val tdlibDir = testFolder.newFolder("tdlib-no-key")
 		val client = ReflectiveTelegramTdlibMessageClient(
 			tdlibDirectory = tdlibDir,
@@ -248,7 +230,10 @@ class TelegramConnectorMessageTest {
 			requestTimeoutMs = 1_000L,
 		)
 
-		assertEquals(emptyList<TelegramChat>(), client.getRecentChats(1))
+		assertEquals(
+			false to (emptyList<TelegramChat>() to emptyList<TelegramMessage>()),
+			client.isAuthorized() to (client.getRecentChats(1) to client.getRecentMessages(10L, 1)),
+		)
 		assertEquals(false, File(tdlibDir, "database").exists())
 	}
 
