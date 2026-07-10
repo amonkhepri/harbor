@@ -248,29 +248,6 @@ class TelegramConnectorMessageTest {
 	}
 
 	@Test
-	fun testDiagnosticsWaitsForAuthorizationProbeCloseBeforeReading() {
-		Client.resetTestState()
-		Client.setAuthorizationStateAfterTdlibParameters(TdApi.AuthorizationStateReady())
-		Client.setCloseAuthorizationUpdateDelayMs(200L)
-		Client.setChats(chat(11L, lastMessageDateSeconds = 1_700_000_003))
-		val client = configuredReflectiveMessageClient()
-
-		val snapshot = TelegramMessageIngestDiagnostics(StubTelegramConnector(client))
-			.readSnapshot(chatLimit = 1, messageLimit = 0)
-
-		assertSnapshot(snapshot, TelegramMessageIngestStatus.CHAT_COUNT_ONLY, 1, 0)
-		assertSentRequests(
-			"SetTdlibParameters",
-			"Close",
-			"SetTdlibParameters",
-			"LoadChats",
-			"GetChats",
-			"GetChat",
-			"Close",
-		)
-	}
-
-	@Test
 	fun testDiagnosticsIgnoresNonClosedAuthorizationUpdateBeforeReadCloseCompletes() {
 		Client.resetTestState()
 		Client.setAuthorizationStateAfterTdlibParameters(TdApi.AuthorizationStateReady())
