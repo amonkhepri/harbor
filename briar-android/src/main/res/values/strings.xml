@@ -54,6 +54,7 @@
 	<string name="telegram_connector_login_identifier_invalid_message">Telegram did not accept that phone number in this build. Check it, then continue to retry. You can also use Harbor password instead.</string>
 	<string name="telegram_connector_login_code_invalid_message">Telegram did not accept that login code in this build. Check it, then continue to retry. You can also use Harbor password instead.</string>
 	<string name="telegram_connector_login_password_invalid_message">Telegram did not accept that password or 2FA entry in this build. Check it, then continue to retry. You can also use Harbor password instead.</string>
+	<string name="telegram_connector_login_unsupported_auth_step_message">Telegram returned an account step Harbor does not support in this build. Use Harbor password instead.</string>
 	<string name="telegram_connector_login_identifier_hint">Telegram phone number</string>
 	<string name="telegram_connector_login_code_hint">Telegram login code</string>
 	<string name="telegram_connector_login_password_hint">Telegram password or 2FA code</string>

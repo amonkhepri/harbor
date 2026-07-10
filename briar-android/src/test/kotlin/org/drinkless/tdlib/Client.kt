@@ -60,7 +60,7 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 				if (request.code.contains("password-required")) {
 					emitAuthorizationState(TdApi.AuthorizationStateWaitPassword())
 				} else {
-					emitAuthorizationState(TdApi.AuthorizationStateReady())
+					emitAuthorizationState(authorizationStateAfterCode)
 				}
 			}
 			is TdApi.CheckAuthenticationPassword -> {
@@ -202,6 +202,7 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 			TdApi.AuthorizationStateWaitTdlibParameters()
 		private var authorizationStateAfterTdlibParameters: Any =
 			TdApi.AuthorizationStateWaitPhoneNumber()
+		private var authorizationStateAfterCode: Any = TdApi.AuthorizationStateReady()
 		private val chatsById = linkedMapOf<Long, TdApi.Chat>()
 		private val messagesByChatId = mutableMapOf<Long, List<TdApi.Message?>>()
 		private var maxChatLoadPageSize = Int.MAX_VALUE
@@ -235,6 +236,7 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 			initialAuthorizationState = TdApi.AuthorizationStateWaitTdlibParameters()
 			authorizationStateAfterTdlibParameters =
 				TdApi.AuthorizationStateWaitPhoneNumber()
+			authorizationStateAfterCode = TdApi.AuthorizationStateReady()
 			chatsById.clear()
 			messagesByChatId.clear()
 			maxChatLoadPageSize = Int.MAX_VALUE
@@ -287,6 +289,11 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 		@JvmStatic
 		fun setAuthorizationStateAfterTdlibParameters(authorizationState: Any) {
 			authorizationStateAfterTdlibParameters = authorizationState
+		}
+
+		@JvmStatic
+		fun setAuthorizationStateAfterCode(authorizationState: Any) {
+			authorizationStateAfterCode = authorizationState
 		}
 
 		@JvmStatic

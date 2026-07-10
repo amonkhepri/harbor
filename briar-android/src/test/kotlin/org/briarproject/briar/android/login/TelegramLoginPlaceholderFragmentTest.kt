@@ -13,6 +13,7 @@ import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.text.AnnotatedString
@@ -136,8 +137,30 @@ class TelegramLoginPlaceholderFragmentTest {
 			.assertEditableTextEquals("")
 	}
 
-	private fun androidx.compose.ui.test.SemanticsNodeInteraction
-		.assertEditableTextEquals(expected: String) {
+	@Test
+	fun testUnsupportedAuthStepShowsSpecificMessageAndDisablesRetry() {
+		telegramAuthSession.stateAfterSubmitIdentifier =
+			TelegramAuthState.RECOVERABLE_ERROR
+		telegramAuthSession.detailAfterSubmitIdentifier =
+			RecoverableErrorDetail.UNSUPPORTED_AUTH_STEP
+
+		composeRule.onNodeWithTag(TELEGRAM_LOGIN_IDENTIFIER_TAG)
+			.performTextInput("+123456789")
+		composeRule.onNodeWithTag(TELEGRAM_LOGIN_CONTINUE_TAG)
+			.performClick()
+		composeRule.waitForIdle()
+
+		composeRule.onNodeWithText(
+			"Telegram returned an account step Harbor does not support in this build. " +
+				"Use Harbor password instead.",
+		).assertIsDisplayed()
+		composeRule.onNodeWithTag(TELEGRAM_LOGIN_CONTINUE_TAG)
+			.assertIsNotEnabled()
+	}
+
+	private fun androidx.compose.ui.test.SemanticsNodeInteraction.assertEditableTextEquals(
+		expected: String,
+	) {
 		assert(
 			SemanticsMatcher.expectValue(
 				SemanticsProperties.EditableText,
@@ -146,9 +169,7 @@ class TelegramLoginPlaceholderFragmentTest {
 		)
 	}
 
-	private fun createViewModel(
-		telegramAuthSession: TelegramAuthSession,
-	): StartupViewModel {
+	private fun createViewModel(telegramAuthSession: TelegramAuthSession): StartupViewModel {
 		val app = mock(Application::class.java)
 		val accountManager = mock(AccountManager::class.java)
 		val lifecycleManager = mock(LifecycleManager::class.java)
@@ -177,14 +198,14 @@ class TelegramLoginPlaceholderFragmentTest {
 		var currentAuthState = TelegramAuthState.CLOSED
 		var currentRecoverableErrorDetail = RecoverableErrorDetail.NONE
 		var stateAfterSubmitIdentifier = TelegramAuthState.IDENTIFIER_ENTRY
+		var detailAfterSubmitIdentifier = RecoverableErrorDetail.NONE
 		var stateAfterSubmitCode = TelegramAuthState.CODE_ENTRY
 		var lastIdentifier = ""
 		var closeCalls = 0
 
 		override fun getCurrentState(): TelegramAuthState = currentAuthState
 
-		override fun getRecoverableErrorDetail(): RecoverableErrorDetail =
-			currentRecoverableErrorDetail
+		override fun getRecoverableErrorDetail(): RecoverableErrorDetail = currentRecoverableErrorDetail
 
 		override fun start() {
 			currentAuthState = TelegramAuthState.IDENTIFIER_ENTRY
@@ -194,6 +215,7 @@ class TelegramLoginPlaceholderFragmentTest {
 		override fun submitIdentifier(identifier: String) {
 			lastIdentifier = identifier
 			currentAuthState = stateAfterSubmitIdentifier
+			currentRecoverableErrorDetail = detailAfterSubmitIdentifier
 		}
 
 		override fun submitCode(code: String) {
@@ -208,5 +230,4 @@ class TelegramLoginPlaceholderFragmentTest {
 			currentRecoverableErrorDetail = RecoverableErrorDetail.NONE
 		}
 	}
-
 }

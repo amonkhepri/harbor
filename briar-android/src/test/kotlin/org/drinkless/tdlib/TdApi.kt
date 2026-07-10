@@ -63,6 +63,8 @@ abstract class TdApi {
 
 	class AuthorizationStateWaitPassword
 
+	class AuthorizationStateWaitRegistration
+
 	class AuthorizationStateReady
 
 	class AuthorizationStateClosed

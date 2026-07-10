@@ -1,3 +1,5 @@
+@file:Suppress("ktlint:standard:function-naming")
+
 package org.briarproject.briar.android.login
 
 import android.os.Bundle
@@ -135,6 +137,8 @@ internal fun TelegramLoginScreen(viewModel: StartupViewModel) {
 	val hasPassword = password.trim().isNotEmpty()
 	val missingTdlib = authState == TelegramAuthState.RECOVERABLE_ERROR &&
 		errorDetail == RecoverableErrorDetail.MISSING_TDLIB
+	val unsupportedAuthStep = authState == TelegramAuthState.RECOVERABLE_ERROR &&
+		errorDetail == RecoverableErrorDetail.UNSUPPORTED_AUTH_STEP
 
 	Column(
 		modifier = Modifier
@@ -212,7 +216,7 @@ internal fun TelegramLoginScreen(viewModel: StartupViewModel) {
 							identifier = it
 							viewModel.setTelegramLoginIdentifier(it)
 						},
-						enabled = hasIdentifier && !missingTdlib,
+						enabled = hasIdentifier && !missingTdlib && !unsupportedAuthStep,
 						onContinue = viewModel::submitTelegramLoginIdentifier,
 					)
 				}
@@ -346,11 +350,7 @@ private fun PasswordStep(
 }
 
 @Composable
-private fun ConfirmationStep(
-	identifier: String,
-	onContinue: () -> Unit,
-	onBack: () -> Unit,
-) {
+private fun ConfirmationStep(identifier: String, onContinue: () -> Unit, onBack: () -> Unit) {
 	Column(
 		modifier = Modifier
 			.fillMaxWidth()
@@ -458,13 +458,10 @@ private fun telegramTextFieldColors() = OutlinedTextFieldDefaults.colors(
 	focusedLabelColor = MaterialTheme.colorScheme.primary,
 	unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
 	disabledLabelColor =
-		MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f),
+	MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f),
 )
 
-private fun loginMessage(
-	authState: TelegramAuthState,
-	errorDetail: RecoverableErrorDetail,
-): Int {
+private fun loginMessage(authState: TelegramAuthState, errorDetail: RecoverableErrorDetail): Int {
 	if (authState != TelegramAuthState.RECOVERABLE_ERROR) {
 		return R.string.telegram_connector_login_message
 	}
@@ -479,6 +476,8 @@ private fun loginMessage(
 			R.string.telegram_connector_login_code_invalid_message
 		RecoverableErrorDetail.INVALID_PASSWORD ->
 			R.string.telegram_connector_login_password_invalid_message
+		RecoverableErrorDetail.UNSUPPORTED_AUTH_STEP ->
+			R.string.telegram_connector_login_unsupported_auth_step_message
 		else -> R.string.telegram_connector_login_retry_message
 	}
 }

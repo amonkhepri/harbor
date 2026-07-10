@@ -369,8 +369,15 @@ class ReflectiveTelegramTdlibLoginClient @JvmOverloads constructor(
 			"AuthorizationStateClosed" -> clearRecoverableErrorDetail(TelegramAuthState.CLOSED)
 			else -> {
 				closeTdlibClient()
-				recoverableError(RecoverableErrorDetail.NONE)
+				recoverableError(recoverableDetailForUnsupportedState(className))
 			}
+		}
+
+	private fun recoverableDetailForUnsupportedState(className: String): RecoverableErrorDetail =
+		if (className.startsWith("AuthorizationStateWait")) {
+			RecoverableErrorDetail.UNSUPPORTED_AUTH_STEP
+		} else {
+			RecoverableErrorDetail.NONE
 		}
 
 	private fun clearRecoverableErrorDetail(state: TelegramAuthState): TelegramAuthState {

@@ -7,7 +7,8 @@ interface TelegramAuthSession {
 		MISSING_API_CREDENTIALS,
 		INVALID_IDENTIFIER,
 		INVALID_CODE,
-		INVALID_PASSWORD
+		INVALID_PASSWORD,
+		UNSUPPORTED_AUTH_STEP,
 	}
 
 	fun getCurrentState(): TelegramAuthState

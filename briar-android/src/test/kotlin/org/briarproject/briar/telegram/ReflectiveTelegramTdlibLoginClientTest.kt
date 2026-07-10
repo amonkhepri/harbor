@@ -336,6 +336,18 @@ class ReflectiveTelegramTdlibLoginClientTest {
 	}
 
 	@Test
+	fun testSubmitCodeReturnsUnsupportedDetailForRegistrationStep() {
+		Client.setAuthorizationStateAfterCode(TdApi.AuthorizationStateWaitRegistration())
+		val client = createClient()
+
+		startToCodeEntry(client)
+		assertRecoverableError(client, RecoverableErrorDetail.UNSUPPORTED_AUTH_STEP) {
+			client.submitCode("12345")
+		}
+		assertSentRequestsAndClose(client, SET_PARAMETERS, SET_PHONE, CHECK_CODE, CLOSE)
+	}
+
+	@Test
 	fun testSubmitCodeReturnsRecoverableErrorWhenReadyUpdateExceedsTimeout() {
 		assertSubmitCodeTimeout("12345", "code wait timeout")
 	}
