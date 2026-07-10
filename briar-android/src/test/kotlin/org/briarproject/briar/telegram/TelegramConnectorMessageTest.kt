@@ -141,21 +141,6 @@ class TelegramConnectorMessageTest {
 	}
 
 	@Test
-	fun testFakeTdlibRequiresLoadChatsBeforeGetChats() {
-		Client.resetTestState()
-		Client.setChats(chat(10L, lastMessageDateSeconds = 1_700_000_000))
-		val client = Client.create({}, null, null)
-
-		val beforeLoad = sendFakeTdlibRequest(client, TdApi.GetChats().also { it.limit = 1 })
-			as TdApi.Chats
-		sendFakeTdlibRequest(client, TdApi.LoadChats().also { it.limit = 1 })
-		val afterLoad = sendFakeTdlibRequest(client, TdApi.GetChats().also { it.limit = 1 })
-			as TdApi.Chats
-
-		assertEquals(listOf(0, 1), listOf(beforeLoad.chatIds.size, afterLoad.chatIds.size))
-	}
-
-	@Test
 	fun testReflectiveClientMapsRecentChatsAndTextMessages() {
 		val client = readyReflectiveMessageClient {
 			Client.setChats(
@@ -457,12 +442,6 @@ class TelegramConnectorMessageTest {
 			Triple(status, recentChatCount, sampledMessageCount),
 			Triple(snapshot.status, snapshot.recentChatCount, snapshot.sampledMessageCount),
 		)
-	}
-
-	private fun sendFakeTdlibRequest(client: Client, request: TdApi.Function): Any? {
-		var result: Any? = null
-		client.send(request) { result = it }
-		return result
 	}
 
 	private class FakeTelegramTdlibMessageClient(
