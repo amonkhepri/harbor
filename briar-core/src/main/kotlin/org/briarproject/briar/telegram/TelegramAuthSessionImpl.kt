@@ -114,7 +114,9 @@ class ReflectiveTelegramTdlibLoginClient @JvmOverloads constructor(
 				when (sendForResult(parametersRequest)) {
 					CommandResult.OK -> Unit
 					CommandResult.ERROR ->
-						return recoverableError(RecoverableErrorDetail.MISSING_API_CREDENTIALS)
+						return recoverableError(
+							RecoverableErrorDetail.TDLIB_DATABASE_KEY_MISMATCH,
+						)
 					CommandResult.TIMEOUT ->
 						return recoverableError(RecoverableErrorDetail.NONE)
 				}

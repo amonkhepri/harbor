@@ -261,6 +261,20 @@ class ReflectiveTelegramTdlibLoginClientTest {
 	}
 
 	@Test
+	fun testSubmitIdentifierReturnsKeyMismatchWhenTdlibParametersAreRejected() {
+		Client.setRejectSetTdlibParameters(true)
+		val client = createClient()
+
+		assertEquals(TelegramAuthState.IDENTIFIER_ENTRY, client.start())
+		assertRecoverableError(
+			client,
+			RecoverableErrorDetail.TDLIB_DATABASE_KEY_MISMATCH,
+		) { client.submitIdentifier("test-login-identifier") }
+		assertEquals(12345 to "test-api-hash", Client.getLastApiId() to Client.getLastApiHash())
+		assertSentRequestsAndClose(client, SET_PARAMETERS)
+	}
+
+	@Test
 	fun testSubmitIdentifierReturnsMissingCredentialsWithoutConfiguredApiId() {
 		assertMissingCredentialsAfterIdentifierSubmit(
 			ReflectiveTelegramTdlibLoginClient(apiId = 0, apiHash = "test-api-hash"),

@@ -34,6 +34,10 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 				lastDatabaseEncryptionKey = request.databaseEncryptionKey?.copyOf() ?: ByteArray(0)
 				lastApiId = request.apiId
 				lastApiHash = request.apiHash.orEmpty()
+				if (rejectSetTdlibParameters) {
+					resultHandler?.onResult(TdApi.Error())
+					return
+				}
 				setTdlibParametersAcceptedLatch?.countDown()
 				resultHandler?.onResult(TdApi.Ok())
 				emitAuthorizationState(authorizationStateAfterTdlibParameters)
@@ -199,6 +203,7 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 		private var maxHistoryPageSize = Int.MAX_VALUE
 		private var activeDatabaseDirectory = ""
 		private var setTdlibParametersAcceptedLatch: CountDownLatch? = null
+		private var rejectSetTdlibParameters = false
 
 		@JvmStatic
 		fun create(
@@ -231,6 +236,7 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 			maxHistoryPageSize = Int.MAX_VALUE
 			activeDatabaseDirectory = ""
 			setTdlibParametersAcceptedLatch = null
+			rejectSetTdlibParameters = false
 		}
 
 		@JvmStatic
@@ -298,6 +304,11 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 		@JvmStatic
 		fun prepareSetTdlibParametersAcceptedLatch() {
 			setTdlibParametersAcceptedLatch = CountDownLatch(1)
+		}
+
+		@JvmStatic
+		fun setRejectSetTdlibParameters(reject: Boolean) {
+			rejectSetTdlibParameters = reject
 		}
 
 		@JvmStatic

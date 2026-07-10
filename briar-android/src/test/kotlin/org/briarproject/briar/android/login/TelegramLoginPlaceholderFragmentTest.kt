@@ -159,6 +159,27 @@ class TelegramLoginPlaceholderFragmentTest {
 	}
 
 	@Test
+	fun testTdlibDatabaseKeyMismatchShowsSpecificMessageAndDisablesRetry() {
+		telegramAuthSession.stateAfterSubmitIdentifier =
+			TelegramAuthState.RECOVERABLE_ERROR
+		telegramAuthSession.detailAfterSubmitIdentifier =
+			RecoverableErrorDetail.TDLIB_DATABASE_KEY_MISMATCH
+
+		composeRule.onNodeWithTag(TELEGRAM_LOGIN_IDENTIFIER_TAG)
+			.performTextInput("+123456789")
+		composeRule.onNodeWithTag(TELEGRAM_LOGIN_CONTINUE_TAG)
+			.performClick()
+		composeRule.waitForIdle()
+
+		composeRule.onNodeWithText(
+			"Telegram login cannot use the protected local Telegram database in this build. " +
+				"Use Harbor password instead.",
+		).assertIsDisplayed()
+		composeRule.onNodeWithTag(TELEGRAM_LOGIN_CONTINUE_TAG)
+			.assertIsNotEnabled()
+	}
+
+	@Test
 	fun testDeviceKeystoreUnavailableShowsSpecificMessageAndDisablesRetry() {
 		telegramAuthSession.stateAfterSubmitIdentifier =
 			TelegramAuthState.RECOVERABLE_ERROR

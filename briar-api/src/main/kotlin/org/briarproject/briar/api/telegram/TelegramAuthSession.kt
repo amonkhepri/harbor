@@ -10,6 +10,7 @@ interface TelegramAuthSession {
 		INVALID_PASSWORD,
 		UNSUPPORTED_AUTH_STEP,
 		DEVICE_KEYSTORE_UNAVAILABLE,
+		TDLIB_DATABASE_KEY_MISMATCH,
 	}
 
 	fun getCurrentState(): TelegramAuthState
