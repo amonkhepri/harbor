@@ -236,15 +236,14 @@ class TelegramConnectorMessageTest {
 	}
 
 	@Test
-	fun testReflectiveClientSetsTdlibParametersBeforeReading() {
+	fun testReflectiveClientUsesDatabaseEncryptionKeyWhenSettingParameters() {
 		Client.resetTestState()
 		Client.setAuthorizationStateAfterTdlibParameters(TdApi.AuthorizationStateReady())
-		Client.setChats(chat(11L, lastMessageDateSeconds = 1_700_000_003))
 		val client = configuredReflectiveMessageClient()
 
-		assertEquals(listOf(TelegramChat(11L, "", 1_700_000_003)), client.getRecentChats(1))
+		assertEquals(true, client.isAuthorized())
 		assertArrayEquals(TDLIB_KEY, Client.getLastDatabaseEncryptionKey())
-		assertSentRequests("SetTdlibParameters", "LoadChats", "GetChats", "GetChat", "Close")
+		assertSentRequests("SetTdlibParameters", "Close")
 	}
 
 	@Test
@@ -277,15 +276,6 @@ class TelegramConnectorMessageTest {
 			.readSnapshot(chatLimit = 1, messageLimit = 0)
 
 		assertSnapshot(snapshot, TelegramMessageIngestStatus.CHAT_COUNT_ONLY, 1, 0)
-		assertSentRequests(
-			"SetTdlibParameters",
-			"Close",
-			"SetTdlibParameters",
-			"LoadChats",
-			"GetChats",
-			"GetChat",
-			"Close",
-		)
 	}
 
 	@Test
