@@ -30,15 +30,17 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.livedata.observeAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.colorResource
@@ -48,6 +50,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Observer
 import androidx.lifecycle.ViewModelProvider
 import org.briarproject.briar.R
 import org.briarproject.briar.android.activity.ActivityComponent
@@ -119,19 +122,19 @@ class TelegramLoginPlaceholderFragment : BaseFragment() {
 
 @Composable
 internal fun TelegramLoginScreen(viewModel: StartupViewModel) {
-	val authState by viewModel.getTelegramAuthState()
-		.observeAsState(TelegramAuthState.CLOSED)
+	val authSnapshot by rememberTelegramAuthSnapshot(viewModel)
+	val authState = authSnapshot.authState
+	val errorDetail = authSnapshot.errorDetail
 	var identifier by remember { mutableStateOf(viewModel.getTelegramLoginIdentifier()) }
 	var code by remember { mutableStateOf(viewModel.getTelegramLoginCode()) }
 	var password by remember { mutableStateOf(viewModel.getTelegramLoginPassword()) }
 
-	LaunchedEffect(authState) {
+	LaunchedEffect(authSnapshot.revision) {
 		identifier = viewModel.getTelegramLoginIdentifier()
 		code = viewModel.getTelegramLoginCode()
 		password = viewModel.getTelegramLoginPassword()
 	}
 
-	val errorDetail = viewModel.getTelegramRecoverableErrorDetail()
 	val hasIdentifier = identifier.trim().isNotEmpty()
 	val hasCode = code.trim().isNotEmpty()
 	val hasPassword = password.trim().isNotEmpty()
@@ -238,6 +241,41 @@ internal fun TelegramLoginScreen(viewModel: StartupViewModel) {
 			}
 		}
 	}
+}
+
+private data class TelegramAuthSnapshot(
+	val authState: TelegramAuthState,
+	val errorDetail: RecoverableErrorDetail,
+	val revision: Int,
+)
+
+@Composable
+private fun rememberTelegramAuthSnapshot(viewModel: StartupViewModel): State<TelegramAuthSnapshot> {
+	val lifecycleOwner = LocalLifecycleOwner.current
+	val authLiveData = viewModel.getTelegramAuthState()
+	val snapshot = remember(viewModel, authLiveData) {
+		mutableStateOf(
+			TelegramAuthSnapshot(
+				authLiveData.value ?: TelegramAuthState.CLOSED,
+				viewModel.getTelegramRecoverableErrorDetail(),
+				0,
+			),
+		)
+	}
+	DisposableEffect(viewModel, authLiveData, lifecycleOwner) {
+		var revision = snapshot.value.revision
+		val observer = Observer<TelegramAuthState> { authState ->
+			revision++
+			snapshot.value = TelegramAuthSnapshot(
+				authState,
+				viewModel.getTelegramRecoverableErrorDetail(),
+				revision,
+			)
+		}
+		authLiveData.observe(lifecycleOwner, observer)
+		onDispose { authLiveData.removeObserver(observer) }
+	}
+	return snapshot
 }
 
 @Composable

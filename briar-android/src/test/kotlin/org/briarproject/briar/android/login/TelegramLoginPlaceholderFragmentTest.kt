@@ -138,6 +138,50 @@ class TelegramLoginPlaceholderFragmentTest {
 	}
 
 	@Test
+	fun testRepeatedRecoverableErrorDetailChangeUpdatesCodeStep() {
+		telegramAuthSession.stateAfterSubmitIdentifier =
+			TelegramAuthState.CODE_ENTRY
+		composeRule.onNodeWithTag(TELEGRAM_LOGIN_IDENTIFIER_TAG)
+			.performTextInput("+123456789")
+		composeRule.onNodeWithTag(TELEGRAM_LOGIN_CONTINUE_TAG)
+			.performClick()
+		composeRule.waitForIdle()
+
+		telegramAuthSession.stateAfterSubmitCode =
+			TelegramAuthState.RECOVERABLE_ERROR
+		telegramAuthSession.detailAfterSubmitCode =
+			RecoverableErrorDetail.INVALID_CODE
+		composeRule.onNodeWithTag(TELEGRAM_LOGIN_CODE_TAG)
+			.performTextInput("11111")
+		composeRule.onNodeWithTag(TELEGRAM_LOGIN_CODE_CONTINUE_TAG)
+			.performClick()
+		composeRule.waitForIdle()
+
+		composeRule.onNodeWithText(
+			"Telegram did not accept that login code in this build. Check it, " +
+				"then continue to retry. You can also use Harbor password instead.",
+		).assertIsDisplayed()
+		composeRule.onNodeWithTag(TELEGRAM_LOGIN_CODE_TAG)
+			.assertEditableTextEquals("11111")
+
+		telegramAuthSession.detailAfterSubmitCode = RecoverableErrorDetail.NONE
+		composeRule.onNodeWithTag(TELEGRAM_LOGIN_CODE_CONTINUE_TAG)
+			.performClick()
+		composeRule.waitForIdle()
+
+		composeRule.onNodeWithText(
+			"Telegram login hit a recoverable issue in this build. Check your phone " +
+				"number or local TDLib setup, then continue to retry. You can also use " +
+				"Harbor password instead.",
+		).assertIsDisplayed()
+		composeRule.onAllNodesWithTag(TELEGRAM_LOGIN_CODE_STEP_TAG)
+			.assertCountEquals(0)
+		composeRule.onNodeWithTag(TELEGRAM_LOGIN_IDENTIFIER_STEP_TAG)
+			.assertIsDisplayed()
+		assertEquals("", viewModel.getTelegramLoginCode())
+	}
+
+	@Test
 	fun testUnsupportedAuthStepShowsSpecificMessageAndAllowsRetry() {
 		assertIdentifierRecoverableErrorMessage(
 			RecoverableErrorDetail.UNSUPPORTED_AUTH_STEP,
@@ -231,6 +275,7 @@ class TelegramLoginPlaceholderFragmentTest {
 		var stateAfterSubmitIdentifier = TelegramAuthState.IDENTIFIER_ENTRY
 		var detailAfterSubmitIdentifier = RecoverableErrorDetail.NONE
 		var stateAfterSubmitCode = TelegramAuthState.CODE_ENTRY
+		var detailAfterSubmitCode = RecoverableErrorDetail.NONE
 		var lastIdentifier = ""
 		var identifierSubmitCalls = 0
 		var closeCalls = 0
@@ -253,6 +298,7 @@ class TelegramLoginPlaceholderFragmentTest {
 
 		override fun submitCode(code: String) {
 			currentAuthState = stateAfterSubmitCode
+			currentRecoverableErrorDetail = detailAfterSubmitCode
 		}
 
 		override fun submitPassword(password: String) = Unit
