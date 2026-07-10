@@ -138,53 +138,43 @@ class TelegramLoginPlaceholderFragmentTest {
 	}
 
 	@Test
-	fun testUnsupportedAuthStepShowsSpecificMessageAndDisablesRetry() {
-		telegramAuthSession.stateAfterSubmitIdentifier =
-			TelegramAuthState.RECOVERABLE_ERROR
-		telegramAuthSession.detailAfterSubmitIdentifier =
-			RecoverableErrorDetail.UNSUPPORTED_AUTH_STEP
-
-		composeRule.onNodeWithTag(TELEGRAM_LOGIN_IDENTIFIER_TAG)
-			.performTextInput("+123456789")
-		composeRule.onNodeWithTag(TELEGRAM_LOGIN_CONTINUE_TAG)
-			.performClick()
-		composeRule.waitForIdle()
-
-		composeRule.onNodeWithText(
+	fun testUnsupportedAuthStepShowsSpecificMessage() {
+		assertIdentifierRecoverableErrorMessage(
+			RecoverableErrorDetail.UNSUPPORTED_AUTH_STEP,
 			"Telegram returned an account step Harbor does not support in this build. " +
 				"Use Harbor password instead.",
-		).assertIsDisplayed()
-		composeRule.onNodeWithTag(TELEGRAM_LOGIN_CONTINUE_TAG)
-			.assertIsNotEnabled()
+		)
 	}
 
 	@Test
 	fun testTdlibDatabaseKeyMismatchShowsSpecificMessageAndDisablesRetry() {
-		telegramAuthSession.stateAfterSubmitIdentifier =
-			TelegramAuthState.RECOVERABLE_ERROR
-		telegramAuthSession.detailAfterSubmitIdentifier =
-			RecoverableErrorDetail.TDLIB_DATABASE_KEY_MISMATCH
-
-		composeRule.onNodeWithTag(TELEGRAM_LOGIN_IDENTIFIER_TAG)
-			.performTextInput("+123456789")
-		composeRule.onNodeWithTag(TELEGRAM_LOGIN_CONTINUE_TAG)
-			.performClick()
-		composeRule.waitForIdle()
-
-		composeRule.onNodeWithText(
+		assertIdentifierRecoverableErrorMessage(
+			RecoverableErrorDetail.TDLIB_DATABASE_KEY_MISMATCH,
 			"Telegram login cannot use the protected local Telegram database in this build. " +
 				"Use Harbor password instead.",
-		).assertIsDisplayed()
+		)
 		composeRule.onNodeWithTag(TELEGRAM_LOGIN_CONTINUE_TAG)
 			.assertIsNotEnabled()
 	}
 
 	@Test
 	fun testDeviceKeystoreUnavailableShowsSpecificMessageAndDisablesRetry() {
+		assertIdentifierRecoverableErrorMessage(
+			RecoverableErrorDetail.DEVICE_KEYSTORE_UNAVAILABLE,
+			"Telegram login in Harbor needs Android 6.0+ device-backed encryption. " +
+				"Use Harbor password instead.",
+		)
+		composeRule.onNodeWithTag(TELEGRAM_LOGIN_CONTINUE_TAG)
+			.assertIsNotEnabled()
+	}
+
+	private fun assertIdentifierRecoverableErrorMessage(
+		detail: RecoverableErrorDetail,
+		message: String,
+	) {
 		telegramAuthSession.stateAfterSubmitIdentifier =
 			TelegramAuthState.RECOVERABLE_ERROR
-		telegramAuthSession.detailAfterSubmitIdentifier =
-			RecoverableErrorDetail.DEVICE_KEYSTORE_UNAVAILABLE
+		telegramAuthSession.detailAfterSubmitIdentifier = detail
 
 		composeRule.onNodeWithTag(TELEGRAM_LOGIN_IDENTIFIER_TAG)
 			.performTextInput("+123456789")
@@ -192,12 +182,7 @@ class TelegramLoginPlaceholderFragmentTest {
 			.performClick()
 		composeRule.waitForIdle()
 
-		composeRule.onNodeWithText(
-			"Telegram login in Harbor needs Android 6.0+ device-backed encryption. " +
-				"Use Harbor password instead.",
-		).assertIsDisplayed()
-		composeRule.onNodeWithTag(TELEGRAM_LOGIN_CONTINUE_TAG)
-			.assertIsNotEnabled()
+		composeRule.onNodeWithText(message).assertIsDisplayed()
 	}
 
 	private fun androidx.compose.ui.test.SemanticsNodeInteraction.assertEditableTextEquals(
