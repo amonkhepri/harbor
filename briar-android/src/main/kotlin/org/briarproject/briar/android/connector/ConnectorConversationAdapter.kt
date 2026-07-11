@@ -8,19 +8,24 @@ import androidx.recyclerview.widget.DiffUtil.ItemCallback
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
 import org.briarproject.briar.R
+import org.briarproject.briar.android.util.UiUtils.formatDate
 
 internal class ConnectorConversationAdapter :
-	ListAdapter<ConnectorConversationMessageItem,
-			ConnectorConversationAdapter.MessageViewHolder>(MessageCallback()) {
+	ListAdapter<
+		ConnectorConversationMessageItem,
+		ConnectorConversationAdapter.MessageViewHolder,
+		>(MessageCallback()) {
 
 	fun submitState(state: ConnectorConversationMessageListState) {
 		submitList(state.messages)
 	}
 
-	override fun onCreateViewHolder(parent: ViewGroup,
-		viewType: Int): MessageViewHolder {
+	override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): MessageViewHolder {
 		val view = LayoutInflater.from(parent.context).inflate(
-			R.layout.list_item_connector_message, parent, false)
+			R.layout.list_item_connector_message,
+			parent,
+			false,
+		)
 		return MessageViewHolder(view)
 	}
 
@@ -38,9 +43,15 @@ internal class ConnectorConversationAdapter :
 
 		fun bind(item: ConnectorConversationMessageItem) {
 			text.text = item.text
-			direction.setText(directionText(item))
-			date.visibility = dateVisibility(item)
-			date.text = dateText(date.context, item)
+			direction.setText(
+				if (item.isOutgoing) {
+					R.string.connector_conversation_direction_outgoing
+				} else {
+					R.string.connector_conversation_direction_incoming
+				},
+			)
+			date.visibility = if (item.dateMillis > 0) View.VISIBLE else View.GONE
+			date.text = if (item.dateMillis > 0) formatDate(date.context, item.dateMillis) else ""
 		}
 	}
 
@@ -54,10 +65,8 @@ internal class ConnectorConversationAdapter :
 		override fun areContentsTheSame(
 			i1: ConnectorConversationMessageItem,
 			i2: ConnectorConversationMessageItem,
-		): Boolean =
-			i1.dateMillis == i2.dateMillis &&
-				i1.isOutgoing == i2.isOutgoing &&
-				i1.text == i2.text
+		): Boolean = i1.dateMillis == i2.dateMillis &&
+			i1.isOutgoing == i2.isOutgoing &&
+			i1.text == i2.text
 	}
-
 }
