@@ -57,6 +57,7 @@
 	<string name="telegram_connector_login_unsupported_auth_step_message">Telegram returned an account step Harbor does not support in this build. Use Harbor password instead.</string>
 	<string name="telegram_connector_login_device_keystore_unavailable_message">Telegram login in Harbor needs Android 6.0+ device-backed encryption. Use Harbor password instead.</string>
 	<string name="telegram_connector_login_tdlib_key_mismatch_message">Telegram login cannot use the protected local Telegram database in this build. Use Harbor password instead.</string>
+	<string name="telegram_connector_login_persisted_session_unverified_message">Telegram is already signed in on this device, but Harbor cannot verify the typed phone number in this build. Use Harbor password instead.</string>
 	<string name="telegram_connector_login_identifier_hint">Telegram phone number</string>
 	<string name="telegram_connector_login_code_hint">Telegram login code</string>
 	<string name="telegram_connector_login_password_hint">Telegram password or 2FA code</string>

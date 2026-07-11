@@ -144,6 +144,9 @@ internal fun TelegramLoginScreen(viewModel: StartupViewModel) {
 		errorDetail == RecoverableErrorDetail.DEVICE_KEYSTORE_UNAVAILABLE
 	val tdlibDatabaseKeyMismatch = authState == TelegramAuthState.RECOVERABLE_ERROR &&
 		errorDetail == RecoverableErrorDetail.TDLIB_DATABASE_KEY_MISMATCH
+	val persistedSessionIdentityUnverified =
+		authState == TelegramAuthState.RECOVERABLE_ERROR &&
+			errorDetail == RecoverableErrorDetail.PERSISTED_SESSION_IDENTITY_UNVERIFIED
 
 	Column(
 		modifier = Modifier
@@ -224,7 +227,8 @@ internal fun TelegramLoginScreen(viewModel: StartupViewModel) {
 						enabled = hasIdentifier &&
 							!missingTdlib &&
 							!deviceKeystoreUnavailable &&
-							!tdlibDatabaseKeyMismatch,
+							!tdlibDatabaseKeyMismatch &&
+							!persistedSessionIdentityUnverified,
 						onContinue = viewModel::submitTelegramLoginIdentifier,
 					)
 				}
@@ -525,6 +529,8 @@ private fun loginMessage(authState: TelegramAuthState, errorDetail: RecoverableE
 			R.string.telegram_connector_login_device_keystore_unavailable_message
 		RecoverableErrorDetail.TDLIB_DATABASE_KEY_MISMATCH ->
 			R.string.telegram_connector_login_tdlib_key_mismatch_message
+		RecoverableErrorDetail.PERSISTED_SESSION_IDENTITY_UNVERIFIED ->
+			R.string.telegram_connector_login_persisted_session_unverified_message
 		else -> R.string.telegram_connector_login_retry_message
 	}
 }

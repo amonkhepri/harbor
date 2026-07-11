@@ -3,6 +3,7 @@ package org.briarproject.briar.telegram
 import org.briarproject.briar.api.telegram.TelegramAuthSession.RecoverableErrorDetail
 import org.briarproject.briar.api.telegram.TelegramAuthState
 import org.drinkless.tdlib.Client
+import org.drinkless.tdlib.TdApi
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -241,6 +242,19 @@ class ReflectiveTelegramTdlibLoginClientTest {
 		assertIdentifierRecoverableError(client, RecoverableErrorDetail.TDLIB_DATABASE_KEY_MISMATCH)
 		assertEquals(12345 to "test-api-hash", Client.getLastApiId() to Client.getLastApiHash())
 		assertSentRequestsAndClose(client, SET_PARAMETERS)
+	}
+
+	@Test
+	fun testSubmitIdentifierRejectsPersistedReadySessionIdentity() {
+		Client.setAuthorizationStateAfterTdlibParameters(TdApi.AuthorizationStateReady())
+		val client = createClient()
+
+		assertIdentifierRecoverableError(
+			client,
+			RecoverableErrorDetail.PERSISTED_SESSION_IDENTITY_UNVERIFIED,
+			"+15550001111",
+		)
+		assertPhoneRequestsAndClose(client, SET_PARAMETERS, CLOSE, expectedPhone = "")
 	}
 
 	@Test

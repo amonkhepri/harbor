@@ -208,6 +208,20 @@ class TelegramLoginPlaceholderFragmentTest {
 			.assertIsNotEnabled()
 	}
 
+	@Test
+	fun testPersistedSessionIdentityUnverifiedShowsMessageAndSkipsConfirmation() {
+		assertIdentifierRecoverableErrorMessage(
+			RecoverableErrorDetail.PERSISTED_SESSION_IDENTITY_UNVERIFIED,
+			R.string.telegram_connector_login_persisted_session_unverified_message,
+		)
+		composeRule.onAllNodesWithTag(TELEGRAM_LOGIN_CONFIRMATION_TAG)
+			.assertCountEquals(0)
+		composeRule.onNodeWithTag(TELEGRAM_LOGIN_IDENTIFIER_STEP_TAG)
+			.assertIsDisplayed()
+		composeRule.onNodeWithTag(TELEGRAM_LOGIN_CONTINUE_TAG)
+			.assertIsNotEnabled()
+	}
+
 	private fun assertIdentifierRecoverableErrorMessage(
 		detail: RecoverableErrorDetail,
 		messageRes: Int,

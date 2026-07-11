@@ -122,6 +122,9 @@ class ReflectiveTelegramTdlibLoginClient(
 				}
 				val authorizationStateAfterParameters =
 					awaitPreparedAuthorizationStateClassName(tdlibParametersUpdate)
+				if (authorizationStateAfterParameters == "AuthorizationStateReady") {
+					return recoverablePersistedSessionIdentityUnverified()
+				}
 				if (authorizationStateAfterParameters != "AuthorizationStateWaitPhoneNumber") {
 					return mapAuthorizationStateClassName(authorizationStateAfterParameters)
 				}
@@ -387,6 +390,11 @@ class ReflectiveTelegramTdlibLoginClient(
 			RecoverableErrorDetail.DEVICE_KEYSTORE_UNAVAILABLE
 		}
 		return recoverableError(detail)
+	}
+
+	private fun recoverablePersistedSessionIdentityUnverified(): TelegramAuthState {
+		closeTdlibClient()
+		return recoverableError(RecoverableErrorDetail.PERSISTED_SESSION_IDENTITY_UNVERIFIED)
 	}
 
 	private fun closeTdlibClient() {
