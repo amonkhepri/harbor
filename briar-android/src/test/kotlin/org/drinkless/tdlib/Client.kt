@@ -133,9 +133,6 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 	}
 
 	private fun emitCloseAuthorizationState() {
-		closeAuthorizationStatePrelude?.let {
-			updateHandler.onResult(TdApi.UpdateAuthorizationState(it))
-		}
 		val emit = {
 			clearActiveDatabaseDirectory(databaseDirectory)
 			updateHandler.onResult(
@@ -186,7 +183,6 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 		private var closeAuthorizationUpdateDelayMs = 0L
 		private var phoneNumberResultDelayMs = 0L
 		private var authenticationCodeResultDelayMs = 0L
-		private var closeAuthorizationStatePrelude: Any? = null
 		private var lastPhoneNumber = ""
 		private var lastDatabaseDirectory = ""
 		private var lastFilesDirectory = ""
@@ -220,7 +216,6 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 			closeAuthorizationUpdateDelayMs = 0L
 			phoneNumberResultDelayMs = 0L
 			authenticationCodeResultDelayMs = 0L
-			closeAuthorizationStatePrelude = null
 			lastPhoneNumber = ""
 			lastDatabaseDirectory = ""
 			lastFilesDirectory = ""
@@ -263,11 +258,6 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 		@JvmStatic
 		fun setAuthenticationCodeResultDelayMs(delayMs: Long) {
 			authenticationCodeResultDelayMs = delayMs
-		}
-
-		@JvmStatic
-		fun setCloseAuthorizationStatePrelude(authorizationState: Any?) {
-			closeAuthorizationStatePrelude = authorizationState
 		}
 
 		@JvmStatic
