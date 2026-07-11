@@ -3,7 +3,8 @@ package org.briarproject.briar.telegram
 import org.briarproject.briar.api.telegram.TelegramChat
 import org.briarproject.briar.api.telegram.TelegramConnector
 import org.briarproject.briar.api.telegram.TelegramMessageReadResult
-class NoOpTelegramConnector : TelegramConnector {
+
+class DisabledTelegramConnector : TelegramConnector {
 	override fun isEnabled(): Boolean = false
 
 	override fun isAuthorized(): Boolean = false

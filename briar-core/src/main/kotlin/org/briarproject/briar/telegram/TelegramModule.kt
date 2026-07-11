@@ -34,7 +34,7 @@ class TelegramModule {
 			tdlibKeyProvider(databaseConfig),
 		)
 	} else {
-		NoOpTelegramConnector()
+		DisabledTelegramConnector()
 	}
 
 	@Provides

@@ -37,8 +37,8 @@ class TelegramConnectorMessageTest {
 	): List<TelegramMessage> = (client.getRecentMessageReadResult(chatId, limit) as Success).messages
 
 	@Test
-	fun testNoOpConnectorReturnsDisabledEmptyMessageLists() {
-		val connector = NoOpTelegramConnector()
+	fun testDisabledConnectorReturnsDisabledEmptyMessageLists() {
+		val connector = DisabledTelegramConnector()
 
 		assertEquals(listOf(false, false), listOf(connector.isEnabled(), connector.isAuthorized()))
 		assertEquals(
