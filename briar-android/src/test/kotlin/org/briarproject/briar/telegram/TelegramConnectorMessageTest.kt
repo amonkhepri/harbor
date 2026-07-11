@@ -5,6 +5,9 @@ import org.briarproject.briar.api.connector.ConnectorSources
 import org.briarproject.briar.api.connector.ConnectorThread
 import org.briarproject.briar.api.telegram.TelegramChat
 import org.briarproject.briar.api.telegram.TelegramMessage
+import org.briarproject.briar.api.telegram.TelegramMessageReadResult
+import org.briarproject.briar.api.telegram.TelegramMessageReadResult.LoadFailed
+import org.briarproject.briar.api.telegram.TelegramMessageReadResult.Success
 import org.drinkless.tdlib.Client
 import org.drinkless.tdlib.TdApi
 import org.junit.Assert.assertArrayEquals
@@ -196,6 +199,25 @@ class TelegramConnectorMessageTest {
 	}
 
 	@Test
+	fun testReflectiveClientDistinguishesHistoryErrorFromEmptyConversation() {
+		val emptyClient = readyReflectiveMessageClient {
+			Client.setMessages(10L)
+		}
+		assertEquals(Success(emptyList()), emptyClient.getRecentMessageReadResult(10L, 3))
+
+		val failingClient = readyReflectiveMessageClient {
+			Client.setMessages(
+				10L,
+				textMessage(10L, 40L, 1_700_000_004, isOutgoing = false, body = "latest"),
+			)
+			Client.setRejectGetChatHistory(true)
+		}
+
+		assertEquals(LoadFailed, failingClient.getRecentMessageReadResult(10L, 3))
+		assertEquals(emptyList<TelegramMessage>(), failingClient.getRecentMessages(10L, 3))
+	}
+
+	@Test
 	fun testReflectiveClientUsesDatabaseEncryptionKeyWhenSettingParameters() {
 		Client.resetTestState()
 		Client.setAuthorizationStateAfterTdlibParameters(TdApi.AuthorizationStateReady())
@@ -306,6 +328,12 @@ class TelegramConnectorMessageTest {
 			lastMessageChatId = chatId
 			lastMessageLimit = limit
 			return messages
+		}
+
+		override fun getRecentMessageReadResult(chatId: Long, limit: Int): TelegramMessageReadResult {
+			lastMessageChatId = chatId
+			lastMessageLimit = limit
+			return Success(messages)
 		}
 	}
 

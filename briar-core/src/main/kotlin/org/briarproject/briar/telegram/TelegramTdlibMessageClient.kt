@@ -1,6 +1,9 @@
 package org.briarproject.briar.telegram
 
 import org.briarproject.briar.api.telegram.TelegramChat
+import org.briarproject.briar.api.telegram.TelegramMessageReadResult
+import org.briarproject.briar.api.telegram.TelegramMessageReadResult.LoadFailed
+import org.briarproject.briar.api.telegram.TelegramMessageReadResult.Success
 import org.briarproject.briar.api.telegram.TelegramMessage
 import java.io.File
 import java.lang.reflect.Method
@@ -14,6 +17,8 @@ interface TelegramTdlibMessageClient {
 	fun isAuthorized(): Boolean
 	fun getRecentChats(limit: Int): List<TelegramChat>
 	fun getRecentMessages(chatId: Long, limit: Int): List<TelegramMessage>
+	fun getRecentMessageReadResult(chatId: Long, limit: Int): TelegramMessageReadResult =
+		Success(getRecentMessages(chatId, limit))
 }
 
 class ReflectiveTelegramTdlibMessageClient(
@@ -39,20 +44,26 @@ class ReflectiveTelegramTdlibMessageClient(
 		}
 	}
 
-	override fun getRecentMessages(chatId: Long, limit: Int): List<TelegramMessage> {
+	override fun getRecentMessages(chatId: Long, limit: Int): List<TelegramMessage> =
+		when (val result = getRecentMessageReadResult(chatId, limit)) {
+			is Success -> result.messages
+			LoadFailed -> emptyList()
+		}
+
+	override fun getRecentMessageReadResult(chatId: Long, limit: Int): TelegramMessageReadResult {
 		val safeLimit = safeLimit(limit)
-		if (chatId == 0L || safeLimit == 0) return emptyList()
-		return withReadyClient(emptyList()) { client ->
+		if (chatId == 0L || safeLimit == 0) return Success(emptyList())
+		return withReadyClient<TelegramMessageReadResult?>(null) { client ->
 			val messages = mutableListOf<TelegramMessage>()
 			val seenMessageIds = LinkedHashSet<Long>()
 			var fromMessageId = 0L
 			var requestCount = 0
 			while (messages.size < safeLimit && requestCount < MAX_TDLIB_HISTORY_REQUESTS) {
-				val rawMessages = sendAndAwait(
+				val historyPage = sendAndAwait(
 					client,
 					createGetChatHistoryRequest(chatId, fromMessageId, safeLimit),
-				)?.let { getObjectArrayField(it, "messages") }
-					?: emptyArray<Any>()
+				) ?: return@withReadyClient LoadFailed
+				val rawMessages = getObjectArrayField(historyPage, "messages")
 				if (rawMessages.isEmpty()) break
 				var newRawMessage = false
 				for (rawMessage in rawMessages) {
@@ -72,8 +83,8 @@ class ReflectiveTelegramTdlibMessageClient(
 				}
 				fromMessageId = nextFromMessageId
 			}
-			messages
-		}
+			Success(messages)
+		} ?: LoadFailed
 	}
 
 	@Throws(ReflectiveOperationException::class, InterruptedException::class)

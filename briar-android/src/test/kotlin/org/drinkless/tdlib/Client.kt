@@ -90,6 +90,10 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 				resultHandler?.onResult(chatsById[request.chatId] ?: TdApi.Error())
 			}
 			is TdApi.GetChatHistory -> {
+				if (rejectGetChatHistory) {
+					resultHandler?.onResult(TdApi.Error())
+					return
+				}
 				val messages = messagesByChatId[request.chatId]
 					.orEmpty()
 					.drop(historyStartIndex(request))
@@ -181,6 +185,7 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 		private var activeDatabaseDirectory = ""
 		private var setTdlibParametersAcceptedLatch: CountDownLatch? = null
 		private var rejectSetTdlibParameters = false
+		private var rejectGetChatHistory = false
 
 		@JvmStatic
 		fun create(
@@ -212,6 +217,7 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 			activeDatabaseDirectory = ""
 			setTdlibParametersAcceptedLatch = null
 			rejectSetTdlibParameters = false
+			rejectGetChatHistory = false
 		}
 
 		fun setAuthorizationUpdateDelayMs(delayMs: Long) {
@@ -266,6 +272,10 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 
 		fun setRejectSetTdlibParameters(reject: Boolean) {
 			rejectSetTdlibParameters = reject
+		}
+
+		fun setRejectGetChatHistory(reject: Boolean) {
+			rejectGetChatHistory = reject
 		}
 
 		fun awaitSetTdlibParametersAccepted(timeoutMs: Long): Boolean =

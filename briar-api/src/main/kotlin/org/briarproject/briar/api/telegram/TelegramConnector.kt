@@ -14,6 +14,8 @@ interface TelegramConnector : ReadOnlyConnector {
 	override fun isAuthorized(): Boolean
 	fun getRecentChats(limit: Int): List<TelegramChat>
 	fun getRecentMessages(chatId: Long, limit: Int): List<TelegramMessage>
+	fun getRecentMessageReadResult(chatId: Long, limit: Int): TelegramMessageReadResult =
+		TelegramMessageReadResult.Success(getRecentMessages(chatId, limit))
 
 	override fun getRecentThreads(limit: Int): List<ConnectorThread> =
 		getRecentChats(limit).map { it.toConnectorThread() }
