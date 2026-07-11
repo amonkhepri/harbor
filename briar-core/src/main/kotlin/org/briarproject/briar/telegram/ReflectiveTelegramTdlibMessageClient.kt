@@ -1,6 +1,7 @@
 package org.briarproject.briar.telegram
 
 import org.briarproject.briar.api.telegram.TelegramChat
+import org.briarproject.briar.api.telegram.TelegramConnector
 import org.briarproject.briar.api.telegram.TelegramMessageReadResult
 import org.briarproject.briar.api.telegram.TelegramMessageReadResult.LoadFailed
 import org.briarproject.briar.api.telegram.TelegramMessageReadResult.Success
@@ -13,12 +14,6 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 
-interface TelegramTdlibMessageClient {
-	fun isAuthorized(): Boolean
-	fun getRecentChats(limit: Int): List<TelegramChat>
-	fun getRecentMessageReadResult(chatId: Long, limit: Int): TelegramMessageReadResult
-}
-
 class ReflectiveTelegramTdlibMessageClient(
 	private val tdlibDirectory: File = File("harbor-telegram"),
 	private val apiId: Int = 0,
@@ -26,9 +21,11 @@ class ReflectiveTelegramTdlibMessageClient(
 	private val tdlibKeyProvider: TelegramTdlibDatabaseKeyProvider =
 		NoOpTelegramTdlibDatabaseKeyProvider,
 	private val requestTimeoutMs: Long = 30_000L,
-) : TelegramTdlibMessageClient {
+) : TelegramConnector {
 
 	private val tdlibReadLock = Any()
+
+	override fun isEnabled(): Boolean = true
 
 	override fun isAuthorized(): Boolean = withReadyClient(false) { true }
 

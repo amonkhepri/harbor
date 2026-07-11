@@ -27,13 +27,11 @@ class TelegramModule {
 		featureFlags: FeatureFlags,
 		databaseConfig: DatabaseConfig,
 	): TelegramConnector = if (featureFlags.shouldEnableTelegramConnector()) {
-		StubTelegramConnector(
-			ReflectiveTelegramTdlibMessageClient(
-				tdlibDirectory(databaseConfig),
-				featureFlags.getTelegramApiId(),
-				featureFlags.getTelegramApiHash(),
-				tdlibKeyProvider(databaseConfig),
-			),
+		ReflectiveTelegramTdlibMessageClient(
+			tdlibDirectory(databaseConfig),
+			featureFlags.getTelegramApiId(),
+			featureFlags.getTelegramApiHash(),
+			tdlibKeyProvider(databaseConfig),
 		)
 	} else {
 		NoOpTelegramConnector()

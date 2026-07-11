@@ -4,6 +4,7 @@ import org.briarproject.briar.api.connector.ConnectorMessage
 import org.briarproject.briar.api.connector.ConnectorSources
 import org.briarproject.briar.api.connector.ConnectorThread
 import org.briarproject.briar.api.telegram.TelegramChat
+import org.briarproject.briar.api.telegram.TelegramConnector
 import org.briarproject.briar.api.telegram.TelegramMessage
 import org.briarproject.briar.api.telegram.TelegramMessageReadResult
 import org.briarproject.briar.api.telegram.TelegramMessageReadResult.LoadFailed
@@ -26,11 +27,11 @@ class TelegramConnectorMessageTest {
 		assertEquals(requestNames.toList(), Client.getSentRequestNames())
 	}
 
-	private fun FakeTelegramTdlibMessageClient.lastRequestLimits() =
+	private fun FakeTelegramConnector.lastRequestLimits() =
 		Triple(lastChatLimit, lastMessageChatId, lastMessageLimit)
 
 	private fun readMessages(
-		client: TelegramTdlibMessageClient,
+		client: TelegramConnector,
 		chatId: Long,
 		limit: Int,
 	): List<TelegramMessage> = (client.getRecentMessageReadResult(chatId, limit) as Success).messages
@@ -48,7 +49,7 @@ class TelegramConnectorMessageTest {
 
 	@Test
 	fun testEnabledConnectorExposesReadOnlyConnectorContract() {
-		val client = FakeTelegramTdlibMessageClient(
+		val connector = FakeTelegramConnector(
 			chats = listOf(
 				TelegramChat(
 					10L,
@@ -68,7 +69,6 @@ class TelegramConnectorMessageTest {
 				),
 			),
 		)
-		val connector = StubTelegramConnector(client)
 
 		assertEquals(listOf(true, true), listOf(connector.isEnabled(), connector.isAuthorized()))
 		assertEquals(ConnectorSources.TELEGRAM, connector.source)
@@ -97,16 +97,15 @@ class TelegramConnectorMessageTest {
 			connector.getRecentThreads(3) to
 				connector.getRecentMessages("10", 2),
 		)
-		assertEquals(Triple(3, 10L, 2), client.lastRequestLimits())
+		assertEquals(Triple(3, 10L, 2), connector.lastRequestLimits())
 	}
 
 	@Test
 	fun testReadOnlyConnectorReturnsEmptyForNonNumericThreadId() {
-		val client = FakeTelegramTdlibMessageClient()
-		val connector = StubTelegramConnector(client)
+		val connector = FakeTelegramConnector()
 
 		assertEquals(emptyList<ConnectorMessage>(), connector.getRecentMessages("thread-1", 2))
-		assertEquals(Triple(0, 0L, 0), client.lastRequestLimits())
+		assertEquals(Triple(0, 0L, 0), connector.lastRequestLimits())
 	}
 
 	@Test
@@ -311,16 +310,18 @@ class TelegramConnectorMessageTest {
 		override fun getDatabaseEncryptionKey(tdlibDirectory: File): ByteArray = key.copyOf()
 	}
 
-	private class FakeTelegramTdlibMessageClient(
+	private class FakeTelegramConnector(
 		val authorized: Boolean = true,
 		val chats: List<TelegramChat> = listOf(TelegramChat(10L, "", 1_700_000_000)),
 		val messages: List<TelegramMessage> = listOf(
 			TelegramMessage(10L, 20L, 1_700_000_001, false, ""),
 		),
-	) : TelegramTdlibMessageClient {
+	) : TelegramConnector {
 		var lastChatLimit = 0
 		var lastMessageChatId = 0L
 		var lastMessageLimit = 0
+
+		override fun isEnabled(): Boolean = true
 
 		override fun isAuthorized(): Boolean = authorized
 
