@@ -29,14 +29,20 @@ class TelegramConnectorMessageTest {
 	private fun FakeTelegramTdlibMessageClient.lastRequestLimits() =
 		Triple(lastChatLimit, lastMessageChatId, lastMessageLimit)
 
+	private fun readMessages(
+		client: TelegramTdlibMessageClient,
+		chatId: Long,
+		limit: Int,
+	): List<TelegramMessage> = (client.getRecentMessageReadResult(chatId, limit) as Success).messages
+
 	@Test
 	fun testNoOpConnectorReturnsDisabledEmptyMessageLists() {
 		val connector = NoOpTelegramConnector()
 
 		assertEquals(listOf(false, false), listOf(connector.isEnabled(), connector.isAuthorized()))
 		assertEquals(
-			emptyList<TelegramChat>() to emptyList<TelegramMessage>(),
-			connector.getRecentChats(5) to connector.getRecentMessages(1L, 5),
+			emptyList<TelegramChat>() to Success(emptyList<TelegramMessage>()),
+			connector.getRecentChats(5) to connector.getRecentMessageReadResult(1L, 5),
 		)
 	}
 
@@ -140,7 +146,7 @@ class TelegramConnectorMessageTest {
 						text = "",
 					),
 				),
-			client.getRecentChats(3) to client.getRecentMessages(10L, 3),
+			client.getRecentChats(3) to readMessages(client, 10L, 3),
 		)
 	}
 
@@ -183,7 +189,7 @@ class TelegramConnectorMessageTest {
 			)
 		}
 
-		val messages = client.getRecentMessages(10L, 4)
+		val messages = readMessages(client, 10L, 4)
 
 		assertEquals(
 			listOf(40L, 30L, 20L, 10L) to listOf("latest", "middle", "older", "oldest"),
@@ -214,7 +220,6 @@ class TelegramConnectorMessageTest {
 		}
 
 		assertEquals(LoadFailed, failingClient.getRecentMessageReadResult(10L, 3))
-		assertEquals(emptyList<TelegramMessage>(), failingClient.getRecentMessages(10L, 3))
 	}
 
 	@Test
@@ -240,8 +245,8 @@ class TelegramConnectorMessageTest {
 		)
 
 		assertEquals(
-			false to (emptyList<TelegramChat>() to emptyList<TelegramMessage>()),
-			client.isAuthorized() to (client.getRecentChats(1) to client.getRecentMessages(10L, 1)),
+			false to (emptyList<TelegramChat>() to LoadFailed),
+			client.isAuthorized() to (client.getRecentChats(1) to client.getRecentMessageReadResult(10L, 1)),
 		)
 		assertEquals(false, File(tdlibDir, "database").exists())
 	}
@@ -268,7 +273,7 @@ class TelegramConnectorMessageTest {
 
 		chatsThread.start()
 		assertEquals(true, Client.awaitSetTdlibParametersAccepted(1_000L))
-		val messages = client.getRecentMessages(11L, 1)
+		val messages = readMessages(client, 11L, 1)
 		chatsThread.join()
 
 		assertEquals(

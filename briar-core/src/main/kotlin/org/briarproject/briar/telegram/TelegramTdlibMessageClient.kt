@@ -17,11 +17,6 @@ interface TelegramTdlibMessageClient {
 	fun isAuthorized(): Boolean
 	fun getRecentChats(limit: Int): List<TelegramChat>
 	fun getRecentMessageReadResult(chatId: Long, limit: Int): TelegramMessageReadResult
-	fun getRecentMessages(chatId: Long, limit: Int): List<TelegramMessage> =
-		when (val result = getRecentMessageReadResult(chatId, limit)) {
-			is Success -> result.messages
-			LoadFailed -> emptyList()
-		}
 }
 
 class ReflectiveTelegramTdlibMessageClient(
