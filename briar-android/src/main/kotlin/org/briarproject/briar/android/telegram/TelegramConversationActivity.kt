@@ -21,9 +21,9 @@ import org.briarproject.briar.android.connector.ConnectorConversationMessageList
 import org.briarproject.briar.android.connector.withAvailabilityState
 import org.briarproject.briar.android.util.BriarSnackbarBuilder
 import org.briarproject.briar.android.view.BriarRecyclerView
+import org.briarproject.briar.api.connector.ConnectorMessageReadResult
 import org.briarproject.briar.api.connector.ReadOnlyConnector
 import org.briarproject.briar.api.telegram.TelegramConnector
-import org.briarproject.briar.api.telegram.TelegramMessageReadResult
 import org.briarproject.nullsafety.MethodsNotNullByDefault
 import org.briarproject.nullsafety.ParametersNotNullByDefault
 import java.util.concurrent.Executor
@@ -158,16 +158,18 @@ class TelegramConversationActivity : BriarActivity() {
 				return@execute
 			}
 			try {
-				when (val result = telegramConnector.getRecentMessageReadResult(chatId, MESSAGE_LIMIT)) {
-					is TelegramMessageReadResult.Success -> {
+				val result = readOnlyConnector.getRecentMessageReadResult(
+					chatId.toString(),
+					MESSAGE_LIMIT,
+				)
+				when (result) {
+					is ConnectorMessageReadResult.Success -> {
 						val state = ConnectorConversationMessageListState(
-							ConnectorConversationMessageItem.fromMessages(
-								result.messages.map { it.toConnectorMessage() },
-							),
+							ConnectorConversationMessageItem.fromMessages(result.messages),
 						)
 						showMessages(state)
 					}
-					TelegramMessageReadResult.LoadFailed -> {
+					ConnectorMessageReadResult.LoadFailed -> {
 						showMessages(ConnectorConversationMessageListState(), LOAD_FAILED)
 					}
 				}

@@ -1,6 +1,7 @@
 package org.briarproject.briar.telegram
 
 import org.briarproject.briar.api.connector.ConnectorMessage
+import org.briarproject.briar.api.connector.ConnectorMessageReadResult
 import org.briarproject.briar.api.connector.ConnectorSources
 import org.briarproject.briar.api.connector.ConnectorThread
 import org.briarproject.briar.api.telegram.TelegramChat
@@ -106,6 +107,17 @@ class TelegramConnectorMessageTest {
 
 		assertEquals(emptyList<ConnectorMessage>(), connector.getRecentMessages("thread-1", 2))
 		assertEquals(Triple(0, 0L, 0), connector.lastRequestLimits())
+	}
+
+	@Test
+	fun testReadOnlyConnectorPreservesLoadFailureResult() {
+		val connector = FakeTelegramConnector(messageReadResult = LoadFailed)
+
+		assertEquals(
+			ConnectorMessageReadResult.LoadFailed,
+			connector.getRecentMessageReadResult("10", 2),
+		)
+		assertEquals(emptyList<ConnectorMessage>(), connector.getRecentMessages("10", 2))
 	}
 
 	@Test
@@ -316,6 +328,7 @@ class TelegramConnectorMessageTest {
 		val messages: List<TelegramMessage> = listOf(
 			TelegramMessage(10L, 20L, 1_700_000_001, false, ""),
 		),
+		val messageReadResult: TelegramMessageReadResult? = null,
 	) : TelegramConnector {
 		var lastChatLimit = 0
 		var lastMessageChatId = 0L
@@ -333,7 +346,7 @@ class TelegramConnectorMessageTest {
 		override fun getRecentMessageReadResult(chatId: Long, limit: Int): TelegramMessageReadResult {
 			lastMessageChatId = chatId
 			lastMessageLimit = limit
-			return Success(messages)
+			return messageReadResult ?: Success(messages)
 		}
 	}
 

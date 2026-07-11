@@ -1,6 +1,6 @@
 package org.briarproject.briar.api.telegram
 
-import org.briarproject.briar.api.connector.ConnectorMessage
+import org.briarproject.briar.api.connector.ConnectorMessageReadResult
 import org.briarproject.briar.api.connector.ConnectorSource
 import org.briarproject.briar.api.connector.ConnectorSources
 import org.briarproject.briar.api.connector.ConnectorThread
@@ -18,12 +18,15 @@ interface TelegramConnector : ReadOnlyConnector {
 	override fun getRecentThreads(limit: Int): List<ConnectorThread> =
 		getRecentChats(limit).map { it.toConnectorThread() }
 
-	override fun getRecentMessages(threadId: String, limit: Int): List<ConnectorMessage> {
-		val chatId = threadId.toLongOrNull() ?: return emptyList()
+	override fun getRecentMessageReadResult(
+		threadId: String,
+		limit: Int,
+	): ConnectorMessageReadResult {
+		val chatId = threadId.toLongOrNull() ?: return ConnectorMessageReadResult.Success(emptyList())
 		return when (val result = getRecentMessageReadResult(chatId, limit)) {
 			is TelegramMessageReadResult.Success ->
-				result.messages.map { it.toConnectorMessage() }
-			TelegramMessageReadResult.LoadFailed -> emptyList()
+				ConnectorMessageReadResult.Success(result.messages.map { it.toConnectorMessage() })
+			TelegramMessageReadResult.LoadFailed -> ConnectorMessageReadResult.LoadFailed
 		}
 	}
 }
