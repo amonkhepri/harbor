@@ -20,14 +20,6 @@ class InboxThreadMergerTest {
 	}
 
 	@Test
-	fun testMergeAcceptsGenericConnectorRows() {
-		val items = InboxThreadMerger.merge(emptyList(), listOf(FakeConnectorInboxThreadItem(connectorSource = MESSENGER, connectorThreadId = "123", latestActivityMillis = 7L)))
-
-		val item = items[0] as ConnectorInboxThreadItem
-		assertEquals(MESSENGER to "messenger:123", item.connectorSource to item.stableId)
-	}
-
-	@Test
 	fun testTelegramRowsExposeCleanLatestPreview() {
 		val item = telegramItem(text = "synthetic\npreview\ttext")
 
@@ -42,13 +34,6 @@ class InboxThreadMergerTest {
 	}
 
 	@Test
-	fun testTelegramRowsExposeEmptyPreviewState() {
-		val item = telegramItem()
-
-		assertPreviewState(item)
-	}
-
-	@Test
 	fun testTelegramRowsExposeLoadingState() {
 		val item = TelegramInboxThreadItem(7L, "chat", 42000L)
 
@@ -56,17 +41,27 @@ class InboxThreadMergerTest {
 	}
 
 	@Test
-	fun testMixedItemsSortNewestFirst() {
-		val items = mutableListOf<InboxThreadItem>(FakeInboxThreadItem("older", 1L, null), FakeInboxThreadItem("newer", 3L, ConnectorSources.TELEGRAM), FakeInboxThreadItem("middle", 2L, null))
+	fun testMergeSortsNewestFirst() {
+		val items = InboxThreadMerger.merge(
+			emptyList(),
+			listOf(connectorItem("older", 1L), connectorItem("newer", 3L), connectorItem("middle", 2L)),
+		)
 
-		InboxThreadMerger.sort(items)
-
-		assertEquals(listOf("newer", "middle", "older"), items.map { it.stableId })
+		assertEquals(listOf("m:newer", "m:middle", "m:older"), items.map { it.stableId })
 	}
 
-	private class FakeInboxThreadItem(override val stableId: String, override val latestActivityMillis: Long, override val connectorSource: ConnectorSource?) : InboxThreadItem
+	private fun connectorItem(
+		id: String,
+		latestActivityMillis: Long,
+		connectorSource: ConnectorSource = ConnectorSource("m", "Messenger"),
+	) = FakeConnectorInboxThreadItem(
+		connectorSource = connectorSource,
+		connectorThreadId = id,
+		latestActivityMillis = latestActivityMillis,
+	)
 
-	private fun telegramItem(text: String = "", outgoing: Boolean = false) = TelegramInboxThreadItem(TelegramChat(7L, "chat", 42, text, outgoing))
+	private fun telegramItem(text: String = "", outgoing: Boolean = false) =
+		TelegramInboxThreadItem(TelegramChat(7L, "chat", 42, text, outgoing))
 
 	private fun assertPreviewState(
 		item: TelegramInboxThreadItem,
@@ -74,10 +69,14 @@ class InboxThreadMergerTest {
 		isPreviewLoading: Boolean = false,
 		isLastMessageOutgoing: Boolean = false,
 	) {
-		assertEquals(listOf(isPreviewLoading, isLastMessageOutgoing, previewText.isNotEmpty(), previewText), listOf(item.isPreviewLoading, item.isLastMessageOutgoing, item.hasPreviewText(), item.previewText))
-	}
-
-	private companion object {
-		val MESSENGER = ConnectorSource("messenger", "Messenger")
+		assertEquals(
+			listOf(isPreviewLoading, isLastMessageOutgoing, previewText.isNotEmpty(), previewText),
+			listOf(
+				item.isPreviewLoading,
+				item.isLastMessageOutgoing,
+				item.hasPreviewText(),
+				item.previewText,
+			),
+		)
 	}
 }

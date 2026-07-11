@@ -14,16 +14,11 @@ object InboxThreadMerger {
 		connectorItems: List<ConnectorInboxThreadItem>,
 	): List<InboxThreadItem> {
 		val items = ArrayList<InboxThreadItem>(
-			briarItems.size + connectorItems.size
+			briarItems.size + connectorItems.size,
 		)
 		briarItems.mapTo(items) { BriarInboxThreadItem(it) }
 		items.addAll(connectorItems)
 		items.sortWith(byLatestActivity)
 		return items
-	}
-
-	@JvmStatic
-	fun sort(items: MutableList<InboxThreadItem>) {
-		items.sortWith(byLatestActivity)
 	}
 }
