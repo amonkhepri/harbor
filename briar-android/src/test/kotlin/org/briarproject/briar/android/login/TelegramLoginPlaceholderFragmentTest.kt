@@ -23,6 +23,7 @@ import org.briarproject.bramble.api.event.EventBus
 import org.briarproject.bramble.api.lifecycle.LifecycleManager
 import org.briarproject.bramble.api.lifecycle.LifecycleManager.LifecycleState
 import org.briarproject.bramble.api.settings.SettingsManager
+import org.briarproject.briar.R
 import org.briarproject.briar.android.login.StartupViewModel.State.SIGNED_OUT
 import org.briarproject.briar.android.viewmodel.LiveDataTestUtil.getOrAwaitValue
 import org.briarproject.briar.api.android.AndroidNotificationManager
@@ -37,6 +38,7 @@ import org.junit.runner.RunWith
 import org.mockito.Mockito.mock
 import org.mockito.Mockito.`when`
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
@@ -157,10 +159,7 @@ class TelegramLoginPlaceholderFragmentTest {
 			.performClick()
 		composeRule.waitForIdle()
 
-		composeRule.onNodeWithText(
-			"Telegram did not accept that login code in this build. Check it, " +
-				"then continue to retry. You can also use Harbor password instead.",
-		).assertIsDisplayed()
+		assertLoginMessage(R.string.telegram_connector_login_code_invalid_message)
 		composeRule.onNodeWithTag(TELEGRAM_LOGIN_CODE_TAG)
 			.assertEditableTextEquals("11111")
 
@@ -169,11 +168,7 @@ class TelegramLoginPlaceholderFragmentTest {
 			.performClick()
 		composeRule.waitForIdle()
 
-		composeRule.onNodeWithText(
-			"Telegram login hit a recoverable issue in this build. Check your phone " +
-				"number or local TDLib setup, then continue to retry. You can also use " +
-				"Harbor password instead.",
-		).assertIsDisplayed()
+		assertLoginMessage(R.string.telegram_connector_login_retry_message)
 		composeRule.onAllNodesWithTag(TELEGRAM_LOGIN_CODE_STEP_TAG)
 			.assertCountEquals(0)
 		composeRule.onNodeWithTag(TELEGRAM_LOGIN_IDENTIFIER_STEP_TAG)
@@ -185,8 +180,7 @@ class TelegramLoginPlaceholderFragmentTest {
 	fun testUnsupportedAuthStepShowsSpecificMessageAndAllowsRetry() {
 		assertIdentifierRecoverableErrorMessage(
 			RecoverableErrorDetail.UNSUPPORTED_AUTH_STEP,
-			"Telegram returned an account step Harbor does not support in this build. " +
-				"Use Harbor password instead.",
+			R.string.telegram_connector_login_unsupported_auth_step_message,
 		)
 		composeRule.onNodeWithTag(TELEGRAM_LOGIN_CONTINUE_TAG)
 			.assertIsEnabled()
@@ -198,8 +192,7 @@ class TelegramLoginPlaceholderFragmentTest {
 	fun testTdlibDatabaseKeyMismatchShowsSpecificMessageAndDisablesRetry() {
 		assertIdentifierRecoverableErrorMessage(
 			RecoverableErrorDetail.TDLIB_DATABASE_KEY_MISMATCH,
-			"Telegram login cannot use the protected local Telegram database in this build. " +
-				"Use Harbor password instead.",
+			R.string.telegram_connector_login_tdlib_key_mismatch_message,
 		)
 		composeRule.onNodeWithTag(TELEGRAM_LOGIN_CONTINUE_TAG)
 			.assertIsNotEnabled()
@@ -209,8 +202,7 @@ class TelegramLoginPlaceholderFragmentTest {
 	fun testDeviceKeystoreUnavailableShowsSpecificMessageAndDisablesRetry() {
 		assertIdentifierRecoverableErrorMessage(
 			RecoverableErrorDetail.DEVICE_KEYSTORE_UNAVAILABLE,
-			"Telegram login in Harbor needs Android 6.0+ device-backed encryption. " +
-				"Use Harbor password instead.",
+			R.string.telegram_connector_login_device_keystore_unavailable_message,
 		)
 		composeRule.onNodeWithTag(TELEGRAM_LOGIN_CONTINUE_TAG)
 			.assertIsNotEnabled()
@@ -218,7 +210,7 @@ class TelegramLoginPlaceholderFragmentTest {
 
 	private fun assertIdentifierRecoverableErrorMessage(
 		detail: RecoverableErrorDetail,
-		message: String,
+		messageRes: Int,
 	) {
 		telegramAuthSession.stateAfterSubmitIdentifier =
 			TelegramAuthState.RECOVERABLE_ERROR
@@ -230,7 +222,13 @@ class TelegramLoginPlaceholderFragmentTest {
 			.performClick()
 		composeRule.waitForIdle()
 
-		composeRule.onNodeWithText(message).assertIsDisplayed()
+		assertLoginMessage(messageRes)
+	}
+
+	private fun assertLoginMessage(messageRes: Int) {
+		composeRule.onNodeWithText(
+			RuntimeEnvironment.getApplication().getString(messageRes),
+		).assertIsDisplayed()
 	}
 
 	private fun androidx.compose.ui.test.SemanticsNodeInteraction.assertEditableTextEquals(
