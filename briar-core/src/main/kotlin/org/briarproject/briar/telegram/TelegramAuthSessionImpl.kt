@@ -41,7 +41,7 @@ class TelegramAuthSessionImpl(private val tdlibLoginClient: TelegramTdlibLoginCl
 	}
 }
 
-class NoOpTelegramTdlibLoginClient : TelegramTdlibLoginClient {
+class DisabledTelegramTdlibLoginClient : TelegramTdlibLoginClient {
 	override fun start(): TelegramAuthState = TelegramAuthState.CLOSED
 
 	override fun getRecoverableErrorDetail(): RecoverableErrorDetail = RecoverableErrorDetail.NONE

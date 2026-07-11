@@ -52,6 +52,6 @@ class TelegramModule {
 			),
 		)
 	} else {
-		TelegramAuthSessionImpl(NoOpTelegramTdlibLoginClient())
+		TelegramAuthSessionImpl(DisabledTelegramTdlibLoginClient())
 	}
 }
