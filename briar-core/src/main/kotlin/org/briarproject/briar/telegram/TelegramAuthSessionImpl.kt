@@ -141,15 +141,11 @@ class ReflectiveTelegramTdlibLoginClient(
 				awaitPreparedAuthorizationStateClassName(phoneNumberUpdate),
 			)
 		} catch (e: ReflectiveOperationException) {
-			closeTdlibClient()
-			return recoverableError(RecoverableErrorDetail.NONE)
+			return recoverableErrorAfterClientFailure()
 		} catch (e: LinkageError) {
-			closeTdlibClient()
-			return recoverableError(RecoverableErrorDetail.NONE)
+			return recoverableErrorAfterClientFailure()
 		} catch (e: InterruptedException) {
-			Thread.currentThread().interrupt()
-			closeTdlibClient()
-			return recoverableError(RecoverableErrorDetail.NONE)
+			return recoverableErrorAfterClientFailure(interrupted = true)
 		}
 	}
 
@@ -171,15 +167,11 @@ class ReflectiveTelegramTdlibLoginClient(
 			}
 			return mapAuthorizationStateClassName(awaitPreparedAuthorizationStateClassName(codeUpdate))
 		} catch (e: ReflectiveOperationException) {
-			closeTdlibClient()
-			return recoverableError(RecoverableErrorDetail.NONE)
+			return recoverableErrorAfterClientFailure()
 		} catch (e: LinkageError) {
-			closeTdlibClient()
-			return recoverableError(RecoverableErrorDetail.NONE)
+			return recoverableErrorAfterClientFailure()
 		} catch (e: InterruptedException) {
-			Thread.currentThread().interrupt()
-			closeTdlibClient()
-			return recoverableError(RecoverableErrorDetail.NONE)
+			return recoverableErrorAfterClientFailure(interrupted = true)
 		}
 	}
 
@@ -203,15 +195,11 @@ class ReflectiveTelegramTdlibLoginClient(
 				awaitPreparedAuthorizationStateClassName(passwordUpdate),
 			)
 		} catch (e: ReflectiveOperationException) {
-			closeTdlibClient()
-			return recoverableError(RecoverableErrorDetail.NONE)
+			return recoverableErrorAfterClientFailure()
 		} catch (e: LinkageError) {
-			closeTdlibClient()
-			return recoverableError(RecoverableErrorDetail.NONE)
+			return recoverableErrorAfterClientFailure()
 		} catch (e: InterruptedException) {
-			Thread.currentThread().interrupt()
-			closeTdlibClient()
-			return recoverableError(RecoverableErrorDetail.NONE)
+			return recoverableErrorAfterClientFailure(interrupted = true)
 		}
 	}
 
@@ -390,6 +378,12 @@ class ReflectiveTelegramTdlibLoginClient(
 	private fun recoverableError(detail: RecoverableErrorDetail): TelegramAuthState {
 		recoverableErrorDetail = detail
 		return TelegramAuthState.RECOVERABLE_ERROR
+	}
+
+	private fun recoverableErrorAfterClientFailure(interrupted: Boolean = false): TelegramAuthState {
+		if (interrupted) Thread.currentThread().interrupt()
+		closeTdlibClient()
+		return recoverableError(RecoverableErrorDetail.NONE)
 	}
 
 	private fun recoverableDatabaseKeyUnavailable(): TelegramAuthState {
