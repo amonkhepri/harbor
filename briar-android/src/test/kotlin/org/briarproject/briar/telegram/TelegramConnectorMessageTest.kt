@@ -84,28 +84,33 @@ class TelegramConnectorMessageTest {
 					true,
 				),
 			) to
-				listOf(
-					ConnectorMessage(
-						ConnectorSources.TELEGRAM,
-						"10",
-						"20",
-						1_700_000_001,
-						false,
-						"body",
-						20L,
+				ConnectorMessageReadResult.Success(
+					listOf(
+						ConnectorMessage(
+							ConnectorSources.TELEGRAM,
+							"10",
+							"20",
+							1_700_000_001,
+							false,
+							"body",
+							20L,
+						),
 					),
 				),
 			connector.getRecentThreads(3) to
-				connector.getRecentMessages("10", 2),
+				connector.getRecentMessageReadResult("10", 2),
 		)
 		assertEquals(Triple(3, 10L, 2), connector.lastRequestLimits())
 	}
 
 	@Test
-	fun testReadOnlyConnectorReturnsEmptyForNonNumericThreadId() {
+	fun testReadOnlyConnectorReturnsEmptyResultForNonNumericThreadId() {
 		val connector = FakeTelegramConnector()
 
-		assertEquals(emptyList<ConnectorMessage>(), connector.getRecentMessages("thread-1", 2))
+		assertEquals(
+			ConnectorMessageReadResult.Success(emptyList<ConnectorMessage>()),
+			connector.getRecentMessageReadResult("thread-1", 2),
+		)
 		assertEquals(Triple(0, 0L, 0), connector.lastRequestLimits())
 	}
 
@@ -117,7 +122,6 @@ class TelegramConnectorMessageTest {
 			ConnectorMessageReadResult.LoadFailed,
 			connector.getRecentMessageReadResult("10", 2),
 		)
-		assertEquals(emptyList<ConnectorMessage>(), connector.getRecentMessages("10", 2))
 	}
 
 	@Test
