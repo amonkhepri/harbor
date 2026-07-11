@@ -9,16 +9,19 @@ import androidx.recyclerview.widget.RecyclerView.ViewHolder
 import org.briarproject.briar.R
 import org.briarproject.nullsafety.NullSafety
 
-class InboxThreadAdapter(
-	private val listener: OnInboxThreadClickListener,
-) : ListAdapter<InboxThreadItem, ViewHolder>(InboxThreadCallback()) {
+class InboxThreadAdapter(private val listener: OnInboxThreadClickListener) :
+	ListAdapter<InboxThreadItem, ViewHolder>(InboxThreadCallback()) {
 
-	private val connectorClickRouter = ConnectorInboxThreadClickRouter(listener)
+	private val connectorClickListener =
+		OnContactClickListener<ConnectorInboxThreadItem> { view, item ->
+			if (item is TelegramInboxThreadItem) listener.onTelegramItemClick(view, item)
+		}
 
-	override fun getItemViewType(position: Int): Int =
-		if (getItem(position).connectorSource == null)
-			VIEW_TYPE_BRIAR
-		else VIEW_TYPE_CONNECTOR
+	override fun getItemViewType(position: Int): Int = if (getItem(position).connectorSource == null) {
+		VIEW_TYPE_BRIAR
+	} else {
+		VIEW_TYPE_CONNECTOR
+	}
 
 	override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
 		val inflater = LayoutInflater.from(parent.context)
@@ -27,7 +30,10 @@ class InboxThreadAdapter(
 			InboxContactListItemViewHolder(view)
 		} else {
 			val view = inflater.inflate(
-				R.layout.list_item_connector_thread, parent, false)
+				R.layout.list_item_connector_thread,
+				parent,
+				false,
+			)
 			ConnectorInboxThreadViewHolder(view)
 		}
 	}
@@ -43,22 +49,17 @@ class InboxThreadAdapter(
 			val connectorItem = item as ConnectorInboxThreadItem
 			(holder as ConnectorInboxThreadViewHolder).bind(
 				connectorItem,
-				connectorClickRouter
+				connectorClickListener,
 			)
 		}
 	}
 
 	internal class InboxThreadCallback : ItemCallback<InboxThreadItem>() {
 
-		override fun areItemsTheSame(
-			i1: InboxThreadItem,
-			i2: InboxThreadItem,
-		): Boolean = i1.stableId == i2.stableId
+		override fun areItemsTheSame(i1: InboxThreadItem, i2: InboxThreadItem): Boolean =
+			i1.stableId == i2.stableId
 
-		override fun areContentsTheSame(
-			i1: InboxThreadItem,
-			i2: InboxThreadItem,
-		): Boolean {
+		override fun areContentsTheSame(i1: InboxThreadItem, i2: InboxThreadItem): Boolean {
 			if (i1.connectorSource != i2.connectorSource) return false
 			if (i1 is ConnectorInboxThreadItem) {
 				val t2 = i2 as ConnectorInboxThreadItem
@@ -79,18 +80,14 @@ class InboxThreadAdapter(
 			}
 			return NullSafety.equals(
 				c1.authorInfo.avatarHeader,
-				c2.authorInfo.avatarHeader
+				c2.authorInfo.avatarHeader,
 			)
 		}
 	}
 
-	private class InboxContactListItemViewHolder(view: View) :
-		ContactListItemViewHolder(view) {
+	private class InboxContactListItemViewHolder(view: View) : ContactListItemViewHolder(view) {
 
-		fun bindInbox(
-			item: ContactListItem,
-			listener: OnContactClickListener<ContactListItem>,
-		) {
+		fun bindInbox(item: ContactListItem, listener: OnContactClickListener<ContactListItem>) {
 			super.bind(item, listener)
 		}
 	}
