@@ -208,19 +208,6 @@ class ReflectiveTelegramTdlibLoginClientTest {
 			Client.getLastDatabaseDirectory() to Client.getLastFilesDirectory(),
 		)
 		assertArrayEquals(TDLIB_KEY, Client.getLastDatabaseEncryptionKey())
-
-		client.close()
-	}
-
-	@Test
-	fun testSubmitIdentifierUsesConfiguredApiCredentials() {
-		val client = ReflectiveTelegramTdlibLoginClient(
-			apiId = 12345,
-			apiHash = "test-api-hash",
-			tdlibKeyProvider = StaticTelegramTdlibDatabaseKeyProvider(TDLIB_KEY),
-		)
-
-		startToCodeEntry(client)
 		assertEquals(12345 to "test-api-hash", Client.getLastApiId() to Client.getLastApiHash())
 
 		client.close()
