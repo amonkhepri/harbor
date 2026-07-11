@@ -16,10 +16,6 @@ internal class ConnectorConversationAdapter :
 		ConnectorConversationAdapter.MessageViewHolder,
 		>(MessageCallback()) {
 
-	fun submitState(state: ConnectorConversationMessageListState) {
-		submitList(state.messages)
-	}
-
 	override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): MessageViewHolder {
 		val view = LayoutInflater.from(parent.context).inflate(
 			R.layout.list_item_connector_message,

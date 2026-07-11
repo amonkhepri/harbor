@@ -2,7 +2,6 @@ package org.briarproject.briar.android.connector
 
 import org.briarproject.briar.api.connector.ConnectorMessage
 import org.briarproject.briar.api.connector.ConnectorSource
-import org.briarproject.briar.api.connector.ReadOnlyConnector
 
 data class ConnectorConversationMessageItem(
 	val connectorSource: ConnectorSource,
@@ -24,9 +23,7 @@ data class ConnectorConversationMessageItem(
 			it.messageId
 		}
 
-		fun fromMessages(
-			messages: List<ConnectorMessage>,
-		): List<ConnectorConversationMessageItem> =
+		fun fromMessages(messages: List<ConnectorMessage>): List<ConnectorConversationMessageItem> =
 			messages.sortedWith(byDateAscending)
 				.filter { it.text.trim().isNotEmpty() }
 				.map { from(it) }
@@ -38,14 +35,7 @@ data class ConnectorConversationMessageItem(
 				message.messageId,
 				message.dateSeconds * 1000L,
 				message.isOutgoing,
-				message.text
+				message.text,
 			)
 	}
 }
-
-internal fun ReadOnlyConnector.getConversationMessageListState(
-	threadId: String,
-	limit: Int,
-): ConnectorConversationMessageListState =
-	ConnectorConversationMessageListState(
-		ConnectorConversationMessageItem.fromMessages(getRecentMessages(threadId, limit)))

@@ -15,8 +15,8 @@ import org.briarproject.briar.android.connector.ConnectorConversationAvailabilit
 import org.briarproject.briar.android.connector.ConnectorConversationAvailabilityState.LOAD_FAILED
 import org.briarproject.briar.android.connector.ConnectorConversationAvailabilityState.LOADING
 import org.briarproject.briar.android.connector.ConnectorConversationAdapter
+import org.briarproject.briar.android.connector.ConnectorConversationMessageItem
 import org.briarproject.briar.android.connector.ConnectorConversationMessageListState
-import org.briarproject.briar.android.connector.getConversationMessageListState
 import org.briarproject.briar.android.connector.withAvailabilityState
 import org.briarproject.briar.android.view.BriarRecyclerView
 import org.briarproject.briar.api.connector.ReadOnlyConnector
@@ -155,9 +155,10 @@ class TelegramConversationActivity : BriarActivity() {
 				return@execute
 			}
 			try {
-				val state = readOnlyConnector.getConversationMessageListState(
-					chatId.toString(),
-					MESSAGE_LIMIT,
+				val state = ConnectorConversationMessageListState(
+					ConnectorConversationMessageItem.fromMessages(
+						readOnlyConnector.getRecentMessages(chatId.toString(), MESSAGE_LIMIT),
+					),
 				)
 				showMessages(state)
 			} catch (e: RuntimeException) {
@@ -184,7 +185,7 @@ class TelegramConversationActivity : BriarActivity() {
 	private fun submitMessageState(state: ConnectorConversationMessageListState) {
 		messageState = state
 		list.setEmptyText(state.emptyText)
-		adapter.submitState(state)
+		adapter.submitList(state.messages)
 		invalidateOptionsMenu()
 	}
 }
