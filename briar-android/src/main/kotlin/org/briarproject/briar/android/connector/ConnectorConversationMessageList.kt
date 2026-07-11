@@ -3,6 +3,7 @@ package org.briarproject.briar.android.connector
 internal data class ConnectorConversationMessageListState(
 	val messages: List<ConnectorConversationMessageItem> = emptyList(),
 	val emptyText: String? = null,
+	val visibleStatusText: String? = null,
 	val isLoading: Boolean = false,
 )
 
@@ -18,15 +19,25 @@ internal fun ConnectorConversationMessageListState.withAvailabilityState(
 	availabilityState: ConnectorConversationAvailabilityState,
 	previousState: ConnectorConversationMessageListState,
 	emptyText: String,
-): ConnectorConversationMessageListState = copy(
-	messages = if (availabilityState.shouldKeepPreviousMessages()) {
+): ConnectorConversationMessageListState {
+	val nextMessages = if (availabilityState.shouldKeepPreviousMessages()) {
 		previousState.messages.ifEmpty { messages }
 	} else {
 		messages
-	},
-	emptyText = emptyText,
-	isLoading = false,
-)
+	}
+	return copy(
+		messages = nextMessages,
+		emptyText = emptyText,
+		visibleStatusText = if (nextMessages.isNotEmpty() &&
+			availabilityState.shouldKeepPreviousMessages()
+		) {
+			emptyText
+		} else {
+			null
+		},
+		isLoading = false,
+	)
+}
 
 private fun ConnectorConversationAvailabilityState.shouldKeepPreviousMessages(): Boolean =
 	this == ConnectorConversationAvailabilityState.ACCOUNT_UNAVAILABLE ||

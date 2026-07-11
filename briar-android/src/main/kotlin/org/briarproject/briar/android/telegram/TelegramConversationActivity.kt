@@ -4,6 +4,7 @@ import android.os.Bundle
 import android.view.Menu
 import android.view.MenuItem
 import androidx.recyclerview.widget.LinearLayoutManager
+import com.google.android.material.snackbar.Snackbar
 import org.briarproject.bramble.api.lifecycle.IoExecutor
 import org.briarproject.briar.R
 import org.briarproject.briar.android.activity.ActivityComponent
@@ -18,6 +19,7 @@ import org.briarproject.briar.android.connector.ConnectorConversationAdapter
 import org.briarproject.briar.android.connector.ConnectorConversationMessageItem
 import org.briarproject.briar.android.connector.ConnectorConversationMessageListState
 import org.briarproject.briar.android.connector.withAvailabilityState
+import org.briarproject.briar.android.util.BriarSnackbarBuilder
 import org.briarproject.briar.android.view.BriarRecyclerView
 import org.briarproject.briar.api.connector.ReadOnlyConnector
 import org.briarproject.briar.api.telegram.TelegramConnector
@@ -194,6 +196,11 @@ class TelegramConversationActivity : BriarActivity() {
 		messageState = state
 		list.setEmptyText(state.emptyText)
 		adapter.submitList(state.messages)
+		state.visibleStatusText?.let {
+			BriarSnackbarBuilder()
+				.make(list, it, Snackbar.LENGTH_LONG)
+				.show()
+		}
 		invalidateOptionsMenu()
 	}
 }

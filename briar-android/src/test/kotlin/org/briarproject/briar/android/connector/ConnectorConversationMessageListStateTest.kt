@@ -6,6 +6,7 @@ import org.briarproject.briar.android.connector.ConnectorConversationAvailabilit
 import org.briarproject.briar.api.connector.ConnectorSource
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 class ConnectorConversationMessageListStateTest {
@@ -24,6 +25,7 @@ class ConnectorConversationMessageListStateTest {
 
 			assertEquals(listOf(messageItem("1")), state.messages)
 			assertEquals("Failed", state.emptyText)
+			assertEquals("Failed", state.visibleStatusText)
 			assertFalse(state.isLoading)
 		}
 	}
@@ -41,6 +43,7 @@ class ConnectorConversationMessageListStateTest {
 
 		assertEquals(emptyList<ConnectorConversationMessageItem>(), state.messages)
 		assertEquals("No messages", state.emptyText)
+		assertNull(state.visibleStatusText)
 		assertFalse(state.isLoading)
 	}
 
