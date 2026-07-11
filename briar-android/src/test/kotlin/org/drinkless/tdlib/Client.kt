@@ -112,51 +112,32 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 	}
 
 	private fun emitAuthorizationState(authorizationState: Any) {
-		val delayMs = getAuthorizationUpdateDelayMs()
-		val emit = {
+		emitAfter(getAuthorizationUpdateDelayMs()) {
 			updateHandler.onResult(
 				TdApi.UpdateAuthorizationState(authorizationState),
 			)
 		}
-		if (delayMs <= 0L) {
-			emit()
-			return
-		}
-		Thread {
-			try {
-				Thread.sleep(delayMs)
-			} catch (e: InterruptedException) {
-				Thread.currentThread().interrupt()
-			}
-			emit()
-		}.start()
 	}
 
 	private fun emitCloseAuthorizationState() {
-		val emit = {
+		emitAfter(closeAuthorizationUpdateDelayMs) {
 			clearActiveDatabaseDirectory(databaseDirectory)
 			updateHandler.onResult(
 				TdApi.UpdateAuthorizationState(TdApi.AuthorizationStateClosed()),
 			)
 		}
-		if (closeAuthorizationUpdateDelayMs <= 0L) {
-			emit()
-			return
-		}
-		Thread {
-			try {
-				Thread.sleep(closeAuthorizationUpdateDelayMs)
-			} catch (e: InterruptedException) {
-				Thread.currentThread().interrupt()
-			}
-			emit()
-		}.start()
 	}
 
 	private fun emitResult(resultHandler: ResultHandler?, result: Any, delayMs: Long) {
 		if (resultHandler == null) return
-		if (delayMs <= 0L) {
+		emitAfter(delayMs) {
 			resultHandler.onResult(result)
+		}
+	}
+
+	private fun emitAfter(delayMs: Long, emit: () -> Unit) {
+		if (delayMs <= 0L) {
+			emit()
 			return
 		}
 		Thread {
@@ -165,7 +146,7 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 			} catch (e: InterruptedException) {
 				Thread.currentThread().interrupt()
 			}
-			resultHandler.onResult(result)
+			emit()
 		}.start()
 	}
 
