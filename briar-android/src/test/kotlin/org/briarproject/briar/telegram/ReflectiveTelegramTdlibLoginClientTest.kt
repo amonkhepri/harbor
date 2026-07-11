@@ -146,6 +146,19 @@ class ReflectiveTelegramTdlibLoginClientTest {
 		assertSentRequestsAndClose(client, *requestNames)
 	}
 
+	private fun assertSubmitIdentifierRejectsPersistedSessionIdentity(authorizationState: Any) {
+		Client.resetTestState()
+		Client.setAuthorizationStateAfterTdlibParameters(authorizationState)
+		val client = createClient()
+
+		assertIdentifierRecoverableError(
+			client,
+			RecoverableErrorDetail.PERSISTED_SESSION_IDENTITY_UNVERIFIED,
+			"+15550001111",
+		)
+		assertPhoneRequestsAndClose(client, SET_PARAMETERS, CLOSE, expectedPhone = "")
+	}
+
 	private fun assertSubmitCodeTimeout(submittedCode: String, expectedWaitDescription: String) {
 		Client.setAuthorizationUpdateDelaySequenceMs(0L, 0L, 0L, 1_200L)
 		val client = createTimeoutClient()
@@ -246,15 +259,15 @@ class ReflectiveTelegramTdlibLoginClientTest {
 
 	@Test
 	fun testSubmitIdentifierRejectsPersistedReadySessionIdentity() {
-		Client.setAuthorizationStateAfterTdlibParameters(TdApi.AuthorizationStateReady())
-		val client = createClient()
+		assertSubmitIdentifierRejectsPersistedSessionIdentity(TdApi.AuthorizationStateReady())
+	}
 
-		assertIdentifierRecoverableError(
-			client,
-			RecoverableErrorDetail.PERSISTED_SESSION_IDENTITY_UNVERIFIED,
-			"+15550001111",
-		)
-		assertPhoneRequestsAndClose(client, SET_PARAMETERS, CLOSE, expectedPhone = "")
+	@Test
+	fun testSubmitIdentifierRejectsPersistedMidLoginSessionIdentity() {
+		listOf(
+			TdApi.AuthorizationStateWaitCode(),
+			TdApi.AuthorizationStateWaitPassword(),
+		).forEach(::assertSubmitIdentifierRejectsPersistedSessionIdentity)
 	}
 
 	@Test

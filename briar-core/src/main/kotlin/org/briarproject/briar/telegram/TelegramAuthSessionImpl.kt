@@ -122,11 +122,8 @@ class ReflectiveTelegramTdlibLoginClient(
 				}
 				val authorizationStateAfterParameters =
 					awaitPreparedAuthorizationStateClassName(tdlibParametersUpdate)
-				if (authorizationStateAfterParameters == "AuthorizationStateReady") {
-					return recoverablePersistedSessionIdentityUnverified()
-				}
 				if (authorizationStateAfterParameters != "AuthorizationStateWaitPhoneNumber") {
-					return mapAuthorizationStateClassName(authorizationStateAfterParameters)
+					return recoverablePersistedSessionIdentityUnverified()
 				}
 			}
 			if (lastAuthorizationStateClassName != "AuthorizationStateWaitPhoneNumber") {
