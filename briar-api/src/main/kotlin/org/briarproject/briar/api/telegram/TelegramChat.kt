@@ -3,7 +3,7 @@ package org.briarproject.briar.api.telegram
 import org.briarproject.briar.api.connector.ConnectorSources
 import org.briarproject.briar.api.connector.ConnectorThread
 
-data class TelegramChat @JvmOverloads constructor(
+data class TelegramChat(
 	val id: Long,
 	val title: String,
 	val lastMessageDateSeconds: Int,
@@ -16,6 +16,6 @@ data class TelegramChat @JvmOverloads constructor(
 		title,
 		lastMessageDateSeconds,
 		lastMessageText,
-		lastMessageIsOutgoing
+		lastMessageIsOutgoing,
 	)
 }

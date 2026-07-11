@@ -1,6 +1,6 @@
 package org.briarproject.briar.api.connector
 
-data class ConnectorThread @JvmOverloads constructor(
+data class ConnectorThread(
 	val source: ConnectorSource,
 	val threadId: String,
 	val title: String,

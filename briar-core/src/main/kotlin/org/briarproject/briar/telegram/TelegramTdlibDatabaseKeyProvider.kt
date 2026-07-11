@@ -18,7 +18,7 @@ object NoOpTelegramTdlibDatabaseKeyProvider : TelegramTdlibDatabaseKeyProvider {
 	override fun isKeyStrengtheningAvailable(): Boolean = false
 }
 
-class ProtectedTelegramTdlibDatabaseKeyProvider @JvmOverloads constructor(
+class ProtectedTelegramTdlibDatabaseKeyProvider(
 	private val databaseConfig: DatabaseConfig,
 	private val random: SecureRandom = SecureRandom(),
 ) : TelegramTdlibDatabaseKeyProvider {

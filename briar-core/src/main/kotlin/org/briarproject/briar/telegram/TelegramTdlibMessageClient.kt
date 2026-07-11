@@ -16,7 +16,7 @@ interface TelegramTdlibMessageClient {
 	fun getRecentMessages(chatId: Long, limit: Int): List<TelegramMessage>
 }
 
-class ReflectiveTelegramTdlibMessageClient @JvmOverloads constructor(
+class ReflectiveTelegramTdlibMessageClient(
 	private val tdlibDirectory: File = File("harbor-telegram"),
 	private val apiId: Int = 0,
 	private val apiHash: String = "",

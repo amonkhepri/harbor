@@ -189,7 +189,6 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 			defaultExceptionHandler: ExceptionHandler?,
 		): Client = Client(updateHandler)
 
-		@JvmStatic
 		fun resetTestState() {
 			sentRequestNames.clear()
 			authorizationUpdateDelaySequenceMs.clear()
@@ -215,98 +214,77 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 			rejectSetTdlibParameters = false
 		}
 
-		@JvmStatic
 		fun setAuthorizationUpdateDelayMs(delayMs: Long) {
 			authorizationUpdateDelayMs = delayMs
 		}
 
-		@JvmStatic
 		fun setCloseAuthorizationUpdateDelayMs(delayMs: Long) {
 			closeAuthorizationUpdateDelayMs = delayMs
 		}
 
-		@JvmStatic
 		fun setAuthorizationUpdateDelaySequenceMs(vararg delayMs: Long) {
 			authorizationUpdateDelaySequenceMs.clear()
 			authorizationUpdateDelaySequenceMs += delayMs.toList()
 		}
 
-		@JvmStatic
 		fun setPhoneNumberResultDelayMs(delayMs: Long) {
 			phoneNumberResultDelayMs = delayMs
 		}
 
-		@JvmStatic
 		fun setAuthenticationCodeResultDelayMs(delayMs: Long) {
 			authenticationCodeResultDelayMs = delayMs
 		}
 
-		@JvmStatic
 		fun setInitialAuthorizationState(authorizationState: Any) {
 			initialAuthorizationState = authorizationState
 		}
 
-		@JvmStatic
 		fun setAuthorizationStateAfterTdlibParameters(authorizationState: Any) {
 			authorizationStateAfterTdlibParameters = authorizationState
 		}
 
-		@JvmStatic
 		fun setChats(vararg chats: TdApi.Chat) {
 			chatsById.clear()
 			chats.forEach { chatsById[it.id] = it }
 		}
 
-		@JvmStatic
 		fun setMessages(chatId: Long, vararg messages: TdApi.Message?) {
 			messagesByChatId[chatId] = messages.toList()
 		}
 
-		@JvmStatic
 		fun setMaxChatLoadPageSize(limit: Int) {
 			maxChatLoadPageSize = limit.coerceAtLeast(0)
 		}
 
-		@JvmStatic
 		fun setMaxHistoryPageSize(limit: Int) {
 			maxHistoryPageSize = limit.coerceAtLeast(1)
 		}
 
-		@JvmStatic
 		fun prepareSetTdlibParametersAcceptedLatch() {
 			setTdlibParametersAcceptedLatch = CountDownLatch(1)
 		}
 
-		@JvmStatic
 		fun setRejectSetTdlibParameters(reject: Boolean) {
 			rejectSetTdlibParameters = reject
 		}
 
-		@JvmStatic
 		fun awaitSetTdlibParametersAccepted(timeoutMs: Long): Boolean =
 			setTdlibParametersAcceptedLatch?.await(timeoutMs, TimeUnit.MILLISECONDS) ?: false
 
-		@JvmStatic
 		fun getSentRequestNames(): List<String> = synchronized(stateLock) {
 			sentRequestNames.toList()
 		}
 
-		@JvmStatic
 		fun getLastPhoneNumber(): String = lastPhoneNumber
 
-		@JvmStatic
 		fun getLastDatabaseDirectory(): String = lastDatabaseDirectory
 
-		@JvmStatic
 		fun getLastFilesDirectory(): String = lastFilesDirectory
 
-		@JvmStatic
 		fun getLastDatabaseEncryptionKey(): ByteArray = lastDatabaseEncryptionKey.copyOf()
 
-		@JvmStatic
 		fun getLastApiId(): Int = lastApiId
 
-		@JvmStatic
 		fun getLastApiHash(): String = lastApiHash
 
 		private fun getAuthorizationUpdateDelayMs(): Long = synchronized(stateLock) {

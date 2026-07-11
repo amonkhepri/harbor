@@ -55,7 +55,7 @@ class NoOpTelegramTdlibLoginClient : TelegramTdlibLoginClient {
 	override fun close(): TelegramAuthState = TelegramAuthState.CLOSED
 }
 
-class ReflectiveTelegramTdlibLoginClient @JvmOverloads constructor(
+class ReflectiveTelegramTdlibLoginClient(
 	private val tdlibDirectory: File = File("harbor-telegram"),
 	private val apiId: Int = 0,
 	private val apiHash: String = "",
