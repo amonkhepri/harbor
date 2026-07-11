@@ -16,14 +16,6 @@ interface TelegramTdlibMessageClient {
 	fun getRecentMessages(chatId: Long, limit: Int): List<TelegramMessage>
 }
 
-class NoOpTelegramTdlibMessageClient : TelegramTdlibMessageClient {
-	override fun isAuthorized(): Boolean = false
-
-	override fun getRecentChats(limit: Int): List<TelegramChat> = emptyList()
-
-	override fun getRecentMessages(chatId: Long, limit: Int): List<TelegramMessage> = emptyList()
-}
-
 class ReflectiveTelegramTdlibMessageClient @JvmOverloads constructor(
 	private val tdlibDirectory: File = File("harbor-telegram"),
 	private val apiId: Int = 0,
