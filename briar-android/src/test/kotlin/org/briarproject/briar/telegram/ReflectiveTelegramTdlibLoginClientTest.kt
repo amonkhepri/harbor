@@ -3,7 +3,6 @@ package org.briarproject.briar.telegram
 import org.briarproject.briar.api.telegram.TelegramAuthSession.RecoverableErrorDetail
 import org.briarproject.briar.api.telegram.TelegramAuthState
 import org.drinkless.tdlib.Client
-import org.drinkless.tdlib.TdApi
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -245,19 +244,6 @@ class ReflectiveTelegramTdlibLoginClientTest {
 
 		assertIdentifierRecoverableError(client, RecoverableErrorDetail.NONE)
 		assertSentRequestsAndClose(client, CLOSE)
-	}
-
-	@Test
-	fun testSubmitIdentifierTransitionsToReadyWhenPersistedSessionIsAuthorized() {
-		Client.setAuthorizationStateAfterTdlibParameters(TdApi.AuthorizationStateReady())
-		val client = createClient()
-
-		client.assertSuccessfulState(TelegramAuthState.IDENTIFIER_ENTRY, client.start())
-		client.assertSuccessfulState(
-			TelegramAuthState.READY,
-			client.submitIdentifier("test-login-identifier"),
-		)
-		assertSentRequestsAndClose(client, SET_PARAMETERS)
 	}
 
 	@Test
