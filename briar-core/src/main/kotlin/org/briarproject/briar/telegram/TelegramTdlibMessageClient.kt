@@ -16,9 +16,12 @@ import java.util.concurrent.atomic.AtomicReference
 interface TelegramTdlibMessageClient {
 	fun isAuthorized(): Boolean
 	fun getRecentChats(limit: Int): List<TelegramChat>
-	fun getRecentMessages(chatId: Long, limit: Int): List<TelegramMessage>
-	fun getRecentMessageReadResult(chatId: Long, limit: Int): TelegramMessageReadResult =
-		Success(getRecentMessages(chatId, limit))
+	fun getRecentMessageReadResult(chatId: Long, limit: Int): TelegramMessageReadResult
+	fun getRecentMessages(chatId: Long, limit: Int): List<TelegramMessage> =
+		when (val result = getRecentMessageReadResult(chatId, limit)) {
+			is Success -> result.messages
+			LoadFailed -> emptyList()
+		}
 }
 
 class ReflectiveTelegramTdlibMessageClient(
@@ -43,12 +46,6 @@ class ReflectiveTelegramTdlibMessageClient(
 			}
 		}
 	}
-
-	override fun getRecentMessages(chatId: Long, limit: Int): List<TelegramMessage> =
-		when (val result = getRecentMessageReadResult(chatId, limit)) {
-			is Success -> result.messages
-			LoadFailed -> emptyList()
-		}
 
 	override fun getRecentMessageReadResult(chatId: Long, limit: Int): TelegramMessageReadResult {
 		val safeLimit = safeLimit(limit)

@@ -324,12 +324,6 @@ class TelegramConnectorMessageTest {
 			return chats
 		}
 
-		override fun getRecentMessages(chatId: Long, limit: Int): List<TelegramMessage> {
-			lastMessageChatId = chatId
-			lastMessageLimit = limit
-			return messages
-		}
-
 		override fun getRecentMessageReadResult(chatId: Long, limit: Int): TelegramMessageReadResult {
 			lastMessageChatId = chatId
 			lastMessageLimit = limit
