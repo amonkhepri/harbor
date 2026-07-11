@@ -118,7 +118,7 @@ class ReflectiveTelegramTdlibMessageClient(
 					apiHash,
 				) ?: return fallback
 				val readyUpdate = prepareAuthorizationUpdate(pendingAuthorizationUpdate)
-				if (sendReturnsError(client, parametersRequest)) return fallback
+				if (sendAndAwait(client, parametersRequest) == null) return fallback
 				authorizationState = awaitPreparedAuthorizationStateClassName(readyUpdate)
 			}
 			if (authorizationState != "AuthorizationStateReady") return fallback
@@ -233,10 +233,6 @@ class ReflectiveTelegramTdlibMessageClient(
 		if (!resultReceived.await(requestTimeoutMs, TimeUnit.MILLISECONDS)) return null
 		return result.get().takeUnless { it?.javaClass?.simpleName == "Error" }
 	}
-
-	@Throws(ReflectiveOperationException::class, InterruptedException::class)
-	private fun sendReturnsError(client: Any, request: Any): Boolean =
-		sendAndAwait(client, request) == null
 
 	@Throws(ReflectiveOperationException::class)
 	private fun mapChat(chat: Any): TelegramChat? {

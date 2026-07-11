@@ -149,50 +149,43 @@ class ReflectiveTelegramTdlibLoginClient(
 		}
 	}
 
-	override fun submitCode(code: String): TelegramAuthState {
-		if (!hasText(code) ||
-			tdlibClient == null ||
-			lastAuthorizationStateClassName != "AuthorizationStateWaitCode"
-		) {
-			return recoverableError(RecoverableErrorDetail.NONE)
-		}
-		try {
-			val codeUpdate = prepareAuthorizationUpdate()
-			when (sendForResult(createCheckAuthenticationCodeRequest(code))) {
-				CommandResult.OK -> Unit
-				CommandResult.ERROR ->
-					return recoverableError(RecoverableErrorDetail.INVALID_CODE)
-				CommandResult.TIMEOUT ->
-					return recoverableError(RecoverableErrorDetail.NONE)
-			}
-			return mapAuthorizationStateClassName(awaitPreparedAuthorizationStateClassName(codeUpdate))
-		} catch (e: ReflectiveOperationException) {
-			return recoverableErrorAfterClientFailure()
-		} catch (e: LinkageError) {
-			return recoverableErrorAfterClientFailure()
-		} catch (e: InterruptedException) {
-			return recoverableErrorAfterClientFailure(interrupted = true)
-		}
-	}
+	override fun submitCode(code: String): TelegramAuthState = submitCredential(
+		credential = code,
+		expectedAuthorizationState = "AuthorizationStateWaitCode",
+		createRequest = ::createCheckAuthenticationCodeRequest,
+		invalidDetail = RecoverableErrorDetail.INVALID_CODE,
+	)
 
-	override fun submitPassword(password: String): TelegramAuthState {
-		if (!hasText(password) ||
+	override fun submitPassword(password: String): TelegramAuthState = submitCredential(
+		credential = password,
+		expectedAuthorizationState = "AuthorizationStateWaitPassword",
+		createRequest = ::createCheckAuthenticationPasswordRequest,
+		invalidDetail = RecoverableErrorDetail.INVALID_PASSWORD,
+	)
+
+	private fun submitCredential(
+		credential: String,
+		expectedAuthorizationState: String,
+		createRequest: (String) -> Any,
+		invalidDetail: RecoverableErrorDetail,
+	): TelegramAuthState {
+		if (!hasText(credential) ||
 			tdlibClient == null ||
-			lastAuthorizationStateClassName != "AuthorizationStateWaitPassword"
+			lastAuthorizationStateClassName != expectedAuthorizationState
 		) {
 			return recoverableError(RecoverableErrorDetail.NONE)
 		}
 		try {
-			val passwordUpdate = prepareAuthorizationUpdate()
-			when (sendForResult(createCheckAuthenticationPasswordRequest(password))) {
+			val authorizationUpdate = prepareAuthorizationUpdate()
+			when (sendForResult(createRequest(credential))) {
 				CommandResult.OK -> Unit
 				CommandResult.ERROR ->
-					return recoverableError(RecoverableErrorDetail.INVALID_PASSWORD)
+					return recoverableError(invalidDetail)
 				CommandResult.TIMEOUT ->
 					return recoverableError(RecoverableErrorDetail.NONE)
 			}
 			return mapAuthorizationStateClassName(
-				awaitPreparedAuthorizationStateClassName(passwordUpdate),
+				awaitPreparedAuthorizationStateClassName(authorizationUpdate),
 			)
 		} catch (e: ReflectiveOperationException) {
 			return recoverableErrorAfterClientFailure()
