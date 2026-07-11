@@ -40,7 +40,7 @@ class ConnectorInboxThreadViewHolder(view: View) : RecyclerView.ViewHolder(view)
 		itemView.setOnClickListener { view -> listener.onItemClick(view, item) }
 	}
 
-	companion object {
+	private companion object {
 		fun titleText(resources: Resources, item: ConnectorInboxThreadItem): CharSequence {
 			val title = item.title
 			return if (title.trim().isEmpty()) {
