@@ -13,7 +13,7 @@ interface TelegramConnector : ReadOnlyConnector {
 	override fun isEnabled(): Boolean
 	override fun isAuthorized(): Boolean
 	fun getRecentChats(limit: Int): List<TelegramChat>
-	fun getRecentMessageReadResult(chatId: Long, limit: Int): TelegramMessageReadResult
+	fun getRecentMessageReadResult(chatId: Long, limit: Int): ConnectorMessageReadResult
 
 	override fun getRecentThreads(limit: Int): List<ConnectorThread> =
 		getRecentChats(limit).map { it.toConnectorThread() }
@@ -23,10 +23,6 @@ interface TelegramConnector : ReadOnlyConnector {
 		limit: Int,
 	): ConnectorMessageReadResult {
 		val chatId = threadId.toLongOrNull() ?: return ConnectorMessageReadResult.Success(emptyList())
-		return when (val result = getRecentMessageReadResult(chatId, limit)) {
-			is TelegramMessageReadResult.Success ->
-				ConnectorMessageReadResult.Success(result.messages.map { it.toConnectorMessage() })
-			TelegramMessageReadResult.LoadFailed -> ConnectorMessageReadResult.LoadFailed
-		}
+		return getRecentMessageReadResult(chatId, limit)
 	}
 }

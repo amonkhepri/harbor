@@ -1,8 +1,8 @@
 package org.briarproject.briar.telegram
 
+import org.briarproject.briar.api.connector.ConnectorMessageReadResult
 import org.briarproject.briar.api.telegram.TelegramChat
 import org.briarproject.briar.api.telegram.TelegramConnector
-import org.briarproject.briar.api.telegram.TelegramMessageReadResult
 
 class DisabledTelegramConnector : TelegramConnector {
 	override fun isEnabled(): Boolean = false
@@ -11,6 +11,6 @@ class DisabledTelegramConnector : TelegramConnector {
 
 	override fun getRecentChats(limit: Int): List<TelegramChat> = emptyList()
 
-	override fun getRecentMessageReadResult(chatId: Long, limit: Int): TelegramMessageReadResult =
-		TelegramMessageReadResult.Success(emptyList())
+	override fun getRecentMessageReadResult(chatId: Long, limit: Int): ConnectorMessageReadResult =
+		ConnectorMessageReadResult.Success(emptyList())
 }

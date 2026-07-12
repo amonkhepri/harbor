@@ -1,10 +1,10 @@
 package org.briarproject.briar.telegram
 
+import org.briarproject.briar.api.connector.ConnectorMessageReadResult
+import org.briarproject.briar.api.connector.ConnectorMessageReadResult.LoadFailed
+import org.briarproject.briar.api.connector.ConnectorMessageReadResult.Success
 import org.briarproject.briar.api.telegram.TelegramChat
 import org.briarproject.briar.api.telegram.TelegramConnector
-import org.briarproject.briar.api.telegram.TelegramMessageReadResult
-import org.briarproject.briar.api.telegram.TelegramMessageReadResult.LoadFailed
-import org.briarproject.briar.api.telegram.TelegramMessageReadResult.Success
 import org.briarproject.briar.api.telegram.TelegramMessage
 import java.io.File
 import java.lang.reflect.Method
@@ -39,10 +39,10 @@ class ReflectiveTelegramTdlibMessageClient(
 		}
 	}
 
-	override fun getRecentMessageReadResult(chatId: Long, limit: Int): TelegramMessageReadResult {
+	override fun getRecentMessageReadResult(chatId: Long, limit: Int): ConnectorMessageReadResult {
 		val safeLimit = safeLimit(limit)
 		if (chatId == 0L || safeLimit == 0) return Success(emptyList())
-		return withReadyClient<TelegramMessageReadResult?>(null) { client ->
+		return withReadyClient<ConnectorMessageReadResult?>(null) { client ->
 			val messages = mutableListOf<TelegramMessage>()
 			val seenMessageIds = LinkedHashSet<Long>()
 			var fromMessageId = 0L
@@ -72,7 +72,7 @@ class ReflectiveTelegramTdlibMessageClient(
 				}
 				fromMessageId = nextFromMessageId
 			}
-			Success(messages)
+			Success(messages.map { it.toConnectorMessage() })
 		} ?: LoadFailed
 	}
 

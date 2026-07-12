@@ -2,14 +2,13 @@ package org.briarproject.briar.telegram
 
 import org.briarproject.briar.api.connector.ConnectorMessage
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult
+import org.briarproject.briar.api.connector.ConnectorMessageReadResult.LoadFailed
+import org.briarproject.briar.api.connector.ConnectorMessageReadResult.Success
 import org.briarproject.briar.api.connector.ConnectorSources
 import org.briarproject.briar.api.connector.ConnectorThread
 import org.briarproject.briar.api.telegram.TelegramChat
 import org.briarproject.briar.api.telegram.TelegramConnector
 import org.briarproject.briar.api.telegram.TelegramMessage
-import org.briarproject.briar.api.telegram.TelegramMessageReadResult
-import org.briarproject.briar.api.telegram.TelegramMessageReadResult.LoadFailed
-import org.briarproject.briar.api.telegram.TelegramMessageReadResult.Success
 import org.drinkless.tdlib.Client
 import org.drinkless.tdlib.TdApi
 import org.junit.Assert.assertArrayEquals
@@ -35,7 +34,7 @@ class TelegramConnectorMessageTest {
 		client: TelegramConnector,
 		chatId: Long,
 		limit: Int,
-	): List<TelegramMessage> = (client.getRecentMessageReadResult(chatId, limit) as Success).messages
+	): List<ConnectorMessage> = (client.getRecentMessageReadResult(chatId, limit) as Success).messages
 
 	@Test
 	fun testDisabledConnectorReturnsDisabledEmptyMessageLists() {
@@ -43,7 +42,7 @@ class TelegramConnectorMessageTest {
 
 		assertEquals(listOf(false, false), listOf(connector.isEnabled(), connector.isAuthorized()))
 		assertEquals(
-			emptyList<TelegramChat>() to Success(emptyList<TelegramMessage>()),
+			emptyList<TelegramChat>() to Success(emptyList()),
 			connector.getRecentChats(5) to connector.getRecentMessageReadResult(1L, 5),
 		)
 	}
@@ -153,13 +152,8 @@ class TelegramConnectorMessageTest {
 				),
 			) to
 				listOf(
-					TelegramMessage(
-						chatId = 10L,
-						messageId = 20L,
-						dateSeconds = 1_700_000_001,
-						isOutgoing = false,
-						text = "",
-					),
+					TelegramMessage(10L, 20L, 1_700_000_001, false, "")
+						.toConnectorMessage(),
 				),
 			client.getRecentChats(3) to readMessages(client, 10L, 3),
 		)
@@ -208,7 +202,7 @@ class TelegramConnectorMessageTest {
 
 		assertEquals(
 			listOf(40L, 30L, 20L, 10L) to listOf("latest", "middle", "older", "oldest"),
-			messages.map { it.messageId } to messages.map { it.text },
+			messages.map { it.sourceMessageOrder } to messages.map { it.text },
 		)
 		assertSentRequests(
 			"GetChatHistory",
@@ -224,7 +218,10 @@ class TelegramConnectorMessageTest {
 		val emptyClient = readyReflectiveMessageClient {
 			Client.setMessages(10L)
 		}
-		assertEquals(Success(emptyList()), emptyClient.getRecentMessageReadResult(10L, 3))
+		assertEquals(
+			Success(emptyList()),
+			emptyClient.getRecentMessageReadResult(10L, 3),
+		)
 
 		val failingClient = readyReflectiveMessageClient {
 			Client.setMessages(
@@ -296,7 +293,10 @@ class TelegramConnectorMessageTest {
 			chatsResult[0],
 		)
 		assertEquals(
-			listOf(TelegramMessage(11L, 21L, 1_700_000_004, false, "body")),
+			listOf(
+				TelegramMessage(11L, 21L, 1_700_000_004, false, "body")
+					.toConnectorMessage(),
+			),
 			messages,
 		)
 	}
@@ -332,7 +332,7 @@ class TelegramConnectorMessageTest {
 		val messages: List<TelegramMessage> = listOf(
 			TelegramMessage(10L, 20L, 1_700_000_001, false, ""),
 		),
-		val messageReadResult: TelegramMessageReadResult? = null,
+		val messageReadResult: ConnectorMessageReadResult? = null,
 	) : TelegramConnector {
 		var lastChatLimit = 0
 		var lastMessageChatId = 0L
@@ -347,10 +347,10 @@ class TelegramConnectorMessageTest {
 			return chats
 		}
 
-		override fun getRecentMessageReadResult(chatId: Long, limit: Int): TelegramMessageReadResult {
+		override fun getRecentMessageReadResult(chatId: Long, limit: Int): ConnectorMessageReadResult {
 			lastMessageChatId = chatId
 			lastMessageLimit = limit
-			return messageReadResult ?: Success(messages)
+			return messageReadResult ?: Success(messages.map { it.toConnectorMessage() })
 		}
 	}
 
