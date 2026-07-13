@@ -2,6 +2,7 @@ package org.briarproject.briar.android.login;
 
 import android.app.Application;
 
+import org.briarproject.bramble.PoliteExecutor;
 import org.briarproject.bramble.api.FeatureFlags;
 import org.briarproject.bramble.api.account.AccountManager;
 import org.briarproject.bramble.api.db.DbException;
@@ -67,6 +68,7 @@ public class StartupViewModel extends AndroidViewModel
 	private final TelegramAuthSession telegramAuthSession;
 	@IoExecutor
 	private final Executor ioExecutor;
+	private final Executor telegramAuthExecutor;
 
 	private final MutableLiveEvent<DecryptionResult> passwordValidated =
 			new MutableLiveEvent<>();
@@ -98,6 +100,7 @@ public class StartupViewModel extends AndroidViewModel
 		this.notificationManager = notificationManager;
 		this.eventBus = eventBus;
 		this.ioExecutor = ioExecutor;
+		telegramAuthExecutor = new PoliteExecutor("TelegramAuth", ioExecutor, 1);
 		this.settingsManager = settingsManager;
 		this.featureFlags = featureFlags;
 		this.telegramAuthSession = telegramAuthSession;
@@ -108,7 +111,7 @@ public class StartupViewModel extends AndroidViewModel
 
 	@Override
 	protected void onCleared() {
-		telegramAuthSession.close();
+		telegramAuthExecutor.execute(telegramAuthSession::close);
 		eventBus.removeListener(this);
 	}
 
@@ -176,9 +179,8 @@ public class StartupViewModel extends AndroidViewModel
 
 	void showTelegramLoginPlaceholder() {
 		pendingTelegramLinkedIdentity = telegramLoginCode = telegramLoginPassword = "";
-		telegramAuthSession.start();
-		telegramAuthState.setValue(telegramAuthSession.getCurrentState());
 		state.setValue(TELEGRAM_LOGIN);
+		runTelegramAuthAction(telegramAuthSession::start);
 	}
 
 	String getTelegramLoginIdentifier() {
@@ -215,26 +217,30 @@ public class StartupViewModel extends AndroidViewModel
 
 	void submitTelegramLoginIdentifier() {
 		telegramLoginCode = telegramLoginPassword = "";
-		telegramAuthSession.submitIdentifier(telegramLoginIdentifier.trim());
-		telegramAuthState.setValue(telegramAuthSession.getCurrentState());
+		String identifier = telegramLoginIdentifier.trim();
+		runTelegramAuthAction(() -> telegramAuthSession.submitIdentifier(identifier));
 	}
 
 	void submitTelegramLoginCode() {
-		telegramAuthSession.submitCode(telegramLoginCode.trim());
-		telegramAuthState.setValue(telegramAuthSession.getCurrentState());
-		if (telegramAuthState.getValue() != TelegramAuthState.RECOVERABLE_ERROR ||
-				getTelegramRecoverableErrorDetail() != RecoverableErrorDetail.INVALID_CODE) {
-			telegramLoginCode = "";
-		}
+		String code = telegramLoginCode.trim();
+		runTelegramAuthAction(() -> {
+			telegramAuthSession.submitCode(code);
+			if (telegramAuthSession.getCurrentState() != TelegramAuthState.RECOVERABLE_ERROR ||
+					getTelegramRecoverableErrorDetail() != RecoverableErrorDetail.INVALID_CODE) {
+				telegramLoginCode = "";
+			}
+		});
 	}
 
 	void submitTelegramLoginPassword() {
-		telegramAuthSession.submitPassword(telegramLoginPassword);
-		telegramAuthState.setValue(telegramAuthSession.getCurrentState());
-		if (telegramAuthState.getValue() != TelegramAuthState.RECOVERABLE_ERROR ||
-				getTelegramRecoverableErrorDetail() != RecoverableErrorDetail.INVALID_PASSWORD) {
-			telegramLoginPassword = "";
-		}
+		String password = telegramLoginPassword;
+		runTelegramAuthAction(() -> {
+			telegramAuthSession.submitPassword(password);
+			if (telegramAuthSession.getCurrentState() != TelegramAuthState.RECOVERABLE_ERROR ||
+					getTelegramRecoverableErrorDetail() != RecoverableErrorDetail.INVALID_PASSWORD) {
+				telegramLoginPassword = "";
+			}
+		});
 	}
 
 	void completeTelegramLoginConfirmation() {
@@ -244,9 +250,10 @@ public class StartupViewModel extends AndroidViewModel
 
 	void showTelegramLoginIdentifierStep() {
 		telegramLoginCode = telegramLoginPassword = "";
-		telegramAuthSession.close();
-		telegramAuthSession.start();
-		telegramAuthState.setValue(telegramAuthSession.getCurrentState());
+		runTelegramAuthAction(() -> {
+			telegramAuthSession.close();
+			telegramAuthSession.start();
+		});
 	}
 
 	boolean isShowingTelegramLoginConfirmation() {
@@ -261,9 +268,15 @@ public class StartupViewModel extends AndroidViewModel
 
 	void showPasswordFragment() {
 		telegramLoginIdentifier = telegramLoginCode = telegramLoginPassword = "";
-		telegramAuthSession.close();
-		telegramAuthState.setValue(telegramAuthSession.getCurrentState());
 		state.setValue(SIGNED_OUT);
+		runTelegramAuthAction(telegramAuthSession::close);
+	}
+
+	private void runTelegramAuthAction(Runnable action) {
+		telegramAuthExecutor.execute(() -> {
+			action.run();
+			telegramAuthState.postValue(telegramAuthSession.getCurrentState());
+		});
 	}
 
 	private void storePendingTelegramLinkedIdentity() {

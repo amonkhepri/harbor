@@ -22,6 +22,8 @@ import org.junit.Rule
 import org.junit.Test
 import org.mockito.Mockito.mock
 import org.mockito.Mockito.`when`
+import java.util.ArrayDeque
+import java.util.concurrent.Executor
 
 class StartupViewModelTest {
 
@@ -34,6 +36,10 @@ class StartupViewModelTest {
 	@Before
 	fun setUp() {
 		telegramAuthSession = FakeTelegramAuthSession()
+		viewModel = createViewModel(ImmediateExecutor())
+	}
+
+	private fun createViewModel(ioExecutor: Executor): StartupViewModel {
 		val app = mock(Application::class.java)
 		val accountManager = mock(AccountManager::class.java)
 		val lifecycleManager = mock(LifecycleManager::class.java)
@@ -45,17 +51,48 @@ class StartupViewModelTest {
 		`when`(lifecycleManager.lifecycleState).thenReturn(LifecycleState.STOPPED)
 		`when`(accountManager.hasDatabaseKey()).thenReturn(false)
 
-		viewModel = StartupViewModel(
+		return StartupViewModel(
 			app,
 			accountManager,
 			lifecycleManager,
 			notificationManager,
 			eventBus,
-			ImmediateExecutor(),
+			ioExecutor,
 			settingsManager,
 			featureFlags,
 			telegramAuthSession,
 		)
+	}
+
+	@Test
+	fun testTelegramAuthCallsRunOnWorkerExecutor() {
+		val executor = QueuedExecutor()
+		viewModel = createViewModel(executor)
+
+		viewModel.showTelegramLoginPlaceholder()
+		assertEquals(0, telegramAuthSession.startCalls)
+		executor.runNext()
+		assertEquals(TelegramAuthState.IDENTIFIER_ENTRY, getOrAwaitValue(viewModel.telegramAuthState))
+
+		viewModel.submitTelegramLoginIdentifier()
+		assertEquals(0, telegramAuthSession.identifierSubmitCalls)
+		executor.runNext()
+		assertEquals(TelegramAuthState.CODE_ENTRY, getOrAwaitValue(viewModel.telegramAuthState))
+
+		viewModel.submitTelegramLoginCode()
+		assertEquals(0, telegramAuthSession.codeSubmitCalls)
+		executor.runNext()
+		assertEquals(TelegramAuthState.PASSWORD_ENTRY, getOrAwaitValue(viewModel.telegramAuthState))
+
+		viewModel.submitTelegramLoginPassword()
+		assertEquals(0, telegramAuthSession.passwordSubmitCalls)
+		executor.runNext()
+		assertEquals(TelegramAuthState.READY, getOrAwaitValue(viewModel.telegramAuthState))
+
+		viewModel.showPasswordFragment()
+		assertEquals(0, telegramAuthSession.closeCalls)
+		executor.runNext()
+		assertEquals(TelegramAuthState.CLOSED, getOrAwaitValue(viewModel.telegramAuthState))
 	}
 
 	@Test
@@ -166,27 +203,48 @@ class StartupViewModelTest {
 		var currentRecoverableErrorDetail = RecoverableErrorDetail.NONE
 		var closeCalls = 0
 		var startCalls = 0
+		var identifierSubmitCalls = 0
+		var codeSubmitCalls = 0
+		var passwordSubmitCalls = 0
 
 		override fun getCurrentState(): TelegramAuthState = currentAuthState
 
-		override fun getRecoverableErrorDetail(): RecoverableErrorDetail =
-			currentRecoverableErrorDetail
+		override fun getRecoverableErrorDetail(): RecoverableErrorDetail = currentRecoverableErrorDetail
 
 		override fun start() {
 			startCalls++
 			currentAuthState = TelegramAuthState.IDENTIFIER_ENTRY
 		}
 
-		override fun submitIdentifier(identifier: String) = Unit
+		override fun submitIdentifier(identifier: String) {
+			identifierSubmitCalls++
+			currentAuthState = TelegramAuthState.CODE_ENTRY
+		}
 
-		override fun submitCode(code: String) = Unit
+		override fun submitCode(code: String) {
+			codeSubmitCalls++
+			currentAuthState = TelegramAuthState.PASSWORD_ENTRY
+		}
 
-		override fun submitPassword(password: String) = Unit
+		override fun submitPassword(password: String) {
+			passwordSubmitCalls++
+			currentAuthState = TelegramAuthState.READY
+		}
 
 		override fun close() {
 			closeCalls++
 			currentAuthState = TelegramAuthState.CLOSED
 			currentRecoverableErrorDetail = RecoverableErrorDetail.NONE
 		}
+	}
+
+	private class QueuedExecutor : Executor {
+		private val tasks = ArrayDeque<Runnable>()
+
+		override fun execute(command: Runnable) {
+			tasks.add(command)
+		}
+
+		fun runNext() = tasks.remove().run()
 	}
 }
