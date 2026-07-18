@@ -6,5 +6,5 @@ interface OnInboxThreadClickListener {
 
 	fun onBriarItemClick(view: View, item: ContactListItem)
 
-	fun onTelegramItemClick(view: View, item: TelegramInboxThreadItem)
+	fun onConnectorItemClick(view: View, item: ConnectorInboxThreadItem)
 }

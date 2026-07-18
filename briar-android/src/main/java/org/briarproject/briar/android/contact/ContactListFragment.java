@@ -24,6 +24,7 @@ import org.briarproject.briar.android.fragment.BaseFragment;
 import org.briarproject.briar.android.telegram.TelegramConversationActivity;
 import org.briarproject.briar.android.util.BriarSnackbarBuilder;
 import org.briarproject.briar.android.view.BriarRecyclerView;
+import org.briarproject.briar.api.connector.ConnectorSources;
 import org.briarproject.nullsafety.MethodsNotNullByDefault;
 import org.briarproject.nullsafety.ParametersNotNullByDefault;
 
@@ -144,9 +145,11 @@ public class ContactListFragment extends BaseFragment
 	}
 
 	@Override
-	public void onTelegramItemClick(View view, TelegramInboxThreadItem item) {
+	public void onConnectorItemClick(View view, ConnectorInboxThreadItem item) {
+		if (!item.getConnectorSource().equals(ConnectorSources.TELEGRAM)) return;
 		Intent i = new Intent(getActivity(), TelegramConversationActivity.class);
-		i.putExtra(TelegramConversationActivity.CHAT_ID, item.getChatId());
+		i.putExtra(TelegramConversationActivity.CHAT_ID,
+				Long.parseLong(item.getConnectorThreadId()));
 		i.putExtra(TelegramConversationActivity.CHAT_TITLE, item.getTitle());
 		startActivity(i);
 	}

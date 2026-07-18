@@ -14,7 +14,7 @@ class InboxThreadAdapter(private val listener: OnInboxThreadClickListener) :
 
 	private val connectorClickListener =
 		OnContactClickListener<ConnectorInboxThreadItem> { view, item ->
-			if (item is TelegramInboxThreadItem) listener.onTelegramItemClick(view, item)
+			listener.onConnectorItemClick(view, item)
 		}
 
 	override fun getItemViewType(position: Int): Int = if (getItem(position).connectorSource == null) {
