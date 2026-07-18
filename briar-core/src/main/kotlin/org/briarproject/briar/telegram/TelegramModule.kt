@@ -18,20 +18,24 @@ class TelegramModule {
 		return File(appPrivateRoot, "tdlib")
 	}
 
-	private fun tdlibKeyProvider(databaseConfig: DatabaseConfig): TelegramTdlibDatabaseKeyProvider =
-		ProtectedTelegramTdlibDatabaseKeyProvider(databaseConfig)
+	@Provides
+	@Singleton
+	fun provideTelegramTdlibDatabaseKeyProvider(
+		databaseConfig: DatabaseConfig,
+	): TelegramTdlibDatabaseKeyProvider = ProtectedTelegramTdlibDatabaseKeyProvider(databaseConfig)
 
 	@Provides
 	@Singleton
 	fun provideTelegramConnector(
 		featureFlags: FeatureFlags,
 		databaseConfig: DatabaseConfig,
+		tdlibKeyProvider: TelegramTdlibDatabaseKeyProvider,
 	): TelegramConnector = if (featureFlags.shouldEnableTelegramConnector()) {
 		ReflectiveTelegramTdlibMessageClient(
 			tdlibDirectory(databaseConfig),
 			featureFlags.getTelegramApiId(),
 			featureFlags.getTelegramApiHash(),
-			tdlibKeyProvider(databaseConfig),
+			tdlibKeyProvider,
 		)
 	} else {
 		DisabledTelegramConnector()
@@ -42,13 +46,14 @@ class TelegramModule {
 	fun provideTelegramAuthSession(
 		featureFlags: FeatureFlags,
 		databaseConfig: DatabaseConfig,
+		tdlibKeyProvider: TelegramTdlibDatabaseKeyProvider,
 	): TelegramAuthSession = if (featureFlags.shouldEnableTelegramConnector()) {
 		TelegramAuthSessionImpl(
 			ReflectiveTelegramTdlibLoginClient(
 				tdlibDirectory(databaseConfig),
 				featureFlags.getTelegramApiId(),
 				featureFlags.getTelegramApiHash(),
-				tdlibKeyProvider(databaseConfig),
+				tdlibKeyProvider,
 			),
 		)
 	} else {
