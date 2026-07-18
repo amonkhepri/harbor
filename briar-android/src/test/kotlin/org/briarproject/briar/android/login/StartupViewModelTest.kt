@@ -96,6 +96,23 @@ class StartupViewModelTest {
 	}
 
 	@Test
+	fun testConfirmationUsesSubmittedIdentifierAfterInFlightEdit() {
+		val executor = QueuedExecutor()
+		viewModel = createViewModel(executor)
+		viewModel.setTelegramLoginIdentifier(" submitted ")
+
+		viewModel.submitTelegramLoginIdentifier()
+		viewModel.setTelegramLoginIdentifier("unverified")
+		executor.runNext()
+		viewModel.completeTelegramLoginConfirmation()
+
+		val field = StartupViewModel::class.java
+			.getDeclaredField("pendingTelegramLinkedIdentity")
+			.apply { isAccessible = true }
+		assertEquals("submitted", field.get(viewModel))
+	}
+
+	@Test
 	fun testShowTelegramLoginPlaceholderClearsStaleAuthStateBeforeStart() {
 		val executor = QueuedExecutor()
 		viewModel = createViewModel(executor)

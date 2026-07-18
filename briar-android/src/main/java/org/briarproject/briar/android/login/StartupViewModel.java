@@ -80,6 +80,7 @@ public class StartupViewModel extends AndroidViewModel
 	private final MutableLiveData<TelegramAuthState> telegramAuthState =
 			new MutableLiveData<>(TelegramAuthState.CLOSED);
 	private String telegramLoginIdentifier = "";
+	private String submittedTelegramLoginIdentifier = "";
 	private String telegramLoginCode = "";
 	private String telegramLoginPassword = "";
 	private volatile String pendingTelegramLinkedIdentity = "";
@@ -178,7 +179,8 @@ public class StartupViewModel extends AndroidViewModel
 	}
 
 	void showTelegramLoginPlaceholder() {
-		pendingTelegramLinkedIdentity = telegramLoginCode = telegramLoginPassword = "";
+		pendingTelegramLinkedIdentity = submittedTelegramLoginIdentifier =
+				telegramLoginCode = telegramLoginPassword = "";
 		state.setValue(TELEGRAM_LOGIN);
 		telegramAuthState.setValue(TelegramAuthState.CLOSED);
 		runTelegramAuthAction(telegramAuthSession::start);
@@ -219,6 +221,7 @@ public class StartupViewModel extends AndroidViewModel
 	void submitTelegramLoginIdentifier() {
 		telegramLoginCode = telegramLoginPassword = "";
 		String identifier = telegramLoginIdentifier.trim();
+		submittedTelegramLoginIdentifier = identifier;
 		runTelegramAuthAction(() -> telegramAuthSession.submitIdentifier(identifier));
 	}
 
@@ -245,12 +248,12 @@ public class StartupViewModel extends AndroidViewModel
 	}
 
 	void completeTelegramLoginConfirmation() {
-		pendingTelegramLinkedIdentity = telegramLoginIdentifier.trim();
+		pendingTelegramLinkedIdentity = submittedTelegramLoginIdentifier;
 		showPasswordFragment();
 	}
 
 	void showTelegramLoginIdentifierStep() {
-		telegramLoginCode = telegramLoginPassword = "";
+		submittedTelegramLoginIdentifier = telegramLoginCode = telegramLoginPassword = "";
 		telegramAuthState.setValue(TelegramAuthState.CLOSED);
 		runTelegramAuthAction(() -> {
 			telegramAuthSession.close();
@@ -269,7 +272,8 @@ public class StartupViewModel extends AndroidViewModel
 	}
 
 	void showPasswordFragment() {
-		telegramLoginIdentifier = telegramLoginCode = telegramLoginPassword = "";
+		telegramLoginIdentifier = submittedTelegramLoginIdentifier =
+				telegramLoginCode = telegramLoginPassword = "";
 		state.setValue(SIGNED_OUT);
 		runTelegramAuthAction(telegramAuthSession::close);
 	}
