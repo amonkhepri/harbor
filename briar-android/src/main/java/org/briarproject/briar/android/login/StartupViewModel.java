@@ -180,6 +180,7 @@ public class StartupViewModel extends AndroidViewModel
 	void showTelegramLoginPlaceholder() {
 		pendingTelegramLinkedIdentity = telegramLoginCode = telegramLoginPassword = "";
 		state.setValue(TELEGRAM_LOGIN);
+		telegramAuthState.setValue(TelegramAuthState.CLOSED);
 		runTelegramAuthAction(telegramAuthSession::start);
 	}
 
@@ -250,6 +251,7 @@ public class StartupViewModel extends AndroidViewModel
 
 	void showTelegramLoginIdentifierStep() {
 		telegramLoginCode = telegramLoginPassword = "";
+		telegramAuthState.setValue(TelegramAuthState.CLOSED);
 		runTelegramAuthAction(() -> {
 			telegramAuthSession.close();
 			telegramAuthSession.start();

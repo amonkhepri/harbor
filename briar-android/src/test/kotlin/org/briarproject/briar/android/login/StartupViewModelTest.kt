@@ -96,6 +96,39 @@ class StartupViewModelTest {
 	}
 
 	@Test
+	fun testShowTelegramLoginPlaceholderClearsStaleAuthStateBeforeStart() {
+		val executor = QueuedExecutor()
+		viewModel = createViewModel(executor)
+		telegramAuthSession.currentAuthState = TelegramAuthState.READY
+
+		viewModel.showTelegramLoginPlaceholder()
+
+		assertEquals(TelegramAuthState.CLOSED, getOrAwaitValue(viewModel.telegramAuthState))
+		assertEquals(0, telegramAuthSession.startCalls)
+		executor.runNext()
+		assertEquals(TelegramAuthState.IDENTIFIER_ENTRY, getOrAwaitValue(viewModel.telegramAuthState))
+	}
+
+	@Test
+	fun testShowTelegramLoginIdentifierStepClearsConfirmationBeforeRestart() {
+		val executor = QueuedExecutor()
+		viewModel = createViewModel(executor)
+		telegramAuthSession.currentAuthState = TelegramAuthState.CODE_ENTRY
+		viewModel.showTelegramLoginPlaceholder()
+		executor.runNext()
+		viewModel.submitTelegramLoginIdentifier()
+		executor.runNext()
+
+		viewModel.showTelegramLoginIdentifierStep()
+
+		assertEquals(TelegramAuthState.CLOSED, getOrAwaitValue(viewModel.telegramAuthState))
+		assertEquals(0, telegramAuthSession.closeCalls)
+		executor.runNext()
+		assertEquals(TelegramAuthState.IDENTIFIER_ENTRY, getOrAwaitValue(viewModel.telegramAuthState))
+		assertEquals(1, telegramAuthSession.closeCalls)
+	}
+
+	@Test
 	fun testShowPasswordFragmentClearsTelegramIdentifierOnFallback() {
 		viewModel.setTelegramLoginIdentifier(" +123456789 ")
 		viewModel.setTelegramLoginCode("12345")
