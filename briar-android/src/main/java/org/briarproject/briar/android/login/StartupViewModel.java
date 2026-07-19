@@ -26,6 +26,7 @@ import org.briarproject.briar.api.telegram.TelegramAuthState;
 import org.briarproject.nullsafety.NotNullByDefault;
 
 import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Logger;
 
 import javax.inject.Inject;
@@ -69,6 +70,7 @@ public class StartupViewModel extends AndroidViewModel
 	@IoExecutor
 	private final Executor ioExecutor;
 	private final Executor telegramAuthExecutor;
+	private final AtomicInteger telegramAuthGeneration = new AtomicInteger();
 
 	private final MutableLiveEvent<DecryptionResult> passwordValidated =
 			new MutableLiveEvent<>();
@@ -112,6 +114,7 @@ public class StartupViewModel extends AndroidViewModel
 
 	@Override
 	protected void onCleared() {
+		telegramAuthGeneration.incrementAndGet();
 		telegramAuthExecutor.execute(telegramAuthSession::close);
 		eventBus.removeListener(this);
 	}
@@ -179,6 +182,7 @@ public class StartupViewModel extends AndroidViewModel
 	}
 
 	void showTelegramLoginPlaceholder() {
+		telegramAuthGeneration.incrementAndGet();
 		pendingTelegramLinkedIdentity = submittedTelegramLoginIdentifier =
 				telegramLoginCode = telegramLoginPassword = "";
 		state.setValue(TELEGRAM_LOGIN);
@@ -258,6 +262,7 @@ public class StartupViewModel extends AndroidViewModel
 	}
 
 	void showTelegramLoginIdentifierStep() {
+		telegramAuthGeneration.incrementAndGet();
 		submittedTelegramLoginIdentifier = telegramLoginCode = telegramLoginPassword = "";
 		telegramAuthState.setValue(TelegramAuthState.CLOSED);
 		runTelegramAuthAction(() -> {
@@ -278,6 +283,7 @@ public class StartupViewModel extends AndroidViewModel
 	}
 
 	void showPasswordFragment() {
+		telegramAuthGeneration.incrementAndGet();
 		telegramLoginIdentifier = submittedTelegramLoginIdentifier =
 				telegramLoginCode = telegramLoginPassword = "";
 		state.setValue(SIGNED_OUT);
@@ -285,7 +291,9 @@ public class StartupViewModel extends AndroidViewModel
 	}
 
 	private void runTelegramAuthAction(Runnable action) {
+		int generation = telegramAuthGeneration.get();
 		telegramAuthExecutor.execute(() -> {
+			if (generation != telegramAuthGeneration.get()) return;
 			action.run();
 			telegramAuthState.postValue(telegramAuthSession.getCurrentState());
 		});

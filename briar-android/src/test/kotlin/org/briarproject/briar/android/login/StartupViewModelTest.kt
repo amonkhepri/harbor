@@ -102,6 +102,23 @@ class StartupViewModelTest {
 	}
 
 	@Test
+	fun testTelegramAuthActionQueuedBeforeCancelIsSkipped() {
+		val executor = QueuedExecutor()
+		viewModel = createViewModel(executor)
+		viewModel.setTelegramLoginIdentifier("+123456789")
+
+		viewModel.submitTelegramLoginIdentifier()
+		viewModel.showPasswordFragment()
+		executor.runNext()
+
+		assertEquals(0, telegramAuthSession.identifierSubmitCalls)
+		assertEquals(0, telegramAuthSession.closeCalls)
+		executor.runNext()
+		assertEquals(1, telegramAuthSession.closeCalls)
+		assertEquals(TelegramAuthState.CLOSED, getOrAwaitValue(viewModel.telegramAuthState))
+	}
+
+	@Test
 	fun testConfirmationUsesSubmittedIdentifierAfterInFlightEdit() {
 		val executor = QueuedExecutor()
 		viewModel = createViewModel(executor)
