@@ -119,6 +119,19 @@ class StartupViewModelTest {
 	}
 
 	@Test
+	fun testTelegramAuthActionCancelledInFlightDoesNotPostStaleState() {
+		val observedStates = mutableListOf<TelegramAuthState>()
+		viewModel.telegramAuthState.observeForever(observedStates::add)
+		telegramAuthSession.onIdentifierSubmitted = viewModel::showPasswordFragment
+
+		viewModel.submitTelegramLoginIdentifier()
+
+		assertEquals(1, telegramAuthSession.identifierSubmitCalls)
+		assertTrue(TelegramAuthState.CODE_ENTRY !in observedStates)
+		assertEquals(TelegramAuthState.CLOSED, observedStates.last())
+	}
+
+	@Test
 	fun testConfirmationUsesSubmittedIdentifierAfterInFlightEdit() {
 		val executor = QueuedExecutor()
 		viewModel = createViewModel(executor)
@@ -288,6 +301,7 @@ class StartupViewModelTest {
 		var closeCalls = 0
 		var startCalls = 0
 		var identifierSubmitCalls = 0
+		var onIdentifierSubmitted: () -> Unit = {}
 		var resendCodeCalls = 0
 		var stateAfterResend = TelegramAuthState.CODE_ENTRY
 		var detailAfterResend = RecoverableErrorDetail.NONE
@@ -306,6 +320,7 @@ class StartupViewModelTest {
 		override fun submitIdentifier(identifier: String) {
 			identifierSubmitCalls++
 			currentAuthState = TelegramAuthState.CODE_ENTRY
+			onIdentifierSubmitted()
 		}
 
 		override fun submitCode(code: String) {

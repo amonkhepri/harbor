@@ -295,6 +295,7 @@ public class StartupViewModel extends AndroidViewModel
 		telegramAuthExecutor.execute(() -> {
 			if (generation != telegramAuthGeneration.get()) return;
 			action.run();
+			if (generation != telegramAuthGeneration.get()) return;
 			telegramAuthState.postValue(telegramAuthSession.getCurrentState());
 		});
 	}
