@@ -113,6 +113,24 @@ class TelegramLoginPlaceholderFragmentTest {
 	}
 
 	@Test
+	fun testRejectedCodeResendKeepsCodeStepVisible() {
+		telegramAuthSession.stateAfterSubmitIdentifier = TelegramAuthState.CODE_ENTRY
+		composeRule.onNodeWithTag(TELEGRAM_LOGIN_IDENTIFIER_TAG)
+			.performTextInput("+123456789")
+		composeRule.onNodeWithTag(TELEGRAM_LOGIN_CONTINUE_TAG).performClick()
+		composeRule.waitForIdle()
+
+		telegramAuthSession.stateAfterResend = TelegramAuthState.RECOVERABLE_ERROR
+		telegramAuthSession.detailAfterResend = RecoverableErrorDetail.CODE_RESEND_FAILED
+		composeRule.onNodeWithTag(TELEGRAM_LOGIN_CODE_RESEND_TAG).performClick()
+		composeRule.waitForIdle()
+
+		assertLoginMessage(R.string.telegram_connector_login_code_resend_failed_message)
+		composeRule.onNodeWithTag(TELEGRAM_LOGIN_CODE_STEP_TAG).assertIsDisplayed()
+		composeRule.onAllNodesWithTag(TELEGRAM_LOGIN_IDENTIFIER_STEP_TAG).assertCountEquals(0)
+	}
+
+	@Test
 	fun testConfirmationBackClearsStaleCodeFieldBeforeReopen() {
 		telegramAuthSession.stateAfterSubmitIdentifier =
 			TelegramAuthState.CODE_ENTRY
@@ -292,6 +310,8 @@ class TelegramLoginPlaceholderFragmentTest {
 		var detailAfterSubmitIdentifier = RecoverableErrorDetail.NONE
 		var stateAfterSubmitCode = TelegramAuthState.CODE_ENTRY
 		var detailAfterSubmitCode = RecoverableErrorDetail.NONE
+		var stateAfterResend = TelegramAuthState.CODE_ENTRY
+		var detailAfterResend = RecoverableErrorDetail.NONE
 		var lastIdentifier = ""
 		var identifierSubmitCalls = 0
 		var resendCodeCalls = 0
@@ -320,8 +340,8 @@ class TelegramLoginPlaceholderFragmentTest {
 
 		override fun resendCode() {
 			resendCodeCalls++
-			currentAuthState = TelegramAuthState.CODE_ENTRY
-			currentRecoverableErrorDetail = RecoverableErrorDetail.NONE
+			currentAuthState = stateAfterResend
+			currentRecoverableErrorDetail = detailAfterResend
 		}
 
 		override fun submitPassword(password: String) = Unit

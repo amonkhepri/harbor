@@ -188,7 +188,10 @@ internal fun TelegramLoginScreen(viewModel: StartupViewModel) {
 			when {
 				authState == TelegramAuthState.CODE_ENTRY ||
 					authState == TelegramAuthState.RECOVERABLE_ERROR &&
-					errorDetail == RecoverableErrorDetail.INVALID_CODE -> {
+					(
+						errorDetail == RecoverableErrorDetail.INVALID_CODE ||
+							errorDetail == RecoverableErrorDetail.CODE_RESEND_FAILED
+						) -> {
 					CodeStep(
 						code = code,
 						onCodeChange = {
