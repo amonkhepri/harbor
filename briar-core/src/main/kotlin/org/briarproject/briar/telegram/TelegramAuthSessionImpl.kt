@@ -277,17 +277,8 @@ class ReflectiveTelegramTdlibLoginClient(
 	@Throws(InterruptedException::class)
 	private fun awaitAuthorizationUpdate(
 		pendingAuthorizationUpdate: PendingAuthorizationUpdate,
-	): String {
-		if (!pendingAuthorizationUpdate.updateReceived.await(
-				authorizationUpdateTimeoutMs,
-				TimeUnit.MILLISECONDS,
-			)
-		) {
-			return ""
-		}
-		return pendingAuthorizationUpdate.authorizationStateClassName.get().also {
-			lastAuthorizationStateClassName = it
-		}
+	): String = (pendingAuthorizationUpdate.await(authorizationUpdateTimeoutMs) ?: "").also {
+		lastAuthorizationStateClassName = it
 	}
 
 	@Throws(ReflectiveOperationException::class)

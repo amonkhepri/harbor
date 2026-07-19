@@ -1,12 +1,13 @@
 package org.briarproject.briar.telegram
 
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 import java.util.Locale
 
 internal class PendingAuthorizationUpdate(private val acceptedClassName: String? = null) {
-	val authorizationStateClassName = AtomicReference("")
-	val updateReceived = CountDownLatch(1)
+	private val authorizationStateClassName = AtomicReference("")
+	private val updateReceived = CountDownLatch(1)
 
 	fun capture(className: String) {
 		if (className.isEmpty() ||
@@ -18,6 +19,13 @@ internal class PendingAuthorizationUpdate(private val acceptedClassName: String?
 		if (authorizationStateClassName.compareAndSet("", className)) {
 			updateReceived.countDown()
 		}
+	}
+
+	@Throws(InterruptedException::class)
+	fun await(timeoutMs: Long): String? = if (updateReceived.await(timeoutMs, TimeUnit.MILLISECONDS)) {
+		authorizationStateClassName.get()
+	} else {
+		null
 	}
 }
 

@@ -139,15 +139,7 @@ class ReflectiveTelegramTdlibMessageClient(
 	@Throws(InterruptedException::class)
 	private fun awaitPreparedAuthorizationStateClassName(
 		pendingAuthorizationUpdate: PendingAuthorizationUpdate,
-	): String = if (pendingAuthorizationUpdate.updateReceived.await(
-			requestTimeoutMs,
-			TimeUnit.MILLISECONDS,
-		)
-	) {
-		pendingAuthorizationUpdate.authorizationStateClassName.get()
-	} else {
-		""
-	}
+	): String = pendingAuthorizationUpdate.await(requestTimeoutMs) ?: ""
 
 	@Throws(ReflectiveOperationException::class)
 	private fun createTdlibClient(
