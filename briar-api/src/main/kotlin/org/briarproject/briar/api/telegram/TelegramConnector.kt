@@ -22,7 +22,7 @@ interface TelegramConnector : ReadOnlyConnector {
 		threadId: String,
 		limit: Int,
 	): ConnectorMessageReadResult {
-		val chatId = threadId.toLongOrNull() ?: return ConnectorMessageReadResult.Success(emptyList())
+		val chatId = threadId.toLongOrNull() ?: return ConnectorMessageReadResult.LoadFailed
 		return getRecentMessageReadResult(chatId, limit)
 	}
 }

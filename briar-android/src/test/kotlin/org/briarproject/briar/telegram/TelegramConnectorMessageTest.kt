@@ -103,11 +103,11 @@ class TelegramConnectorMessageTest {
 	}
 
 	@Test
-	fun testReadOnlyConnectorReturnsEmptyResultForNonNumericThreadId() {
+	fun testReadOnlyConnectorRejectsNonNumericThreadId() {
 		val connector = FakeTelegramConnector()
 
 		assertEquals(
-			ConnectorMessageReadResult.Success(emptyList<ConnectorMessage>()),
+			ConnectorMessageReadResult.LoadFailed,
 			connector.getRecentMessageReadResult("thread-1", 2),
 		)
 		assertEquals(Triple(0, 0L, 0), connector.lastRequestLimits())
