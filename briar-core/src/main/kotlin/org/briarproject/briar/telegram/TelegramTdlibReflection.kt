@@ -65,15 +65,11 @@ internal fun createReflectiveTdlibClient(onUpdate: (Any?) -> Unit): Any {
 }
 
 internal data class ReflectiveTdlibSendResult(val completed: Boolean, val value: Any?)
-
 private object NoTdlibResult
 
 @Throws(ReflectiveOperationException::class)
 internal fun closeReflectiveTdlibClient(client: Any) {
-	val functionClass = tdApiClass("Function")
-	val resultHandlerClass = Class.forName("org.drinkless.tdlib.Client\$ResultHandler")
-	client.javaClass.getMethod("send", functionClass, resultHandlerClass)
-		.invoke(client, createTdApiObject("Close"), null)
+	client.sendReflectively(createTdApiObject("Close"), null)
 }
 
 @Throws(ReflectiveOperationException::class, InterruptedException::class)
@@ -84,7 +80,6 @@ internal fun sendReflectiveTdlibRequest(
 ): ReflectiveTdlibSendResult {
 	val result = AtomicReference<Any?>(NoTdlibResult)
 	val resultReceived = CountDownLatch(1)
-	val functionClass = tdApiClass("Function")
 	val resultHandlerClass = Class.forName("org.drinkless.tdlib.Client\$ResultHandler")
 	val resultHandler = Proxy.newProxyInstance(
 		resultHandlerClass.classLoader,
@@ -98,14 +93,17 @@ internal fun sendReflectiveTdlibRequest(
 		}
 		null
 	}
-	client.javaClass.getMethod("send", functionClass, resultHandlerClass)
-		.invoke(client, request, resultHandler)
+	client.sendReflectively(request, resultHandler)
 	return if (resultReceived.await(timeoutMs, TimeUnit.MILLISECONDS)) {
 		ReflectiveTdlibSendResult(true, result.get())
 	} else {
 		ReflectiveTdlibSendResult(false, null)
 	}
 }
+
+private fun Any.sendReflectively(function: Any, resultHandler: Any?) = javaClass
+	.getMethod("send", tdApiClass("Function"), Class.forName(TDLIB_RESULT_HANDLER))
+	.invoke(this, function, resultHandler)
 
 @Throws(ReflectiveOperationException::class)
 internal fun getAuthorizationStateClassName(update: Any?): String {
@@ -160,5 +158,6 @@ internal fun setFieldIfPresent(target: Any, name: String, value: Any?) {
 internal fun hasText(value: String): Boolean = value.trim().isNotEmpty()
 
 private val CAMEL_CASE_BOUNDARY = Regex("(?<=[a-z0-9])(?=[A-Z])")
+private const val TDLIB_RESULT_HANDLER = "org.drinkless.tdlib.Client\$ResultHandler"
 private const val UNKNOWN_CODE_DELIVERY_STATUS =
 	"current=UNKNOWN next=UNKNOWN timeout_seconds=UNKNOWN"
