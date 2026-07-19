@@ -27,7 +27,20 @@ import org.briarproject.briar.api.telegram.TelegramConnector
 import org.briarproject.nullsafety.MethodsNotNullByDefault
 import org.briarproject.nullsafety.ParametersNotNullByDefault
 import java.util.concurrent.Executor
+import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
+
+internal class ConnectorConversationLoadOwner {
+	private val generation = AtomicLong()
+
+	fun begin(): Long = generation.incrementAndGet()
+
+	fun owns(loadGeneration: Long): Boolean = generation.get() == loadGeneration
+
+	fun invalidate() {
+		generation.incrementAndGet()
+	}
+}
 
 @MethodsNotNullByDefault
 @ParametersNotNullByDefault
@@ -82,6 +95,7 @@ class TelegramConversationActivity : BriarActivity() {
 	private lateinit var list: BriarRecyclerView
 	private var chatId = 0L
 	private var messageState = ConnectorConversationMessageListState()
+	private val loadOwner = ConnectorConversationLoadOwner()
 
 	override fun injectActivity(component: ActivityComponent) {
 		component.inject(this)
@@ -136,9 +150,15 @@ class TelegramConversationActivity : BriarActivity() {
 		return super.onOptionsItemSelected(item)
 	}
 
+	override fun onDestroy() {
+		loadOwner.invalidate()
+		super.onDestroy()
+	}
+
 	private fun loadMessages() {
+		val loadGeneration = loadOwner.begin()
 		if (!hasValidChatId(chatId)) {
-			showMessages(ConnectorConversationMessageListState(), LOAD_FAILED)
+			showMessages(loadGeneration, ConnectorConversationMessageListState(), LOAD_FAILED)
 			return
 		}
 		submitMessageState(
@@ -149,14 +169,20 @@ class TelegramConversationActivity : BriarActivity() {
 			),
 		)
 		ioExecutor.execute {
+			if (!loadOwner.owns(loadGeneration)) return@execute
 			if (!readOnlyConnector.isEnabled()) {
-				showMessages(ConnectorConversationMessageListState(), DISABLED)
+				showMessages(loadGeneration, ConnectorConversationMessageListState(), DISABLED)
 				return@execute
 			}
 			if (!readOnlyConnector.isAuthorized()) {
-				showMessages(ConnectorConversationMessageListState(), ACCOUNT_UNAVAILABLE)
+				showMessages(
+					loadGeneration,
+					ConnectorConversationMessageListState(),
+					ACCOUNT_UNAVAILABLE,
+				)
 				return@execute
 			}
+			if (!loadOwner.owns(loadGeneration)) return@execute
 			try {
 				val result = readOnlyConnector.getRecentMessageReadResult(
 					chatId.toString(),
@@ -167,23 +193,33 @@ class TelegramConversationActivity : BriarActivity() {
 						val state = ConnectorConversationMessageListState(
 							ConnectorConversationMessageItem.fromMessages(result.messages),
 						)
-						showMessages(state)
+						showMessages(loadGeneration, state)
 					}
 					ConnectorMessageReadResult.LoadFailed -> {
-						showMessages(ConnectorConversationMessageListState(), LOAD_FAILED)
+						showMessages(
+							loadGeneration,
+							ConnectorConversationMessageListState(),
+							LOAD_FAILED,
+						)
 					}
 				}
 			} catch (e: RuntimeException) {
-				showMessages(ConnectorConversationMessageListState(), LOAD_FAILED)
+				showMessages(
+					loadGeneration,
+					ConnectorConversationMessageListState(),
+					LOAD_FAILED,
+				)
 			}
 		}
 	}
 
 	private fun showMessages(
+		loadGeneration: Long,
 		state: ConnectorConversationMessageListState,
 		availabilityState: ConnectorConversationAvailabilityState = EMPTY,
 	) {
 		runOnUiThread {
+			if (!loadOwner.owns(loadGeneration)) return@runOnUiThread
 			submitMessageState(
 				state.withAvailabilityState(
 					availabilityState,
