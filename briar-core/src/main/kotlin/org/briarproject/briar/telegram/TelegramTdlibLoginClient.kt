@@ -7,6 +7,7 @@ interface TelegramTdlibLoginClient {
 	fun start(): TelegramAuthState
 	fun getRecoverableErrorDetail(): RecoverableErrorDetail
 	fun submitIdentifier(identifier: String): TelegramAuthState
+	fun resendCode(): TelegramAuthState
 	fun submitCode(code: String): TelegramAuthState
 	fun submitPassword(password: String): TelegramAuthState
 	fun close(): TelegramAuthState

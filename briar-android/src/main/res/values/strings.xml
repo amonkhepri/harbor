@@ -62,6 +62,7 @@
 	<string name="telegram_connector_login_code_hint">Telegram login code</string>
 	<string name="telegram_connector_login_password_hint">Telegram password or 2FA code</string>
 	<string name="telegram_connector_login_continue_button">Continue</string>
+	<string name="telegram_connector_login_resend_button">Send code another way</string>
 	<string name="telegram_connector_login_confirmation_message">Telegram phone number staged for internal Harbor testing: %1$s</string>
 	<string name="telegram_connector_login_retry_message">Telegram login hit a recoverable issue in this build. Check your phone number or local TDLib setup, then continue to retry. You can also use Harbor password instead.</string>
 	<string name="telegram_connector_login_confirmation_continue_button">Return to Harbor sign-in</string>

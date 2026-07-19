@@ -181,6 +181,7 @@ class ReflectiveTelegramTdlibLoginClientTest {
 		private const val SET_PARAMETERS = "SetTdlibParameters"
 		private const val SET_PHONE = "SetAuthenticationPhoneNumber"
 		private const val CHECK_CODE = "CheckAuthenticationCode"
+		private const val RESEND_CODE = "ResendAuthenticationCode"
 		private const val CHECK_PASSWORD = "CheckAuthenticationPassword"
 		private const val CLOSE = "Close"
 		private val TDLIB_KEY = ByteArray(32) { (it + 1).toByte() }
@@ -209,6 +210,15 @@ class ReflectiveTelegramTdlibLoginClientTest {
 			client.submitIdentifier("test-login-identifier"),
 		)
 		assertPhoneRequestsAndClose(client, SET_PARAMETERS, SET_PHONE)
+	}
+
+	@Test
+	fun testResendCodeKeepsClientInCodeEntry() {
+		val client = createClient()
+
+		startToCodeEntry(client)
+		client.assertSuccessfulState(TelegramAuthState.CODE_ENTRY, client.resendCode())
+		assertSentRequestsAndClose(client, SET_PARAMETERS, SET_PHONE, RESEND_CODE)
 	}
 
 	@Test

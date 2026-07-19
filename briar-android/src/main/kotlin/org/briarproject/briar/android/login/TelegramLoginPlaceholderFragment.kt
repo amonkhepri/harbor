@@ -26,6 +26,7 @@ import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
@@ -68,6 +69,7 @@ const val TELEGRAM_LOGIN_CODE_TAG = "telegram_login_code"
 const val TELEGRAM_LOGIN_PASSWORD_TAG = "telegram_login_password"
 const val TELEGRAM_LOGIN_CONTINUE_TAG = "btn_telegram_login_continue"
 const val TELEGRAM_LOGIN_CODE_CONTINUE_TAG = "btn_telegram_login_code_continue"
+const val TELEGRAM_LOGIN_CODE_RESEND_TAG = "btn_telegram_login_code_resend"
 const val TELEGRAM_LOGIN_PASSWORD_CONTINUE_TAG = "btn_telegram_login_password_continue"
 const val TELEGRAM_LOGIN_CONFIRMATION_CONTINUE_TAG =
 	"btn_telegram_login_confirmation_continue"
@@ -195,6 +197,7 @@ internal fun TelegramLoginScreen(viewModel: StartupViewModel) {
 						},
 						enabled = hasCode,
 						onContinue = viewModel::submitTelegramLoginCode,
+						onResend = viewModel::resendTelegramLoginCode,
 					)
 				}
 				authState == TelegramAuthState.PASSWORD_ENTRY ||
@@ -325,6 +328,7 @@ private fun CodeStep(
 	onCodeChange: (String) -> Unit,
 	enabled: Boolean,
 	onContinue: () -> Unit,
+	onResend: () -> Unit,
 ) {
 	Column(
 		modifier = Modifier
@@ -353,6 +357,15 @@ private fun CodeStep(
 				.testTag(TELEGRAM_LOGIN_CODE_CONTINUE_TAG),
 		) {
 			Text(stringResource(R.string.telegram_connector_login_continue_button))
+		}
+		Spacer(Modifier.height(8.dp))
+		OutlinedButton(
+			onClick = onResend,
+			modifier = Modifier
+				.fillMaxWidth()
+				.testTag(TELEGRAM_LOGIN_CODE_RESEND_TAG),
+		) {
+			Text(stringResource(R.string.telegram_connector_login_resend_button))
 		}
 	}
 }

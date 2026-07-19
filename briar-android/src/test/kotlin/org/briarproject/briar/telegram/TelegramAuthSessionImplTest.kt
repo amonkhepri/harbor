@@ -16,6 +16,8 @@ class TelegramAuthSessionImplTest {
 		assertDisabledSessionClosed(session)
 		session.submitIdentifier("test-login-identifier")
 		assertDisabledSessionClosed(session)
+		session.resendCode()
+		assertDisabledSessionClosed(session)
 		session.submitCode("12345")
 		assertDisabledSessionClosed(session)
 		session.submitPassword("test-password")

@@ -28,6 +28,10 @@ class TelegramAuthSessionImpl(private val tdlibLoginClient: TelegramTdlibLoginCl
 		currentState = tdlibLoginClient.submitIdentifier(identifier)
 	}
 
+	override fun resendCode() {
+		currentState = tdlibLoginClient.resendCode()
+	}
+
 	override fun submitCode(code: String) {
 		currentState = tdlibLoginClient.submitCode(code)
 	}
@@ -47,6 +51,8 @@ class DisabledTelegramTdlibLoginClient : TelegramTdlibLoginClient {
 	override fun getRecoverableErrorDetail(): RecoverableErrorDetail = RecoverableErrorDetail.NONE
 
 	override fun submitIdentifier(identifier: String): TelegramAuthState = TelegramAuthState.CLOSED
+
+	override fun resendCode(): TelegramAuthState = TelegramAuthState.CLOSED
 
 	override fun submitCode(code: String): TelegramAuthState = TelegramAuthState.CLOSED
 
@@ -155,6 +161,33 @@ class ReflectiveTelegramTdlibLoginClient(
 		createRequest = ::createCheckAuthenticationCodeRequest,
 		invalidDetail = RecoverableErrorDetail.INVALID_CODE,
 	)
+
+	override fun resendCode(): TelegramAuthState {
+		if (tdlibClient == null || lastAuthorizationStateClassName != "AuthorizationStateWaitCode") {
+			return recoverableError(RecoverableErrorDetail.NONE)
+		}
+		return try {
+			val authorizationUpdate = prepareAuthorizationUpdate()
+			when (sendForResult(createTdApiObject("ResendAuthenticationCode"))) {
+				CommandResult.OK -> mapAuthorizationStateClassName(
+					awaitPreparedAuthorizationStateClassName(authorizationUpdate),
+				)
+				CommandResult.ERROR -> {
+					if (pendingAuthorizationUpdate === authorizationUpdate) {
+						pendingAuthorizationUpdate = null
+					}
+					clearRecoverableErrorDetail(TelegramAuthState.CODE_ENTRY)
+				}
+				CommandResult.TIMEOUT -> recoverableError(RecoverableErrorDetail.NONE)
+			}
+		} catch (e: ReflectiveOperationException) {
+			recoverableErrorAfterClientFailure()
+		} catch (e: LinkageError) {
+			recoverableErrorAfterClientFailure()
+		} catch (e: InterruptedException) {
+			recoverableErrorAfterClientFailure(interrupted = true)
+		}
+	}
 
 	override fun submitPassword(password: String): TelegramAuthState = submitCredential(
 		credential = password,

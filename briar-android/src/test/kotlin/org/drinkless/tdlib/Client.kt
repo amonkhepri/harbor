@@ -59,6 +59,10 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 				emitResult(resultHandler, TdApi.Ok(), authenticationCodeResultDelayMs)
 				emitAuthorizationState(authorizationStateAfterCode(request.code))
 			}
+			is TdApi.ResendAuthenticationCode -> {
+				resultHandler?.onResult(TdApi.Ok())
+				emitAuthorizationState(TdApi.AuthorizationStateWaitCode())
+			}
 			is TdApi.CheckAuthenticationPassword -> {
 				if (request.password.contains("invalid")) {
 					resultHandler?.onResult(TdApi.Error())

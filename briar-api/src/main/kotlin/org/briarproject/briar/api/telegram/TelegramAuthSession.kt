@@ -18,6 +18,7 @@ interface TelegramAuthSession {
 	fun getRecoverableErrorDetail(): RecoverableErrorDetail
 	fun start()
 	fun submitIdentifier(identifier: String)
+	fun resendCode()
 	fun submitCode(code: String)
 	fun submitPassword(password: String)
 	fun close()

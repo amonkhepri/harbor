@@ -236,6 +236,11 @@ public class StartupViewModel extends AndroidViewModel
 		});
 	}
 
+	void resendTelegramLoginCode() {
+		telegramLoginCode = "";
+		runTelegramAuthAction(telegramAuthSession::resendCode);
+	}
+
 	void submitTelegramLoginPassword() {
 		String password = telegramLoginPassword;
 		runTelegramAuthAction(() -> {

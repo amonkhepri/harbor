@@ -15,6 +15,7 @@ import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.text.AnnotatedString
 import org.briarproject.bramble.api.FeatureFlags
@@ -96,8 +97,11 @@ class TelegramLoginPlaceholderFragmentTest {
 			TelegramAuthState.CODE_ENTRY,
 			getOrAwaitValue(viewModel.getTelegramAuthState()),
 		)
+		composeRule.onNodeWithTag(TELEGRAM_LOGIN_CODE_RESEND_TAG).performClick()
+		composeRule.waitForIdle()
+		assertEquals(1, telegramAuthSession.resendCodeCalls)
 
-		composeRule.onNodeWithTag(TELEGRAM_LOGIN_BACK_TAG).performClick()
+		composeRule.onNodeWithTag(TELEGRAM_LOGIN_BACK_TAG).performScrollTo().performClick()
 		composeRule.waitForIdle()
 
 		assertEquals(1, telegramAuthSession.closeCalls)
@@ -290,6 +294,7 @@ class TelegramLoginPlaceholderFragmentTest {
 		var detailAfterSubmitCode = RecoverableErrorDetail.NONE
 		var lastIdentifier = ""
 		var identifierSubmitCalls = 0
+		var resendCodeCalls = 0
 		var closeCalls = 0
 
 		override fun getCurrentState(): TelegramAuthState = currentAuthState
@@ -311,6 +316,12 @@ class TelegramLoginPlaceholderFragmentTest {
 		override fun submitCode(code: String) {
 			currentAuthState = stateAfterSubmitCode
 			currentRecoverableErrorDetail = detailAfterSubmitCode
+		}
+
+		override fun resendCode() {
+			resendCodeCalls++
+			currentAuthState = TelegramAuthState.CODE_ENTRY
+			currentRecoverableErrorDetail = RecoverableErrorDetail.NONE
 		}
 
 		override fun submitPassword(password: String) = Unit

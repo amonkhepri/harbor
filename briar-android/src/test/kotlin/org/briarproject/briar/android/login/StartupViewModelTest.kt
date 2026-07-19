@@ -79,6 +79,11 @@ class StartupViewModelTest {
 		executor.runNext()
 		assertEquals(TelegramAuthState.CODE_ENTRY, getOrAwaitValue(viewModel.telegramAuthState))
 
+		viewModel.resendTelegramLoginCode()
+		assertEquals(0, telegramAuthSession.resendCodeCalls)
+		executor.runNext()
+		assertEquals(TelegramAuthState.CODE_ENTRY, getOrAwaitValue(viewModel.telegramAuthState))
+
 		viewModel.submitTelegramLoginCode()
 		assertEquals(0, telegramAuthSession.codeSubmitCalls)
 		executor.runNext()
@@ -254,6 +259,7 @@ class StartupViewModelTest {
 		var closeCalls = 0
 		var startCalls = 0
 		var identifierSubmitCalls = 0
+		var resendCodeCalls = 0
 		var codeSubmitCalls = 0
 		var passwordSubmitCalls = 0
 
@@ -274,6 +280,11 @@ class StartupViewModelTest {
 		override fun submitCode(code: String) {
 			codeSubmitCalls++
 			currentAuthState = TelegramAuthState.PASSWORD_ENTRY
+		}
+
+		override fun resendCode() {
+			resendCodeCalls++
+			currentAuthState = TelegramAuthState.CODE_ENTRY
 		}
 
 		override fun submitPassword(password: String) {
