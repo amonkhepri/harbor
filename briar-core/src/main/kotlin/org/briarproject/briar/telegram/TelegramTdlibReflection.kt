@@ -4,6 +4,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 import java.util.Locale
+import java.lang.reflect.Proxy
 
 internal class PendingAuthorizationUpdate(private val acceptedClassName: String? = null) {
 	private val authorizationStateClassName = AtomicReference("")
@@ -40,6 +41,27 @@ internal fun tdlibClientClassExists(): Boolean = try {
 	false
 } catch (_: LinkageError) {
 	false
+}
+
+@Throws(ReflectiveOperationException::class)
+internal fun createReflectiveTdlibClient(onUpdate: (Any?) -> Unit): Any {
+	val clientClass = Class.forName("org.drinkless.tdlib.Client")
+	val resultHandlerClass = Class.forName("org.drinkless.tdlib.Client\$ResultHandler")
+	val exceptionHandlerClass = Class.forName("org.drinkless.tdlib.Client\$ExceptionHandler")
+	val updateHandler = Proxy.newProxyInstance(
+		resultHandlerClass.classLoader,
+		arrayOf(resultHandlerClass),
+	) { _, method, args ->
+		if (method.name == "onResult" && args?.size == 1) onUpdate(args[0])
+		null
+	}
+	val create = clientClass.getMethod(
+		"create",
+		resultHandlerClass,
+		exceptionHandlerClass,
+		exceptionHandlerClass,
+	)
+	return create.invoke(null, updateHandler, null, null)
 }
 
 @Throws(ReflectiveOperationException::class)

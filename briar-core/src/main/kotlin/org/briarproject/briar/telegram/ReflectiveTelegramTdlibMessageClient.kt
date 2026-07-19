@@ -144,28 +144,10 @@ class ReflectiveTelegramTdlibMessageClient(
 	@Throws(ReflectiveOperationException::class)
 	private fun createTdlibClient(
 		pendingAuthorizationUpdate: AtomicReference<PendingAuthorizationUpdate?>,
-	): Any {
-		val clientClass = Class.forName("org.drinkless.tdlib.Client")
-		val resultHandlerClass = Class.forName("org.drinkless.tdlib.Client\$ResultHandler")
-		val exceptionHandlerClass = Class.forName("org.drinkless.tdlib.Client\$ExceptionHandler")
-		val updateHandler = Proxy.newProxyInstance(
-			resultHandlerClass.classLoader,
-			arrayOf(resultHandlerClass),
-		) { _, method, args ->
-			if (method.name == "onResult" && args != null && args.size == 1) {
-				val className = getAuthorizationStateClassName(args[0])
-				val pendingUpdate = pendingAuthorizationUpdate.get()
-				pendingUpdate?.capture(className)
-			}
-			null
-		}
-		val create = clientClass.getMethod(
-			"create",
-			resultHandlerClass,
-			exceptionHandlerClass,
-			exceptionHandlerClass,
-		)
-		return create.invoke(null, updateHandler, null, null)
+	): Any = createReflectiveTdlibClient { update ->
+		val className = getAuthorizationStateClassName(update)
+		val pendingUpdate = pendingAuthorizationUpdate.get()
+		pendingUpdate?.capture(className)
 	}
 
 	@Throws(ReflectiveOperationException::class)

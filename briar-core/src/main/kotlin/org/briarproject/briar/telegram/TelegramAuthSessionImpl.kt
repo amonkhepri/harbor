@@ -285,36 +285,18 @@ class ReflectiveTelegramTdlibLoginClient(
 	private fun createTdlibClient(): Any {
 		val clientGeneration = ++nextClientGeneration
 		activeClientGeneration = clientGeneration
-		val clientClass = Class.forName("org.drinkless.tdlib.Client")
-		val resultHandlerClass = Class.forName("org.drinkless.tdlib.Client\$ResultHandler")
-		val exceptionHandlerClass = Class.forName("org.drinkless.tdlib.Client\$ExceptionHandler")
-		val updateHandler = Proxy.newProxyInstance(
-			resultHandlerClass.classLoader,
-			arrayOf(resultHandlerClass),
-		) { _, method, args ->
+		return createReflectiveTdlibClient { update ->
 			val pendingAuthorizationUpdate = pendingAuthorizationUpdate
 			if (clientGeneration == activeClientGeneration &&
-				method.name == "onResult" &&
-				args != null &&
-				args.size == 1 &&
 				pendingAuthorizationUpdate != null
 			) {
-				val update = args[0]
 				getTelegramCodeDeliveryStatus(update)?.let {
 					log.info("Telegram auth code delivery: $it")
 				}
 				val className = getAuthorizationStateClassName(update)
 				pendingAuthorizationUpdate.capture(className)
 			}
-			null
 		}
-		val create = clientClass.getMethod(
-			"create",
-			resultHandlerClass,
-			exceptionHandlerClass,
-			exceptionHandlerClass,
-		)
-		return create.invoke(null, updateHandler, null, null)
 	}
 
 	@Throws(ReflectiveOperationException::class)
