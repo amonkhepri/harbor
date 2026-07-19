@@ -5,7 +5,7 @@ import org.briarproject.briar.api.connector.ConnectorMessageReadResult
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult.LoadFailed
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult.Success
 import org.briarproject.briar.api.connector.ConnectorSources
-import org.briarproject.briar.api.telegram.TelegramChat
+import org.briarproject.briar.api.connector.ConnectorThread
 import org.briarproject.briar.api.telegram.TelegramConnector
 import java.io.File
 import java.lang.reflect.Method
@@ -30,7 +30,7 @@ class ReflectiveTelegramTdlibMessageClient(
 
 	override fun isAuthorized(): Boolean = withReadyClient(false) { true }
 
-	override fun getRecentChats(limit: Int): List<TelegramChat> {
+	override fun getRecentThreads(limit: Int): List<ConnectorThread> {
 		val safeLimit = safeLimit(limit)
 		if (safeLimit == 0) return emptyList()
 		return withReadyClient(emptyList()) { client ->
@@ -228,16 +228,17 @@ class ReflectiveTelegramTdlibMessageClient(
 	}
 
 	@Throws(ReflectiveOperationException::class)
-	private fun mapChat(chat: Any): TelegramChat? {
+	private fun mapChat(chat: Any): ConnectorThread? {
 		if (chat.javaClass.simpleName != "Chat") return null
 		val lastMessage = getObjectField(chat, "lastMessage")
 		val lastTextMessage = mapTextMessage(lastMessage)
-		return TelegramChat(
-			id = getLongField(chat, "id"),
+		return ConnectorThread(
+			source = ConnectorSources.TELEGRAM,
+			threadId = getLongField(chat, "id").toString(),
 			title = getStringField(chat, "title"),
-			lastMessageDateSeconds = lastMessage?.let { getIntField(it, "date") } ?: 0,
-			lastMessageText = lastTextMessage?.text.orEmpty(),
-			lastMessageIsOutgoing = lastTextMessage?.isOutgoing ?: false,
+			latestActivityDateSeconds = lastMessage?.let { getIntField(it, "date") } ?: 0,
+			latestMessageText = lastTextMessage?.text.orEmpty(),
+			isLatestMessageOutgoing = lastTextMessage?.isOutgoing ?: false,
 		)
 	}
 

@@ -2,7 +2,7 @@ package org.briarproject.briar.android.contact
 
 import org.briarproject.briar.api.connector.ConnectorSource
 import org.briarproject.briar.api.connector.ConnectorSources
-import org.briarproject.briar.api.telegram.TelegramChat
+import org.briarproject.briar.api.connector.ConnectorThread
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -60,8 +60,9 @@ class InboxThreadMergerTest {
 		latestActivityMillis = latestActivityMillis,
 	)
 
-	private fun telegramItem(text: String = "", outgoing: Boolean = false) =
-		TelegramInboxThreadItem(TelegramChat(7L, "chat", 42, text, outgoing))
+	private fun telegramItem(text: String = "", outgoing: Boolean = false) = TelegramInboxThreadItem(
+		ConnectorThread(ConnectorSources.TELEGRAM, "7", "chat", 42, text, outgoing),
+	)
 
 	private fun assertPreviewState(
 		item: TelegramInboxThreadItem,

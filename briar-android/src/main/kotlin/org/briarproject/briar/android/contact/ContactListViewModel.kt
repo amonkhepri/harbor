@@ -97,11 +97,11 @@ internal class ContactListViewModel @Inject constructor(
 					)
 					return@execute
 				}
-				val chats = telegramConnector.getRecentChats(20)
+				val threads = telegramConnector.getRecentThreads(20)
 				_telegramAvailabilityState.postValue(
-					telegramAvailabilityStateFor(true, true, false, chats.isNotEmpty()),
+					telegramAvailabilityStateFor(true, true, false, threads.isNotEmpty()),
 				)
-				_telegramThreadItems.postValue(chats.map(::TelegramInboxThreadItem))
+				_telegramThreadItems.postValue(threads.map(::TelegramInboxThreadItem))
 			} catch (e: RuntimeException) {
 				_telegramAvailabilityState.postValue(
 					telegramAvailabilityStateFor(true, true, true, false),

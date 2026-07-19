@@ -6,7 +6,6 @@ import org.briarproject.briar.api.connector.ConnectorMessageReadResult.LoadFaile
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult.Success
 import org.briarproject.briar.api.connector.ConnectorSources
 import org.briarproject.briar.api.connector.ConnectorThread
-import org.briarproject.briar.api.telegram.TelegramChat
 import org.briarproject.briar.api.telegram.TelegramConnector
 import org.drinkless.tdlib.Client
 import org.drinkless.tdlib.TdApi
@@ -33,6 +32,21 @@ private fun telegramMessage(
 	messageId,
 )
 
+private fun telegramThread(
+	chatId: Long,
+	title: String,
+	latestActivityDateSeconds: Int,
+	latestMessageText: String = "",
+	isLatestMessageOutgoing: Boolean = false,
+) = ConnectorThread(
+	ConnectorSources.TELEGRAM,
+	chatId.toString(),
+	title,
+	latestActivityDateSeconds,
+	latestMessageText,
+	isLatestMessageOutgoing,
+)
+
 class TelegramConnectorMessageTest {
 	@get:Rule
 	val testFolder = TemporaryFolder()
@@ -56,8 +70,8 @@ class TelegramConnectorMessageTest {
 
 		assertEquals(listOf(false, false), listOf(connector.isEnabled(), connector.isAuthorized()))
 		assertEquals(
-			emptyList<TelegramChat>() to Success(emptyList()),
-			connector.getRecentChats(5) to connector.getRecentMessageReadResult(1L, 5),
+			emptyList<ConnectorThread>() to Success(emptyList()),
+			connector.getRecentThreads(5) to connector.getRecentMessageReadResult(1L, 5),
 		)
 	}
 
@@ -65,7 +79,7 @@ class TelegramConnectorMessageTest {
 	fun testEnabledConnectorExposesReadOnlyConnectorContract() {
 		val connector = FakeTelegramConnector(
 			chats = listOf(
-				TelegramChat(
+				telegramThread(
 					10L,
 					"synthetic",
 					1_700_000_000,
@@ -157,7 +171,7 @@ class TelegramConnectorMessageTest {
 
 		assertEquals(
 			listOf(
-				TelegramChat(
+				telegramThread(
 					10L,
 					"",
 					1_700_000_000,
@@ -168,7 +182,7 @@ class TelegramConnectorMessageTest {
 				listOf(
 					telegramMessage(10L, 20L, 1_700_000_001, false, ""),
 				),
-			client.getRecentChats(3) to readMessages(client, 10L, 3),
+			client.getRecentThreads(3) to readMessages(client, 10L, 3),
 		)
 	}
 
@@ -183,7 +197,7 @@ class TelegramConnectorMessageTest {
 			)
 		}
 
-		assertEquals(listOf(10L, 11L, 12L), client.getRecentChats(3).map { it.id })
+		assertEquals(listOf("10", "11", "12"), client.getRecentThreads(3).map { it.threadId })
 		assertSentRequests(
 			"LoadChats",
 			"GetChats",
@@ -270,8 +284,9 @@ class TelegramConnectorMessageTest {
 		)
 
 		assertEquals(
-			false to (emptyList<TelegramChat>() to LoadFailed),
-			client.isAuthorized() to (client.getRecentChats(1) to client.getRecentMessageReadResult(10L, 1)),
+			false to (emptyList<ConnectorThread>() to LoadFailed),
+			client.isAuthorized() to
+				(client.getRecentThreads(1) to client.getRecentMessageReadResult(10L, 1)),
 		)
 		assertEquals(false, File(tdlibDir, "database").exists())
 	}
@@ -291,9 +306,9 @@ class TelegramConnectorMessageTest {
 			tdlibDirectory = testFolder.newFolder("tdlib-concurrent"),
 			requestTimeoutMs = 2_000L,
 		)
-		val chatsResult = arrayOf<List<TelegramChat>?>(null)
+		val chatsResult = arrayOf<List<ConnectorThread>?>(null)
 		val chatsThread = Thread {
-			chatsResult[0] = client.getRecentChats(1)
+			chatsResult[0] = client.getRecentThreads(1)
 		}
 
 		chatsThread.start()
@@ -302,7 +317,7 @@ class TelegramConnectorMessageTest {
 		chatsThread.join()
 
 		assertEquals(
-			listOf(TelegramChat(11L, "", 1_700_000_003, "preview", false)),
+			listOf(telegramThread(11L, "", 1_700_000_003, "preview", false)),
 			chatsResult[0],
 		)
 		assertEquals(
@@ -340,7 +355,7 @@ class TelegramConnectorMessageTest {
 
 	private class FakeTelegramConnector(
 		val authorized: Boolean = true,
-		val chats: List<TelegramChat> = listOf(TelegramChat(10L, "", 1_700_000_000)),
+		val chats: List<ConnectorThread> = listOf(telegramThread(10L, "", 1_700_000_000)),
 		val messages: List<ConnectorMessage> = listOf(
 			telegramMessage(10L, 20L, 1_700_000_001, false, ""),
 		),
@@ -354,7 +369,7 @@ class TelegramConnectorMessageTest {
 
 		override fun isAuthorized(): Boolean = authorized
 
-		override fun getRecentChats(limit: Int): List<TelegramChat> {
+		override fun getRecentThreads(limit: Int): List<ConnectorThread> {
 			lastChatLimit = limit
 			return chats
 		}

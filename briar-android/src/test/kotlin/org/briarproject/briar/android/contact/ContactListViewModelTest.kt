@@ -12,8 +12,9 @@ import org.briarproject.bramble.test.ImmediateExecutor
 import org.briarproject.briar.android.viewmodel.LiveDataTestUtil.getOrAwaitValue
 import org.briarproject.briar.api.android.AndroidNotificationManager
 import org.briarproject.briar.api.conversation.ConversationManager
+import org.briarproject.briar.api.connector.ConnectorSources
+import org.briarproject.briar.api.connector.ConnectorThread
 import org.briarproject.briar.api.identity.AuthorManager
-import org.briarproject.briar.api.telegram.TelegramChat
 import org.briarproject.briar.api.telegram.TelegramConnector
 import org.briarproject.briar.android.contact.TelegramInboxAvailabilityState.ACCOUNT_UNAVAILABLE
 import org.briarproject.briar.android.contact.TelegramInboxAvailabilityState.EMPTY
@@ -47,8 +48,8 @@ class ContactListViewModelTest {
 		val connector = mock(TelegramConnector::class.java)
 		`when`(connector.isEnabled()).thenReturn(true)
 		`when`(connector.isAuthorized()).thenReturn(true)
-		`when`(connector.getRecentChats(20))
-			.thenReturn(listOf(TelegramChat(7, "", 11)))
+		`when`(connector.getRecentThreads(20))
+			.thenReturn(listOf(ConnectorThread(ConnectorSources.TELEGRAM, "7", "", 11)))
 			.thenThrow(IllegalStateException())
 		val viewModel = createViewModel(connector)
 
