@@ -17,6 +17,7 @@ import org.briarproject.briar.api.telegram.TelegramAuthSession
 import org.briarproject.briar.api.telegram.TelegramAuthSession.RecoverableErrorDetail
 import org.briarproject.briar.api.telegram.TelegramAuthState
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -170,6 +171,17 @@ class StartupViewModelTest {
 	}
 
 	@Test
+	fun testRejectedCodeResendRemainsInTelegramLoginFlow() {
+		viewModel.showTelegramLoginPlaceholder()
+		telegramAuthSession.stateAfterResend = TelegramAuthState.RECOVERABLE_ERROR
+		telegramAuthSession.detailAfterResend =
+			RecoverableErrorDetail.CODE_RESEND_FAILED
+		viewModel.resendTelegramLoginCode()
+
+		assertTrue(viewModel.isShowingTelegramLoginConfirmation())
+	}
+
+	@Test
 	fun testShowPasswordFragmentClearsInvalidPasswordRecoverableErrorOnFallback() {
 		viewModel.setTelegramLoginIdentifier(" +123456789 ")
 		viewModel.setTelegramLoginCode("12345")
@@ -260,6 +272,8 @@ class StartupViewModelTest {
 		var startCalls = 0
 		var identifierSubmitCalls = 0
 		var resendCodeCalls = 0
+		var stateAfterResend = TelegramAuthState.CODE_ENTRY
+		var detailAfterResend = RecoverableErrorDetail.NONE
 		var codeSubmitCalls = 0
 		var passwordSubmitCalls = 0
 
@@ -284,7 +298,8 @@ class StartupViewModelTest {
 
 		override fun resendCode() {
 			resendCodeCalls++
-			currentAuthState = TelegramAuthState.CODE_ENTRY
+			currentAuthState = stateAfterResend
+			currentRecoverableErrorDetail = detailAfterResend
 		}
 
 		override fun submitPassword(password: String) {

@@ -273,6 +273,7 @@ public class StartupViewModel extends AndroidViewModel
 				authState == TelegramAuthState.READY ||
 				authState == TelegramAuthState.RECOVERABLE_ERROR &&
 						(getTelegramRecoverableErrorDetail() == RecoverableErrorDetail.INVALID_CODE ||
+								getTelegramRecoverableErrorDetail() == RecoverableErrorDetail.CODE_RESEND_FAILED ||
 								getTelegramRecoverableErrorDetail() == RecoverableErrorDetail.INVALID_PASSWORD);
 	}
 
