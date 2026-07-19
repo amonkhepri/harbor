@@ -60,9 +60,10 @@ class TelegramConnectorMessageTest {
 
 	private fun readMessages(
 		client: TelegramConnector,
-		chatId: Long,
+		threadId: String,
 		limit: Int,
-	): List<ConnectorMessage> = (client.getRecentMessageReadResult(chatId, limit) as Success).messages
+	): List<ConnectorMessage> =
+		(client.getRecentMessageReadResult(threadId, limit) as Success).messages
 
 	@Test
 	fun testDisabledConnectorReturnsDisabledEmptyMessageLists() {
@@ -71,7 +72,7 @@ class TelegramConnectorMessageTest {
 		assertEquals(listOf(false, false), listOf(connector.isEnabled(), connector.isAuthorized()))
 		assertEquals(
 			emptyList<ConnectorThread>() to Success(emptyList()),
-			connector.getRecentThreads(5) to connector.getRecentMessageReadResult(1L, 5),
+			connector.getRecentThreads(5) to connector.getRecentMessageReadResult("1", 5),
 		)
 	}
 
@@ -182,7 +183,7 @@ class TelegramConnectorMessageTest {
 				listOf(
 					telegramMessage(10L, 20L, 1_700_000_001, false, ""),
 				),
-			client.getRecentThreads(3) to readMessages(client, 10L, 3),
+			client.getRecentThreads(3) to readMessages(client, "10", 3),
 		)
 	}
 
@@ -225,7 +226,7 @@ class TelegramConnectorMessageTest {
 			)
 		}
 
-		val messages = readMessages(client, 10L, 4)
+		val messages = readMessages(client, "10", 4)
 
 		assertEquals(
 			listOf(40L, 30L, 20L, 10L) to listOf("latest", "middle", "older", "oldest"),
@@ -247,7 +248,7 @@ class TelegramConnectorMessageTest {
 		}
 		assertEquals(
 			Success(emptyList()),
-			emptyClient.getRecentMessageReadResult(10L, 3),
+			emptyClient.getRecentMessageReadResult("10", 3),
 		)
 
 		val failingClient = readyReflectiveMessageClient {
@@ -258,7 +259,7 @@ class TelegramConnectorMessageTest {
 			Client.setRejectGetChatHistory(true)
 		}
 
-		assertEquals(LoadFailed, failingClient.getRecentMessageReadResult(10L, 3))
+		assertEquals(LoadFailed, failingClient.getRecentMessageReadResult("10", 3))
 	}
 
 	@Test
@@ -286,7 +287,7 @@ class TelegramConnectorMessageTest {
 		assertEquals(
 			false to (emptyList<ConnectorThread>() to LoadFailed),
 			client.isAuthorized() to
-				(client.getRecentThreads(1) to client.getRecentMessageReadResult(10L, 1)),
+				(client.getRecentThreads(1) to client.getRecentMessageReadResult("10", 1)),
 		)
 		assertEquals(false, File(tdlibDir, "database").exists())
 	}
@@ -313,7 +314,7 @@ class TelegramConnectorMessageTest {
 
 		chatsThread.start()
 		assertEquals(true, Client.awaitSetTdlibParametersAccepted(1_000L))
-		val messages = readMessages(client, 11L, 1)
+		val messages = readMessages(client, "11", 1)
 		chatsThread.join()
 
 		assertEquals(
@@ -374,7 +375,11 @@ class TelegramConnectorMessageTest {
 			return chats
 		}
 
-		override fun getRecentMessageReadResult(chatId: Long, limit: Int): ConnectorMessageReadResult {
+		override fun getRecentMessageReadResult(
+			threadId: String,
+			limit: Int,
+		): ConnectorMessageReadResult {
+			val chatId = threadId.toLongOrNull() ?: return LoadFailed
 			lastMessageChatId = chatId
 			lastMessageLimit = limit
 			return messageReadResult ?: Success(messages)

@@ -11,6 +11,10 @@ class DisabledTelegramConnector : TelegramConnector {
 
 	override fun getRecentThreads(limit: Int): List<ConnectorThread> = emptyList()
 
-	override fun getRecentMessageReadResult(chatId: Long, limit: Int): ConnectorMessageReadResult =
-		ConnectorMessageReadResult.Success(emptyList())
+	override fun getRecentMessageReadResult(threadId: String, limit: Int): ConnectorMessageReadResult =
+		if (threadId.toLongOrNull() == null) {
+			ConnectorMessageReadResult.LoadFailed
+		} else {
+			ConnectorMessageReadResult.Success(emptyList())
+		}
 }

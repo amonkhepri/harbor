@@ -40,7 +40,8 @@ class ReflectiveTelegramTdlibMessageClient(
 		}
 	}
 
-	override fun getRecentMessageReadResult(chatId: Long, limit: Int): ConnectorMessageReadResult {
+	override fun getRecentMessageReadResult(threadId: String, limit: Int): ConnectorMessageReadResult {
+		val chatId = threadId.toLongOrNull() ?: return LoadFailed
 		val safeLimit = safeLimit(limit)
 		if (chatId == 0L || safeLimit == 0) return Success(emptyList())
 		return withReadyClient<ConnectorMessageReadResult?>(null) { client ->
