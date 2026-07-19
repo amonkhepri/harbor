@@ -534,6 +534,8 @@ private fun loginMessage(authState: TelegramAuthState, errorDetail: RecoverableE
 			R.string.telegram_connector_login_identifier_invalid_message
 		RecoverableErrorDetail.INVALID_CODE ->
 			R.string.telegram_connector_login_code_invalid_message
+		RecoverableErrorDetail.CODE_RESEND_FAILED ->
+			R.string.telegram_connector_login_code_resend_failed_message
 		RecoverableErrorDetail.INVALID_PASSWORD ->
 			R.string.telegram_connector_login_password_invalid_message
 		RecoverableErrorDetail.UNSUPPORTED_AUTH_STEP ->

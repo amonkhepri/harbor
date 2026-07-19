@@ -60,6 +60,10 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 				emitAuthorizationState(authorizationStateAfterCode(request.code))
 			}
 			is TdApi.ResendAuthenticationCode -> {
+				if (rejectResendAuthenticationCode) {
+					resultHandler?.onResult(TdApi.Error())
+					return
+				}
 				resultHandler?.onResult(TdApi.Ok())
 				emitAuthorizationState(TdApi.AuthorizationStateWaitCode())
 			}
@@ -189,6 +193,7 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 		private var activeDatabaseDirectory = ""
 		private var setTdlibParametersAcceptedLatch: CountDownLatch? = null
 		private var rejectSetTdlibParameters = false
+		private var rejectResendAuthenticationCode = false
 		private var rejectGetChatHistory = false
 
 		@JvmStatic
@@ -221,6 +226,7 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 			activeDatabaseDirectory = ""
 			setTdlibParametersAcceptedLatch = null
 			rejectSetTdlibParameters = false
+			rejectResendAuthenticationCode = false
 			rejectGetChatHistory = false
 		}
 
@@ -276,6 +282,10 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 
 		fun setRejectSetTdlibParameters(reject: Boolean) {
 			rejectSetTdlibParameters = reject
+		}
+
+		fun setRejectResendAuthenticationCode(reject: Boolean) {
+			rejectResendAuthenticationCode = reject
 		}
 
 		fun setRejectGetChatHistory(reject: Boolean) {

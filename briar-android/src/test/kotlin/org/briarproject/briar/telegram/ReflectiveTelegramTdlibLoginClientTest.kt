@@ -222,6 +222,18 @@ class ReflectiveTelegramTdlibLoginClientTest {
 	}
 
 	@Test
+	fun testRejectedResendCodeReturnsSpecificRecoverableError() {
+		val client = createClient()
+		startToCodeEntry(client)
+		Client.setRejectResendAuthenticationCode(true)
+
+		assertRecoverableError(client, RecoverableErrorDetail.CODE_RESEND_FAILED) {
+			client.resendCode()
+		}
+		assertSentRequestsAndClose(client, SET_PARAMETERS, SET_PHONE, RESEND_CODE)
+	}
+
+	@Test
 	fun testSubmitIdentifierUsesConfiguredWritableTdlibDirectories() {
 		val tdlibDir = File("build/test-tdlib-dir")
 		val client = createClient(tdlibDirectory = tdlibDir)

@@ -176,7 +176,7 @@ class ReflectiveTelegramTdlibLoginClient(
 					if (pendingAuthorizationUpdate === authorizationUpdate) {
 						pendingAuthorizationUpdate = null
 					}
-					clearRecoverableErrorDetail(TelegramAuthState.CODE_ENTRY)
+					recoverableError(RecoverableErrorDetail.CODE_RESEND_FAILED)
 				}
 				CommandResult.TIMEOUT -> recoverableError(RecoverableErrorDetail.NONE)
 			}

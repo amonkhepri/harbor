@@ -53,6 +53,7 @@
 	<string name="telegram_connector_login_api_credentials_missing_message">Telegram login needs local Telegram API credentials for this internal Harbor build. Add the local Gradle properties, rebuild, then continue to retry. You can also use Harbor password instead.</string>
 	<string name="telegram_connector_login_identifier_invalid_message">Telegram did not accept that phone number in this build. Check it, then continue to retry. You can also use Harbor password instead.</string>
 	<string name="telegram_connector_login_code_invalid_message">Telegram did not accept that login code in this build. Check it, then continue to retry. You can also use Harbor password instead.</string>
+	<string name="telegram_connector_login_code_resend_failed_message">Telegram could not resend the login code. Wait, then continue to retry. You can also use Harbor password instead.</string>
 	<string name="telegram_connector_login_password_invalid_message">Telegram did not accept that password or 2FA entry in this build. Check it, then continue to retry. You can also use Harbor password instead.</string>
 	<string name="telegram_connector_login_unsupported_auth_step_message">Telegram returned an account step Harbor does not support in this build. Use Harbor password instead.</string>
 	<string name="telegram_connector_login_device_keystore_unavailable_message">Telegram login in Harbor needs Android 6.0+ device-backed encryption. Use Harbor password instead.</string>
