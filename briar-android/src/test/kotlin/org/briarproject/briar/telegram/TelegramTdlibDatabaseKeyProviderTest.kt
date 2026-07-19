@@ -34,6 +34,23 @@ class TelegramTdlibDatabaseKeyProviderTest {
 	}
 
 	@Test
+	fun testResetsTdlibStateWhenMarkerIsPartial() {
+		val provider = provider(FakeKeyStrengthener())
+		val tdlibDirectory = testFolder.newFolder("tdlib")
+		val firstKey = checkNotNull(provider.getDatabaseEncryptionKey(tdlibDirectory))
+		val staleState = File(tdlibDirectory, "database/stale").also {
+			it.parentFile?.mkdirs()
+			it.writeText("stale")
+		}
+		File(testFolder.root, "key/telegram-tdlib-key.marker").writeText("")
+
+		val recoveredKey = checkNotNull(provider.getDatabaseEncryptionKey(tdlibDirectory))
+
+		assertEquals(false, staleState.exists())
+		assertArrayEquals(firstKey, recoveredKey)
+	}
+
+	@Test
 	fun testReturnsNoKeyWithoutStrengthener() {
 		val provider = provider(null)
 

@@ -46,7 +46,12 @@ class ProtectedTelegramTdlibDatabaseKeyProvider(
 
 	private fun resetUnmarkedTdlibState(tdlibDirectory: File, seedFile: File, markerFile: File) {
 		if (tdlibDirectory.exists() &&
-			(!seedFile.isFile || seedFile.length() != SecretKey.LENGTH.toLong() || !markerFile.isFile)
+			(
+				!seedFile.isFile ||
+					seedFile.length() != SecretKey.LENGTH.toLong() ||
+					!markerFile.isFile ||
+					markerFile.readText() != MARKER_TEXT
+				)
 		) {
 			tdlibDirectory.deleteRecursively()
 		}
