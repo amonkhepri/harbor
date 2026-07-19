@@ -5,10 +5,6 @@ import org.briarproject.briar.api.telegram.TelegramAuthSession.RecoverableErrorD
 import org.briarproject.briar.api.telegram.TelegramAuthState
 import java.io.File
 import java.lang.reflect.Method
-import java.lang.reflect.Proxy
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicReference
 import java.util.logging.Logger
 
 class TelegramAuthSessionImpl(private val tdlibLoginClient: TelegramTdlibLoginClient) :
@@ -322,30 +318,17 @@ class ReflectiveTelegramTdlibLoginClient(
 
 	@Throws(ReflectiveOperationException::class, InterruptedException::class)
 	private fun sendForResult(request: Any): CommandResult {
-		val resultClassName = AtomicReference("")
-		val resultReceived = CountDownLatch(1)
-		val functionClass = tdApiClass("Function")
-		val resultHandlerClass = Class.forName("org.drinkless.tdlib.Client\$ResultHandler")
-		val resultHandler = Proxy.newProxyInstance(
-			resultHandlerClass.classLoader,
-			arrayOf(resultHandlerClass),
-		) { _, method, args ->
-			if (method.name == "onResult" &&
-				args != null &&
-				args.size == 1 &&
-				resultClassName.compareAndSet("", args[0]?.javaClass?.simpleName ?: "")
-			) {
-				resultReceived.countDown()
-			}
-			null
-		}
-		tdlibClient!!.javaClass.getMethod("send", functionClass, resultHandlerClass)
-			.invoke(tdlibClient, request, resultHandler)
-		if (!resultReceived.await(authorizationUpdateTimeoutMs, TimeUnit.MILLISECONDS)) {
+		val result = sendReflectiveTdlibRequest(
+			tdlibClient!!,
+			request,
+			authorizationUpdateTimeoutMs,
+		)
+		if (!result.completed) {
 			closeTdlibClient()
 			return CommandResult.TIMEOUT
 		}
-		return if (resultClassName.get() == "Error") {
+		return if (result.value?.javaClass?.simpleName == "Error"
+		) {
 			CommandResult.ERROR
 		} else {
 			CommandResult.OK

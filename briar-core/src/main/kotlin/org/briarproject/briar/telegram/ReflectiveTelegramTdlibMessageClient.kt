@@ -9,10 +9,7 @@ import org.briarproject.briar.api.connector.ConnectorThread
 import org.briarproject.briar.api.telegram.TelegramConnector
 import java.io.File
 import java.lang.reflect.Method
-import java.lang.reflect.Proxy
 import java.util.LinkedHashSet
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 
 class ReflectiveTelegramTdlibMessageClient(
@@ -179,27 +176,8 @@ class ReflectiveTelegramTdlibMessageClient(
 
 	@Throws(ReflectiveOperationException::class, InterruptedException::class)
 	private fun sendAndAwait(client: Any, request: Any): Any? {
-		val result = AtomicReference<Any?>()
-		val resultReceived = CountDownLatch(1)
-		val functionClass = tdApiClass("Function")
-		val resultHandlerClass = Class.forName("org.drinkless.tdlib.Client\$ResultHandler")
-		val resultHandler = Proxy.newProxyInstance(
-			resultHandlerClass.classLoader,
-			arrayOf(resultHandlerClass),
-		) { _, method, args ->
-			if (method.name == "onResult" &&
-				args != null &&
-				args.size == 1 &&
-				result.compareAndSet(null, args[0])
-			) {
-				resultReceived.countDown()
-			}
-			null
-		}
-		client.javaClass.getMethod("send", functionClass, resultHandlerClass)
-			.invoke(client, request, resultHandler)
-		if (!resultReceived.await(requestTimeoutMs, TimeUnit.MILLISECONDS)) return null
-		return result.get().takeUnless { it?.javaClass?.simpleName == "Error" }
+		val result = sendReflectiveTdlibRequest(client, request, requestTimeoutMs)
+		return result.value.takeIf { result.completed && it?.javaClass?.simpleName != "Error" }
 	}
 
 	@Throws(ReflectiveOperationException::class)

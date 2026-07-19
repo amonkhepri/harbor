@@ -64,6 +64,41 @@ internal fun createReflectiveTdlibClient(onUpdate: (Any?) -> Unit): Any {
 	return create.invoke(null, updateHandler, null, null)
 }
 
+internal data class ReflectiveTdlibSendResult(val completed: Boolean, val value: Any?)
+
+private object NoTdlibResult
+
+@Throws(ReflectiveOperationException::class, InterruptedException::class)
+internal fun sendReflectiveTdlibRequest(
+	client: Any,
+	request: Any,
+	timeoutMs: Long,
+): ReflectiveTdlibSendResult {
+	val result = AtomicReference<Any?>(NoTdlibResult)
+	val resultReceived = CountDownLatch(1)
+	val functionClass = tdApiClass("Function")
+	val resultHandlerClass = Class.forName("org.drinkless.tdlib.Client\$ResultHandler")
+	val resultHandler = Proxy.newProxyInstance(
+		resultHandlerClass.classLoader,
+		arrayOf(resultHandlerClass),
+	) { _, method, args ->
+		if (method.name == "onResult" &&
+			args?.size == 1 &&
+			result.compareAndSet(NoTdlibResult, args[0])
+		) {
+			resultReceived.countDown()
+		}
+		null
+	}
+	client.javaClass.getMethod("send", functionClass, resultHandlerClass)
+		.invoke(client, request, resultHandler)
+	return if (resultReceived.await(timeoutMs, TimeUnit.MILLISECONDS)) {
+		ReflectiveTdlibSendResult(true, result.get())
+	} else {
+		ReflectiveTdlibSendResult(false, null)
+	}
+}
+
 @Throws(ReflectiveOperationException::class)
 internal fun getAuthorizationStateClassName(update: Any?): String {
 	if (update?.javaClass?.simpleName != "UpdateAuthorizationState") {
