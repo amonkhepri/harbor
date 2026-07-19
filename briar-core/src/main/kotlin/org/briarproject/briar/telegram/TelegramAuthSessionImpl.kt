@@ -9,6 +9,7 @@ import java.lang.reflect.Proxy
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
+import java.util.logging.Logger
 
 class TelegramAuthSessionImpl(private val tdlibLoginClient: TelegramTdlibLoginClient) :
 	TelegramAuthSession {
@@ -69,6 +70,8 @@ class ReflectiveTelegramTdlibLoginClient(
 		NoOpTelegramTdlibDatabaseKeyProvider,
 	private val authorizationUpdateTimeoutMs: Long = 30_000L,
 ) : TelegramTdlibLoginClient {
+
+	private val log = Logger.getLogger(ReflectiveTelegramTdlibLoginClient::class.java.name)
 
 	private enum class CommandResult {
 		OK,
@@ -305,7 +308,11 @@ class ReflectiveTelegramTdlibLoginClient(
 				args.size == 1 &&
 				pendingAuthorizationUpdate != null
 			) {
-				val className = getAuthorizationStateClassName(args[0])
+				val update = args[0]
+				getTelegramCodeDeliveryStatus(update)?.let {
+					log.info("Telegram auth code delivery: $it")
+				}
+				val className = getAuthorizationStateClassName(update)
 				pendingAuthorizationUpdate.capture(className)
 			}
 			null

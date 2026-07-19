@@ -2,6 +2,7 @@ package org.briarproject.briar.telegram
 
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.atomic.AtomicReference
+import java.util.Locale
 
 internal class PendingAuthorizationUpdate(private val acceptedClassName: String? = null) {
 	val authorizationStateClassName = AtomicReference("")
@@ -42,6 +43,30 @@ internal fun getAuthorizationStateClassName(update: Any?): String {
 	return authorizationState?.javaClass?.simpleName ?: ""
 }
 
+internal fun getTelegramCodeDeliveryStatus(update: Any?): String? {
+	if (update?.javaClass?.simpleName != "UpdateAuthorizationState") return null
+	return try {
+		val authorizationState = update.javaClass.getField("authorizationState").get(update)
+		if (authorizationState?.javaClass?.simpleName != "AuthorizationStateWaitCode") return null
+		val codeInfo = authorizationState.javaClass.getField("codeInfo").get(authorizationState)
+			?: return UNKNOWN_CODE_DELIVERY_STATUS
+		val currentType = codeDeliveryType(codeInfo.javaClass.getField("type").get(codeInfo))
+		val nextType = codeDeliveryType(codeInfo.javaClass.getField("nextType").get(codeInfo))
+		val timeoutSeconds = codeInfo.javaClass.getField("timeout").getInt(codeInfo)
+		"current=$currentType next=$nextType timeout_seconds=$timeoutSeconds"
+	} catch (_: ReflectiveOperationException) {
+		UNKNOWN_CODE_DELIVERY_STATUS
+	}
+}
+
+private fun codeDeliveryType(type: Any?): String {
+	if (type == null) return "NONE"
+	return type.javaClass.simpleName
+		.removePrefix("AuthenticationCodeType")
+		.replace(CAMEL_CASE_BOUNDARY, "_")
+		.uppercase(Locale.US)
+}
+
 @Throws(ReflectiveOperationException::class)
 internal fun tdApiClass(className: String): Class<*> =
 	Class.forName("org.drinkless.tdlib.TdApi\$$className")
@@ -60,3 +85,7 @@ internal fun setFieldIfPresent(target: Any, name: String, value: Any?) {
 }
 
 internal fun hasText(value: String): Boolean = value.trim().isNotEmpty()
+
+private val CAMEL_CASE_BOUNDARY = Regex("(?<=[a-z0-9])(?=[A-Z])")
+private const val UNKNOWN_CODE_DELIVERY_STATUS =
+	"current=UNKNOWN next=UNKNOWN timeout_seconds=UNKNOWN"
