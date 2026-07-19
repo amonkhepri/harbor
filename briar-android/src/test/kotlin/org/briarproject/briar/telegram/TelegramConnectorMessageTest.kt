@@ -8,7 +8,6 @@ import org.briarproject.briar.api.connector.ConnectorSources
 import org.briarproject.briar.api.connector.ConnectorThread
 import org.briarproject.briar.api.telegram.TelegramChat
 import org.briarproject.briar.api.telegram.TelegramConnector
-import org.briarproject.briar.api.telegram.TelegramMessage
 import org.drinkless.tdlib.Client
 import org.drinkless.tdlib.TdApi
 import org.junit.Assert.assertArrayEquals
@@ -18,8 +17,23 @@ import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
 
-class TelegramConnectorMessageTest {
+private fun telegramMessage(
+	chatId: Long,
+	messageId: Long,
+	dateSeconds: Int,
+	isOutgoing: Boolean,
+	text: String,
+) = ConnectorMessage(
+	ConnectorSources.TELEGRAM,
+	chatId.toString(),
+	messageId.toString(),
+	dateSeconds,
+	isOutgoing,
+	text,
+	messageId,
+)
 
+class TelegramConnectorMessageTest {
 	@get:Rule
 	val testFolder = TemporaryFolder()
 
@@ -60,7 +74,7 @@ class TelegramConnectorMessageTest {
 				),
 			),
 			messages = listOf(
-				TelegramMessage(
+				telegramMessage(
 					10L,
 					20L,
 					1_700_000_001,
@@ -152,8 +166,7 @@ class TelegramConnectorMessageTest {
 				),
 			) to
 				listOf(
-					TelegramMessage(10L, 20L, 1_700_000_001, false, "")
-						.toConnectorMessage(),
+					telegramMessage(10L, 20L, 1_700_000_001, false, ""),
 				),
 			client.getRecentChats(3) to readMessages(client, 10L, 3),
 		)
@@ -294,8 +307,7 @@ class TelegramConnectorMessageTest {
 		)
 		assertEquals(
 			listOf(
-				TelegramMessage(11L, 21L, 1_700_000_004, false, "body")
-					.toConnectorMessage(),
+				telegramMessage(11L, 21L, 1_700_000_004, false, "body"),
 			),
 			messages,
 		)
@@ -329,8 +341,8 @@ class TelegramConnectorMessageTest {
 	private class FakeTelegramConnector(
 		val authorized: Boolean = true,
 		val chats: List<TelegramChat> = listOf(TelegramChat(10L, "", 1_700_000_000)),
-		val messages: List<TelegramMessage> = listOf(
-			TelegramMessage(10L, 20L, 1_700_000_001, false, ""),
+		val messages: List<ConnectorMessage> = listOf(
+			telegramMessage(10L, 20L, 1_700_000_001, false, ""),
 		),
 		val messageReadResult: ConnectorMessageReadResult? = null,
 	) : TelegramConnector {
@@ -350,7 +362,7 @@ class TelegramConnectorMessageTest {
 		override fun getRecentMessageReadResult(chatId: Long, limit: Int): ConnectorMessageReadResult {
 			lastMessageChatId = chatId
 			lastMessageLimit = limit
-			return messageReadResult ?: Success(messages.map { it.toConnectorMessage() })
+			return messageReadResult ?: Success(messages)
 		}
 	}
 

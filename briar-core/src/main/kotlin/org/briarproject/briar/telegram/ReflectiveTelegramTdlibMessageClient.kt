@@ -1,11 +1,12 @@
 package org.briarproject.briar.telegram
 
+import org.briarproject.briar.api.connector.ConnectorMessage
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult.LoadFailed
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult.Success
+import org.briarproject.briar.api.connector.ConnectorSources
 import org.briarproject.briar.api.telegram.TelegramChat
 import org.briarproject.briar.api.telegram.TelegramConnector
-import org.briarproject.briar.api.telegram.TelegramMessage
 import java.io.File
 import java.lang.reflect.Method
 import java.lang.reflect.Proxy
@@ -43,7 +44,7 @@ class ReflectiveTelegramTdlibMessageClient(
 		val safeLimit = safeLimit(limit)
 		if (chatId == 0L || safeLimit == 0) return Success(emptyList())
 		return withReadyClient<ConnectorMessageReadResult?>(null) { client ->
-			val messages = mutableListOf<TelegramMessage>()
+			val messages = mutableListOf<ConnectorMessage>()
 			val seenMessageIds = LinkedHashSet<Long>()
 			var fromMessageId = 0L
 			var requestCount = 0
@@ -72,7 +73,7 @@ class ReflectiveTelegramTdlibMessageClient(
 				}
 				fromMessageId = nextFromMessageId
 			}
-			Success(messages.map { it.toConnectorMessage() })
+			Success(messages)
 		} ?: LoadFailed
 	}
 
@@ -241,17 +242,21 @@ class ReflectiveTelegramTdlibMessageClient(
 	}
 
 	@Throws(ReflectiveOperationException::class)
-	private fun mapTextMessage(message: Any?): TelegramMessage? {
+	private fun mapTextMessage(message: Any?): ConnectorMessage? {
 		if (message == null || message.javaClass.simpleName != "Message") return null
 		val content = getObjectField(message, "content")
 		if (content?.javaClass?.simpleName != "MessageText") return null
 		val formattedText = getObjectField(content, "text")
-		return TelegramMessage(
-			chatId = getLongField(message, "chatId"),
-			messageId = getLongField(message, "id"),
+		val chatId = getLongField(message, "chatId")
+		val messageId = getLongField(message, "id")
+		return ConnectorMessage(
+			source = ConnectorSources.TELEGRAM,
+			threadId = chatId.toString(),
+			messageId = messageId.toString(),
 			dateSeconds = getIntField(message, "date"),
 			isOutgoing = getBooleanField(message, "isOutgoing"),
 			text = formattedText?.let { getStringField(it, "text") }.orEmpty(),
+			sourceMessageOrder = messageId,
 		)
 	}
 
