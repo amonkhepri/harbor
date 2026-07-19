@@ -68,6 +68,14 @@ internal data class ReflectiveTdlibSendResult(val completed: Boolean, val value:
 
 private object NoTdlibResult
 
+@Throws(ReflectiveOperationException::class)
+internal fun closeReflectiveTdlibClient(client: Any) {
+	val functionClass = tdApiClass("Function")
+	val resultHandlerClass = Class.forName("org.drinkless.tdlib.Client\$ResultHandler")
+	client.javaClass.getMethod("send", functionClass, resultHandlerClass)
+		.invoke(client, createTdApiObject("Close"), null)
+}
+
 @Throws(ReflectiveOperationException::class, InterruptedException::class)
 internal fun sendReflectiveTdlibRequest(
 	client: Any,

@@ -8,7 +8,6 @@ import org.briarproject.briar.api.connector.ConnectorSources
 import org.briarproject.briar.api.connector.ConnectorThread
 import org.briarproject.briar.api.telegram.TelegramConnector
 import java.io.File
-import java.lang.reflect.Method
 import java.util.LinkedHashSet
 import java.util.concurrent.atomic.AtomicReference
 
@@ -256,11 +255,7 @@ class ReflectiveTelegramTdlibMessageClient(
 				pendingAuthorizationUpdate,
 				"AuthorizationStateClosed",
 			)
-			val functionClass = tdApiClass("Function")
-			val resultHandlerClass = Class.forName("org.drinkless.tdlib.Client\$ResultHandler")
-			val send: Method = client.javaClass.getMethod("send", functionClass, resultHandlerClass)
-			val closeRequest = createTdApiObject("Close")
-			send.invoke(client, closeRequest, null)
+			closeReflectiveTdlibClient(client)
 			awaitPreparedAuthorizationStateClassName(closeUpdate)
 		} catch (_: ReflectiveOperationException) {
 		} catch (_: LinkageError) {

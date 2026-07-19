@@ -4,7 +4,6 @@ import org.briarproject.briar.api.telegram.TelegramAuthSession
 import org.briarproject.briar.api.telegram.TelegramAuthSession.RecoverableErrorDetail
 import org.briarproject.briar.api.telegram.TelegramAuthState
 import java.io.File
-import java.lang.reflect.Method
 import java.util.logging.Logger
 
 class TelegramAuthSessionImpl(private val tdlibLoginClient: TelegramTdlibLoginClient) :
@@ -397,11 +396,7 @@ class ReflectiveTelegramTdlibLoginClient(
 		tdlibClient = null
 		val closeUpdate = prepareAuthorizationUpdate("AuthorizationStateClosed")
 		try {
-			val functionClass = tdApiClass("Function")
-			val resultHandlerClass = Class.forName("org.drinkless.tdlib.Client\$ResultHandler")
-			val send: Method = client.javaClass.getMethod("send", functionClass, resultHandlerClass)
-			val closeRequest = createTdApiObject("Close")
-			send.invoke(client, closeRequest, null)
+			closeReflectiveTdlibClient(client)
 			awaitAuthorizationUpdate(closeUpdate)
 		} catch (_: ReflectiveOperationException) {
 		} catch (_: LinkageError) {
