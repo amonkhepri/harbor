@@ -20,32 +20,22 @@ class TelegramAuthSessionImpl(
 	override fun getRecoverableErrorDetail(): RecoverableErrorDetail =
 		tdlibLoginClient.getRecoverableErrorDetail()
 
-	override fun start() {
-		currentState = accessGate.run(TelegramAuthState.CLOSED) { tdlibLoginClient.start() }
-	}
+	override fun start() = updateState(tdlibLoginClient::start)
 
-	override fun submitIdentifier(identifier: String) {
-		currentState = accessGate.run(TelegramAuthState.CLOSED) {
-			tdlibLoginClient.submitIdentifier(identifier)
-		}
-	}
+	override fun submitIdentifier(identifier: String) =
+		updateState { tdlibLoginClient.submitIdentifier(identifier) }
 
-	override fun resendCode() {
-		currentState = accessGate.run(TelegramAuthState.CLOSED) { tdlibLoginClient.resendCode() }
-	}
+	override fun resendCode() = updateState(tdlibLoginClient::resendCode)
 
-	override fun submitCode(code: String) {
-		currentState = accessGate.run(TelegramAuthState.CLOSED) { tdlibLoginClient.submitCode(code) }
-	}
+	override fun submitCode(code: String) = updateState { tdlibLoginClient.submitCode(code) }
 
-	override fun submitPassword(password: String) {
-		currentState = accessGate.run(TelegramAuthState.CLOSED) {
-			tdlibLoginClient.submitPassword(password)
-		}
-	}
+	override fun submitPassword(password: String) =
+		updateState { tdlibLoginClient.submitPassword(password) }
 
-	override fun close() {
-		currentState = accessGate.run(TelegramAuthState.CLOSED) { tdlibLoginClient.close() }
+	override fun close() = updateState(tdlibLoginClient::close)
+
+	private fun updateState(call: () -> TelegramAuthState) {
+		currentState = accessGate.run(TelegramAuthState.CLOSED, call)
 	}
 
 	override fun startService() = accessGate.start()
