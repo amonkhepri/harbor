@@ -62,6 +62,7 @@ internal fun createReflectiveTdlibClient(onUpdate: (Any?) -> Unit): Any {
 		exceptionHandlerClass,
 	)
 	return create.invoke(null, updateHandler, null, null)
+		?: throw ReflectiveOperationException("TDLib client factory returned null")
 }
 
 internal data class ReflectiveTdlibSendResult(val completed: Boolean, val value: Any?)
