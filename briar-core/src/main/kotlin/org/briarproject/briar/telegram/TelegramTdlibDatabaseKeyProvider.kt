@@ -72,7 +72,9 @@ class ProtectedTelegramTdlibDatabaseKeyProvider(
 	@Throws(IOException::class)
 	private fun writeMarker(markerFile: File) {
 		markerFile.parentFile?.mkdirs()
-		if (!markerFile.isFile) markerFile.writeText(MARKER_TEXT)
+		if (!markerFile.isFile || markerFile.readText() != MARKER_TEXT) {
+			markerFile.writeText(MARKER_TEXT)
+		}
 	}
 
 	private fun seedFile(): File = File(databaseConfig.databaseKeyDirectory, SEED_FILE)

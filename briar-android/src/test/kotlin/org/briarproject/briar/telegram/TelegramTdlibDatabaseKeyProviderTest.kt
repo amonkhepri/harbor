@@ -45,9 +45,16 @@ class TelegramTdlibDatabaseKeyProviderTest {
 		File(testFolder.root, "key/telegram-tdlib-key.marker").writeText("")
 
 		val recoveredKey = checkNotNull(provider.getDatabaseEncryptionKey(tdlibDirectory))
+		val recoveredState = File(tdlibDirectory, "database/recovered").also {
+			it.parentFile?.mkdirs()
+			it.writeText("recovered")
+		}
+		val reusedKey = checkNotNull(provider.getDatabaseEncryptionKey(tdlibDirectory))
 
 		assertEquals(false, staleState.exists())
+		assertEquals(true, recoveredState.exists())
 		assertArrayEquals(firstKey, recoveredKey)
+		assertArrayEquals(recoveredKey, reusedKey)
 	}
 
 	@Test
