@@ -18,20 +18,23 @@ class ReflectiveTelegramTdlibMessageClient(
 	private val tdlibKeyProvider: TelegramTdlibDatabaseKeyProvider =
 		NoOpTelegramTdlibDatabaseKeyProvider,
 	private val requestTimeoutMs: Long = 30_000L,
+	private val accessGate: TelegramTdlibAccessGate = TelegramTdlibAccessGate(),
 ) : TelegramConnector {
 
 	private val tdlibReadLock = Any()
 
 	override fun isEnabled(): Boolean = true
 
-	override fun isAuthorized(): Boolean = withReadyClient(false) { true }
+	override fun isAuthorized(): Boolean = accessGate.run(false) { withReadyClient(false) { true } }
 
 	override fun getRecentThreads(limit: Int): List<ConnectorThread> {
 		val safeLimit = safeLimit(limit)
 		if (safeLimit == 0) return emptyList()
-		return withReadyClient(emptyList()) { client ->
-			loadRecentChatIds(client, safeLimit).take(safeLimit).mapNotNull { chatId ->
-				sendAndAwait(client, createGetChatRequest(chatId))?.let { mapChat(it) }
+		return accessGate.run(emptyList()) {
+			withReadyClient(emptyList()) { client ->
+				loadRecentChatIds(client, safeLimit).take(safeLimit).mapNotNull { chatId ->
+					sendAndAwait(client, createGetChatRequest(chatId))?.let { mapChat(it) }
+				}
 			}
 		}
 	}
@@ -40,37 +43,39 @@ class ReflectiveTelegramTdlibMessageClient(
 		val chatId = threadId.toLongOrNull() ?: return LoadFailed
 		val safeLimit = safeLimit(limit)
 		if (chatId == 0L || safeLimit == 0) return Success(emptyList())
-		return withReadyClient<ConnectorMessageReadResult?>(null) { client ->
-			val messages = mutableListOf<ConnectorMessage>()
-			val seenMessageIds = LinkedHashSet<Long>()
-			var fromMessageId = 0L
-			var requestCount = 0
-			while (messages.size < safeLimit && requestCount < MAX_TDLIB_HISTORY_REQUESTS) {
-				val historyPage = sendAndAwait(
-					client,
-					createGetChatHistoryRequest(chatId, fromMessageId, safeLimit),
-				) ?: return@withReadyClient LoadFailed
-				val rawMessages = getObjectArrayField(historyPage, "messages")
-				if (rawMessages.isEmpty()) break
-				var newRawMessage = false
-				for (rawMessage in rawMessages) {
-					val messageId = getMessageId(rawMessage) ?: continue
-					if (!seenMessageIds.add(messageId)) continue
-					newRawMessage = true
-					val message = mapTextMessage(rawMessage) ?: continue
-					if (messages.size < safeLimit) messages += message
+		return accessGate.run<ConnectorMessageReadResult?>(null) {
+			withReadyClient(null) { client ->
+				val messages = mutableListOf<ConnectorMessage>()
+				val seenMessageIds = LinkedHashSet<Long>()
+				var fromMessageId = 0L
+				var requestCount = 0
+				while (messages.size < safeLimit && requestCount < MAX_TDLIB_HISTORY_REQUESTS) {
+					val historyPage = sendAndAwait(
+						client,
+						createGetChatHistoryRequest(chatId, fromMessageId, safeLimit),
+					) ?: return@withReadyClient LoadFailed
+					val rawMessages = getObjectArrayField(historyPage, "messages")
+					if (rawMessages.isEmpty()) break
+					var newRawMessage = false
+					for (rawMessage in rawMessages) {
+						val messageId = getMessageId(rawMessage) ?: continue
+						if (!seenMessageIds.add(messageId)) continue
+						newRawMessage = true
+						val message = mapTextMessage(rawMessage) ?: continue
+						if (messages.size < safeLimit) messages += message
+					}
+					requestCount++
+					val nextFromMessageId = rawMessages.mapNotNull { getMessageId(it) }.lastOrNull()
+					if (!newRawMessage ||
+						nextFromMessageId == null ||
+						nextFromMessageId == fromMessageId
+					) {
+						break
+					}
+					fromMessageId = nextFromMessageId
 				}
-				requestCount++
-				val nextFromMessageId = rawMessages.mapNotNull { getMessageId(it) }.lastOrNull()
-				if (!newRawMessage ||
-					nextFromMessageId == null ||
-					nextFromMessageId == fromMessageId
-				) {
-					break
-				}
-				fromMessageId = nextFromMessageId
+				Success(messages)
 			}
-			Success(messages)
 		} ?: LoadFailed
 	}
 

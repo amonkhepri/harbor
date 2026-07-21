@@ -3,11 +3,15 @@ package org.briarproject.briar.telegram
 import org.briarproject.briar.api.telegram.TelegramAuthSession
 import org.briarproject.briar.api.telegram.TelegramAuthSession.RecoverableErrorDetail
 import org.briarproject.briar.api.telegram.TelegramAuthState
+import org.briarproject.bramble.api.lifecycle.Service
 import java.io.File
 import java.util.logging.Logger
 
-class TelegramAuthSessionImpl(private val tdlibLoginClient: TelegramTdlibLoginClient) :
-	TelegramAuthSession {
+class TelegramAuthSessionImpl(
+	private val tdlibLoginClient: TelegramTdlibLoginClient,
+	private val accessGate: TelegramTdlibAccessGate = TelegramTdlibAccessGate(),
+) : TelegramAuthSession,
+	Service {
 
 	private var currentState = TelegramAuthState.CLOSED
 
@@ -17,26 +21,36 @@ class TelegramAuthSessionImpl(private val tdlibLoginClient: TelegramTdlibLoginCl
 		tdlibLoginClient.getRecoverableErrorDetail()
 
 	override fun start() {
-		currentState = tdlibLoginClient.start()
+		currentState = accessGate.run(TelegramAuthState.CLOSED) { tdlibLoginClient.start() }
 	}
 
 	override fun submitIdentifier(identifier: String) {
-		currentState = tdlibLoginClient.submitIdentifier(identifier)
+		currentState = accessGate.run(TelegramAuthState.CLOSED) {
+			tdlibLoginClient.submitIdentifier(identifier)
+		}
 	}
 
 	override fun resendCode() {
-		currentState = tdlibLoginClient.resendCode()
+		currentState = accessGate.run(TelegramAuthState.CLOSED) { tdlibLoginClient.resendCode() }
 	}
 
 	override fun submitCode(code: String) {
-		currentState = tdlibLoginClient.submitCode(code)
+		currentState = accessGate.run(TelegramAuthState.CLOSED) { tdlibLoginClient.submitCode(code) }
 	}
 
 	override fun submitPassword(password: String) {
-		currentState = tdlibLoginClient.submitPassword(password)
+		currentState = accessGate.run(TelegramAuthState.CLOSED) {
+			tdlibLoginClient.submitPassword(password)
+		}
 	}
 
 	override fun close() {
+		currentState = accessGate.run(TelegramAuthState.CLOSED) { tdlibLoginClient.close() }
+	}
+
+	override fun startService() = accessGate.start()
+
+	override fun stopService() = accessGate.stop {
 		currentState = tdlibLoginClient.close()
 	}
 }
