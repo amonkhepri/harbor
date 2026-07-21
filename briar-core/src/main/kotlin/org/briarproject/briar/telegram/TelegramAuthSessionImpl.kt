@@ -87,6 +87,8 @@ class ReflectiveTelegramTdlibLoginClient(
 
 	@Volatile
 	private var pendingAuthorizationUpdate: PendingAuthorizationUpdate? = null
+
+	@Volatile
 	private var recoverableErrorDetail = RecoverableErrorDetail.NONE
 	private var tdlibClient: Any? = null
 
