@@ -131,7 +131,7 @@ internal fun TelegramLoginScreen(viewModel: StartupViewModel) {
 	var code by remember { mutableStateOf(viewModel.getTelegramLoginCode()) }
 	var password by remember { mutableStateOf(viewModel.getTelegramLoginPassword()) }
 
-	LaunchedEffect(authSnapshot.revision) {
+	LaunchedEffect(authSnapshot) {
 		identifier = viewModel.getTelegramLoginIdentifier()
 		code = viewModel.getTelegramLoginCode()
 		password = viewModel.getTelegramLoginPassword()
@@ -253,34 +253,18 @@ internal fun TelegramLoginScreen(viewModel: StartupViewModel) {
 	}
 }
 
-private data class TelegramAuthSnapshot(
-	val authState: TelegramAuthState,
-	val errorDetail: RecoverableErrorDetail,
-	val revision: Int,
-)
-
 @Composable
-private fun rememberTelegramAuthSnapshot(viewModel: StartupViewModel): State<TelegramAuthSnapshot> {
+private fun rememberTelegramAuthSnapshot(
+	viewModel: StartupViewModel,
+): State<StartupViewModel.TelegramAuthSnapshot> {
 	val lifecycleOwner = LocalLifecycleOwner.current
-	val authLiveData = viewModel.getTelegramAuthState()
+	val authLiveData = viewModel.getTelegramAuthSnapshot()
 	val snapshot = remember(viewModel, authLiveData) {
-		mutableStateOf(
-			TelegramAuthSnapshot(
-				authLiveData.value ?: TelegramAuthState.CLOSED,
-				viewModel.getTelegramRecoverableErrorDetail(),
-				0,
-			),
-		)
+		mutableStateOf(authLiveData.value!!)
 	}
 	DisposableEffect(viewModel, authLiveData, lifecycleOwner) {
-		var revision = snapshot.value.revision
-		val observer = Observer<TelegramAuthState> { authState ->
-			revision++
-			snapshot.value = TelegramAuthSnapshot(
-				authState,
-				viewModel.getTelegramRecoverableErrorDetail(),
-				revision,
-			)
+		val observer = Observer<StartupViewModel.TelegramAuthSnapshot> { authSnapshot ->
+			snapshot.value = authSnapshot
 		}
 		authLiveData.observe(lifecycleOwner, observer)
 		onDispose { authLiveData.removeObserver(observer) }

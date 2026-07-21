@@ -212,6 +212,18 @@ class StartupViewModelTest {
 	}
 
 	@Test
+	fun testTelegramLoginConfirmationUsesPublishedAuthSnapshot() {
+		viewModel.showTelegramLoginPlaceholder()
+		telegramAuthSession.stateAfterResend = TelegramAuthState.RECOVERABLE_ERROR
+		telegramAuthSession.detailAfterResend = RecoverableErrorDetail.CODE_RESEND_FAILED
+		viewModel.resendTelegramLoginCode()
+
+		telegramAuthSession.currentRecoverableErrorDetail = RecoverableErrorDetail.NONE
+
+		assertTrue(viewModel.isShowingTelegramLoginConfirmation())
+	}
+
+	@Test
 	fun testShowPasswordFragmentClearsInvalidPasswordRecoverableErrorOnFallback() {
 		viewModel.setTelegramLoginIdentifier(" +123456789 ")
 		viewModel.setTelegramLoginCode("12345")

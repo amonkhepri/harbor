@@ -81,6 +81,9 @@ public class StartupViewModel extends AndroidViewModel
 	private final MutableLiveData<State> state = new MutableLiveData<>();
 	private final MutableLiveData<TelegramAuthState> telegramAuthState =
 			new MutableLiveData<>(TelegramAuthState.CLOSED);
+	private final MutableLiveData<TelegramAuthSnapshot> telegramAuthSnapshot =
+			new MutableLiveData<>(new TelegramAuthSnapshot(
+					TelegramAuthState.CLOSED, RecoverableErrorDetail.NONE));
 	private String telegramLoginIdentifier = "";
 	private String submittedTelegramLoginIdentifier = "";
 	private String telegramLoginCode = "";
@@ -187,6 +190,8 @@ public class StartupViewModel extends AndroidViewModel
 				telegramLoginCode = telegramLoginPassword = "";
 		state.setValue(TELEGRAM_LOGIN);
 		telegramAuthState.setValue(TelegramAuthState.CLOSED);
+		telegramAuthSnapshot.setValue(new TelegramAuthSnapshot(
+				TelegramAuthState.CLOSED, RecoverableErrorDetail.NONE));
 		runTelegramAuthAction(telegramAuthSession::start);
 	}
 
@@ -216,6 +221,10 @@ public class StartupViewModel extends AndroidViewModel
 
 	LiveData<TelegramAuthState> getTelegramAuthState() {
 		return telegramAuthState;
+	}
+
+	LiveData<TelegramAuthSnapshot> getTelegramAuthSnapshot() {
+		return telegramAuthSnapshot;
 	}
 
 	RecoverableErrorDetail getTelegramRecoverableErrorDetail() {
@@ -265,6 +274,8 @@ public class StartupViewModel extends AndroidViewModel
 		telegramAuthGeneration.incrementAndGet();
 		submittedTelegramLoginIdentifier = telegramLoginCode = telegramLoginPassword = "";
 		telegramAuthState.setValue(TelegramAuthState.CLOSED);
+		telegramAuthSnapshot.setValue(new TelegramAuthSnapshot(
+				TelegramAuthState.CLOSED, RecoverableErrorDetail.NONE));
 		runTelegramAuthAction(() -> {
 			telegramAuthSession.close();
 			telegramAuthSession.start();
@@ -272,14 +283,15 @@ public class StartupViewModel extends AndroidViewModel
 	}
 
 	boolean isShowingTelegramLoginConfirmation() {
-		TelegramAuthState authState = telegramAuthState.getValue();
+		TelegramAuthSnapshot snapshot = telegramAuthSnapshot.getValue();
+		TelegramAuthState authState = snapshot.authState;
 		return authState == TelegramAuthState.CODE_ENTRY ||
 				authState == TelegramAuthState.PASSWORD_ENTRY ||
 				authState == TelegramAuthState.READY ||
 				authState == TelegramAuthState.RECOVERABLE_ERROR &&
-						(getTelegramRecoverableErrorDetail() == RecoverableErrorDetail.INVALID_CODE ||
-								getTelegramRecoverableErrorDetail() == RecoverableErrorDetail.CODE_RESEND_FAILED ||
-								getTelegramRecoverableErrorDetail() == RecoverableErrorDetail.INVALID_PASSWORD);
+						(snapshot.errorDetail == RecoverableErrorDetail.INVALID_CODE ||
+								snapshot.errorDetail == RecoverableErrorDetail.CODE_RESEND_FAILED ||
+								snapshot.errorDetail == RecoverableErrorDetail.INVALID_PASSWORD);
 	}
 
 	void showPasswordFragment() {
@@ -296,8 +308,23 @@ public class StartupViewModel extends AndroidViewModel
 			if (generation != telegramAuthGeneration.get()) return;
 			action.run();
 			if (generation != telegramAuthGeneration.get()) return;
-			telegramAuthState.postValue(telegramAuthSession.getCurrentState());
+			TelegramAuthState authState = telegramAuthSession.getCurrentState();
+			RecoverableErrorDetail errorDetail =
+					telegramAuthSession.getRecoverableErrorDetail();
+			telegramAuthState.postValue(authState);
+			telegramAuthSnapshot.postValue(new TelegramAuthSnapshot(authState, errorDetail));
 		});
+	}
+
+	static class TelegramAuthSnapshot {
+		final TelegramAuthState authState;
+		final RecoverableErrorDetail errorDetail;
+
+		TelegramAuthSnapshot(TelegramAuthState authState,
+				RecoverableErrorDetail errorDetail) {
+			this.authState = authState;
+			this.errorDetail = errorDetail;
+		}
 	}
 
 	private void storePendingTelegramLinkedIdentity() {
