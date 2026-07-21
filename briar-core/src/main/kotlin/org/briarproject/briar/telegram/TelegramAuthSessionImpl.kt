@@ -13,6 +13,7 @@ class TelegramAuthSessionImpl(
 ) : TelegramAuthSession,
 	Service {
 
+	@Volatile
 	private var currentState = TelegramAuthState.CLOSED
 
 	override fun getCurrentState(): TelegramAuthState = currentState
