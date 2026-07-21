@@ -95,7 +95,7 @@ class TelegramLoginPlaceholderFragmentTest {
 			.assertIsDisplayed()
 		assertEquals(
 			TelegramAuthState.CODE_ENTRY,
-			getOrAwaitValue(viewModel.getTelegramAuthState()),
+			getOrAwaitValue(viewModel.getTelegramAuthSnapshot()).authState,
 		)
 		composeRule.onNodeWithTag(TELEGRAM_LOGIN_CODE_RESEND_TAG).performClick()
 		composeRule.waitForIdle()
@@ -107,7 +107,7 @@ class TelegramLoginPlaceholderFragmentTest {
 		assertEquals(1, telegramAuthSession.closeCalls)
 		assertEquals(
 			TelegramAuthState.CLOSED,
-			getOrAwaitValue(viewModel.getTelegramAuthState()),
+			getOrAwaitValue(viewModel.getTelegramAuthSnapshot()).authState,
 		)
 		assertEquals(SIGNED_OUT, getOrAwaitValue(viewModel.getState()))
 	}

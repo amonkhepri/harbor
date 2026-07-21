@@ -73,32 +73,44 @@ class StartupViewModelTest {
 		viewModel.showTelegramLoginPlaceholder()
 		assertEquals(0, telegramAuthSession.startCalls)
 		executor.runNext()
-		assertEquals(TelegramAuthState.IDENTIFIER_ENTRY, getOrAwaitValue(viewModel.telegramAuthState))
+		assertEquals(
+			TelegramAuthState.IDENTIFIER_ENTRY,
+			getOrAwaitValue(viewModel.telegramAuthSnapshot).authState,
+		)
 
 		viewModel.submitTelegramLoginIdentifier()
 		assertEquals(0, telegramAuthSession.identifierSubmitCalls)
 		executor.runNext()
-		assertEquals(TelegramAuthState.CODE_ENTRY, getOrAwaitValue(viewModel.telegramAuthState))
+		assertEquals(
+			TelegramAuthState.CODE_ENTRY,
+			getOrAwaitValue(viewModel.telegramAuthSnapshot).authState,
+		)
 
 		viewModel.resendTelegramLoginCode()
 		assertEquals(0, telegramAuthSession.resendCodeCalls)
 		executor.runNext()
-		assertEquals(TelegramAuthState.CODE_ENTRY, getOrAwaitValue(viewModel.telegramAuthState))
+		assertEquals(
+			TelegramAuthState.CODE_ENTRY,
+			getOrAwaitValue(viewModel.telegramAuthSnapshot).authState,
+		)
 
 		viewModel.submitTelegramLoginCode()
 		assertEquals(0, telegramAuthSession.codeSubmitCalls)
 		executor.runNext()
-		assertEquals(TelegramAuthState.PASSWORD_ENTRY, getOrAwaitValue(viewModel.telegramAuthState))
+		assertEquals(
+			TelegramAuthState.PASSWORD_ENTRY,
+			getOrAwaitValue(viewModel.telegramAuthSnapshot).authState,
+		)
 
 		viewModel.submitTelegramLoginPassword()
 		assertEquals(0, telegramAuthSession.passwordSubmitCalls)
 		executor.runNext()
-		assertEquals(TelegramAuthState.READY, getOrAwaitValue(viewModel.telegramAuthState))
+		assertEquals(TelegramAuthState.READY, getOrAwaitValue(viewModel.telegramAuthSnapshot).authState)
 
 		viewModel.showPasswordFragment()
 		assertEquals(0, telegramAuthSession.closeCalls)
 		executor.runNext()
-		assertEquals(TelegramAuthState.CLOSED, getOrAwaitValue(viewModel.telegramAuthState))
+		assertEquals(TelegramAuthState.CLOSED, getOrAwaitValue(viewModel.telegramAuthSnapshot).authState)
 	}
 
 	@Test
@@ -115,20 +127,20 @@ class StartupViewModelTest {
 		assertEquals(0, telegramAuthSession.closeCalls)
 		executor.runNext()
 		assertEquals(1, telegramAuthSession.closeCalls)
-		assertEquals(TelegramAuthState.CLOSED, getOrAwaitValue(viewModel.telegramAuthState))
+		assertEquals(TelegramAuthState.CLOSED, getOrAwaitValue(viewModel.telegramAuthSnapshot).authState)
 	}
 
 	@Test
 	fun testTelegramAuthActionCancelledInFlightDoesNotPostStaleState() {
-		val observedStates = mutableListOf<TelegramAuthState>()
-		viewModel.telegramAuthState.observeForever(observedStates::add)
+		val observedSnapshots = mutableListOf<StartupViewModel.TelegramAuthSnapshot>()
+		viewModel.telegramAuthSnapshot.observeForever(observedSnapshots::add)
 		telegramAuthSession.onIdentifierSubmitted = viewModel::showPasswordFragment
 
 		viewModel.submitTelegramLoginIdentifier()
 
 		assertEquals(1, telegramAuthSession.identifierSubmitCalls)
-		assertTrue(TelegramAuthState.CODE_ENTRY !in observedStates)
-		assertEquals(TelegramAuthState.CLOSED, observedStates.last())
+		assertTrue(observedSnapshots.none { it.authState == TelegramAuthState.CODE_ENTRY })
+		assertEquals(TelegramAuthState.CLOSED, observedSnapshots.last().authState)
 	}
 
 	@Test
@@ -156,10 +168,13 @@ class StartupViewModelTest {
 
 		viewModel.showTelegramLoginPlaceholder()
 
-		assertEquals(TelegramAuthState.CLOSED, getOrAwaitValue(viewModel.telegramAuthState))
+		assertEquals(TelegramAuthState.CLOSED, getOrAwaitValue(viewModel.telegramAuthSnapshot).authState)
 		assertEquals(0, telegramAuthSession.startCalls)
 		executor.runNext()
-		assertEquals(TelegramAuthState.IDENTIFIER_ENTRY, getOrAwaitValue(viewModel.telegramAuthState))
+		assertEquals(
+			TelegramAuthState.IDENTIFIER_ENTRY,
+			getOrAwaitValue(viewModel.telegramAuthSnapshot).authState,
+		)
 	}
 
 	@Test
@@ -174,10 +189,13 @@ class StartupViewModelTest {
 
 		viewModel.showTelegramLoginIdentifierStep()
 
-		assertEquals(TelegramAuthState.CLOSED, getOrAwaitValue(viewModel.telegramAuthState))
+		assertEquals(TelegramAuthState.CLOSED, getOrAwaitValue(viewModel.telegramAuthSnapshot).authState)
 		assertEquals(0, telegramAuthSession.closeCalls)
 		executor.runNext()
-		assertEquals(TelegramAuthState.IDENTIFIER_ENTRY, getOrAwaitValue(viewModel.telegramAuthState))
+		assertEquals(
+			TelegramAuthState.IDENTIFIER_ENTRY,
+			getOrAwaitValue(viewModel.telegramAuthSnapshot).authState,
+		)
 		assertEquals(1, telegramAuthSession.closeCalls)
 	}
 
@@ -194,7 +212,7 @@ class StartupViewModelTest {
 		assertEquals("", viewModel.getTelegramLoginPassword())
 		assertEquals(
 			TelegramAuthState.CLOSED,
-			getOrAwaitValue(viewModel.getTelegramAuthState()),
+			getOrAwaitValue(viewModel.getTelegramAuthSnapshot()).authState,
 		)
 		assertEquals(SIGNED_OUT, getOrAwaitValue(viewModel.getState()))
 		assertEquals(1, telegramAuthSession.closeCalls)
@@ -240,7 +258,7 @@ class StartupViewModelTest {
 		assertEquals("", viewModel.getTelegramLoginPassword())
 		assertEquals(
 			TelegramAuthState.CLOSED,
-			getOrAwaitValue(viewModel.getTelegramAuthState()),
+			getOrAwaitValue(viewModel.getTelegramAuthSnapshot()).authState,
 		)
 		assertEquals(
 			RecoverableErrorDetail.NONE,
@@ -268,7 +286,7 @@ class StartupViewModelTest {
 		assertEquals("", viewModel.getTelegramLoginPassword())
 		assertEquals(
 			TelegramAuthState.IDENTIFIER_ENTRY,
-			getOrAwaitValue(viewModel.getTelegramAuthState()),
+			getOrAwaitValue(viewModel.getTelegramAuthSnapshot()).authState,
 		)
 		assertEquals(
 			RecoverableErrorDetail.NONE,
@@ -290,7 +308,7 @@ class StartupViewModelTest {
 
 		assertEquals(
 			TelegramAuthState.IDENTIFIER_ENTRY,
-			getOrAwaitValue(viewModel.getTelegramAuthState()),
+			getOrAwaitValue(viewModel.getTelegramAuthSnapshot()).authState,
 		)
 		assertEquals(
 			RecoverableErrorDetail.NONE,
@@ -303,7 +321,7 @@ class StartupViewModelTest {
 		viewModel.setTelegramLoginIdentifier("+123456789")
 		assertEquals(
 			TelegramAuthState.IDENTIFIER_ENTRY,
-			getOrAwaitValue(viewModel.getTelegramAuthState()),
+			getOrAwaitValue(viewModel.getTelegramAuthSnapshot()).authState,
 		)
 	}
 

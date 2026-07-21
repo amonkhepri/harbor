@@ -79,8 +79,6 @@ public class StartupViewModel extends AndroidViewModel
 	private final MutableLiveEvent<String> telegramLinkedIdentityStaged =
 			new MutableLiveEvent<>();
 	private final MutableLiveData<State> state = new MutableLiveData<>();
-	private final MutableLiveData<TelegramAuthState> telegramAuthState =
-			new MutableLiveData<>(TelegramAuthState.CLOSED);
 	private final MutableLiveData<TelegramAuthSnapshot> telegramAuthSnapshot =
 			new MutableLiveData<>(new TelegramAuthSnapshot(
 					TelegramAuthState.CLOSED, RecoverableErrorDetail.NONE));
@@ -189,7 +187,6 @@ public class StartupViewModel extends AndroidViewModel
 		pendingTelegramLinkedIdentity = submittedTelegramLoginIdentifier =
 				telegramLoginCode = telegramLoginPassword = "";
 		state.setValue(TELEGRAM_LOGIN);
-		telegramAuthState.setValue(TelegramAuthState.CLOSED);
 		telegramAuthSnapshot.setValue(new TelegramAuthSnapshot(
 				TelegramAuthState.CLOSED, RecoverableErrorDetail.NONE));
 		runTelegramAuthAction(telegramAuthSession::start);
@@ -217,10 +214,6 @@ public class StartupViewModel extends AndroidViewModel
 
 	void setTelegramLoginPassword(String password) {
 		telegramLoginPassword = password;
-	}
-
-	LiveData<TelegramAuthState> getTelegramAuthState() {
-		return telegramAuthState;
 	}
 
 	LiveData<TelegramAuthSnapshot> getTelegramAuthSnapshot() {
@@ -273,7 +266,6 @@ public class StartupViewModel extends AndroidViewModel
 	void showTelegramLoginIdentifierStep() {
 		telegramAuthGeneration.incrementAndGet();
 		submittedTelegramLoginIdentifier = telegramLoginCode = telegramLoginPassword = "";
-		telegramAuthState.setValue(TelegramAuthState.CLOSED);
 		telegramAuthSnapshot.setValue(new TelegramAuthSnapshot(
 				TelegramAuthState.CLOSED, RecoverableErrorDetail.NONE));
 		runTelegramAuthAction(() -> {
@@ -311,7 +303,6 @@ public class StartupViewModel extends AndroidViewModel
 			TelegramAuthState authState = telegramAuthSession.getCurrentState();
 			RecoverableErrorDetail errorDetail =
 					telegramAuthSession.getRecoverableErrorDetail();
-			telegramAuthState.postValue(authState);
 			telegramAuthSnapshot.postValue(new TelegramAuthSnapshot(authState, errorDetail));
 		});
 	}
