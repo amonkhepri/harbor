@@ -220,10 +220,6 @@ public class StartupViewModel extends AndroidViewModel
 		return telegramAuthSnapshot;
 	}
 
-	RecoverableErrorDetail getTelegramRecoverableErrorDetail() {
-		return telegramAuthSession.getRecoverableErrorDetail();
-	}
-
 	void submitTelegramLoginIdentifier() {
 		telegramLoginCode = telegramLoginPassword = "";
 		String identifier = telegramLoginIdentifier.trim();
@@ -236,7 +232,7 @@ public class StartupViewModel extends AndroidViewModel
 		runTelegramAuthAction(() -> {
 			telegramAuthSession.submitCode(code);
 			if (telegramAuthSession.getCurrentState() != TelegramAuthState.RECOVERABLE_ERROR ||
-					getTelegramRecoverableErrorDetail() != RecoverableErrorDetail.INVALID_CODE) {
+					telegramAuthSession.getRecoverableErrorDetail() != RecoverableErrorDetail.INVALID_CODE) {
 				telegramLoginCode = "";
 			}
 		});
@@ -252,7 +248,7 @@ public class StartupViewModel extends AndroidViewModel
 		runTelegramAuthAction(() -> {
 			telegramAuthSession.submitPassword(password);
 			if (telegramAuthSession.getCurrentState() != TelegramAuthState.RECOVERABLE_ERROR ||
-					getTelegramRecoverableErrorDetail() != RecoverableErrorDetail.INVALID_PASSWORD) {
+					telegramAuthSession.getRecoverableErrorDetail() != RecoverableErrorDetail.INVALID_PASSWORD) {
 				telegramLoginPassword = "";
 			}
 		});

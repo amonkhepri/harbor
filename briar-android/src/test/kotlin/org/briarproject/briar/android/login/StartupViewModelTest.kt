@@ -262,7 +262,7 @@ class StartupViewModelTest {
 		)
 		assertEquals(
 			RecoverableErrorDetail.NONE,
-			viewModel.getTelegramRecoverableErrorDetail(),
+			getOrAwaitValue(viewModel.getTelegramAuthSnapshot()).errorDetail,
 		)
 		assertEquals(SIGNED_OUT, getOrAwaitValue(viewModel.getState()))
 		assertEquals(1, telegramAuthSession.closeCalls)
@@ -290,7 +290,7 @@ class StartupViewModelTest {
 		)
 		assertEquals(
 			RecoverableErrorDetail.NONE,
-			viewModel.getTelegramRecoverableErrorDetail(),
+			getOrAwaitValue(viewModel.getTelegramAuthSnapshot()).errorDetail,
 		)
 		assertEquals(TELEGRAM_LOGIN, getOrAwaitValue(viewModel.getState()))
 		assertEquals(1, telegramAuthSession.closeCalls)
@@ -312,7 +312,7 @@ class StartupViewModelTest {
 		)
 		assertEquals(
 			RecoverableErrorDetail.NONE,
-			viewModel.getTelegramRecoverableErrorDetail(),
+			getOrAwaitValue(viewModel.getTelegramAuthSnapshot()).errorDetail,
 		)
 		assertEquals(TELEGRAM_LOGIN, getOrAwaitValue(viewModel.getState()))
 		assertEquals(1, telegramAuthSession.startCalls)
