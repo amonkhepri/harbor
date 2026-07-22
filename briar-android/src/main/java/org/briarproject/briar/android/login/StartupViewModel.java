@@ -258,6 +258,7 @@ public class StartupViewModel extends AndroidViewModel
 	}
 
 	void completeTelegramLoginConfirmation() {
+		if (submittedTelegramLoginIdentifier.isEmpty()) return;
 		pendingTelegramLinkedIdentity = submittedTelegramLoginIdentifier;
 		showPasswordFragment();
 	}

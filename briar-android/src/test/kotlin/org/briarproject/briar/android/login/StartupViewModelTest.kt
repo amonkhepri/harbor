@@ -154,6 +154,7 @@ class StartupViewModelTest {
 		viewModel.setTelegramLoginIdentifier("unverified")
 		executor.runNext()
 		viewModel.completeTelegramLoginConfirmation()
+		viewModel.completeTelegramLoginConfirmation()
 
 		val field = StartupViewModel::class.java
 			.getDeclaredField("pendingTelegramLinkedIdentity")
