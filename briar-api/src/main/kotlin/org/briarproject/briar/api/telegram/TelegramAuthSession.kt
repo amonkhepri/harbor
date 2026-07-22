@@ -1,6 +1,8 @@
 package org.briarproject.briar.api.telegram
 
 interface TelegramAuthSession {
+	data class Snapshot(val authState: TelegramAuthState, val errorDetail: RecoverableErrorDetail)
+
 	enum class RecoverableErrorDetail {
 		NONE,
 		MISSING_TDLIB,
@@ -15,8 +17,7 @@ interface TelegramAuthSession {
 		PERSISTED_SESSION_IDENTITY_UNVERIFIED,
 	}
 
-	fun getCurrentState(): TelegramAuthState
-	fun getRecoverableErrorDetail(): RecoverableErrorDetail
+	fun getSnapshot(): Snapshot
 	fun start()
 	fun submitIdentifier(identifier: String)
 	fun resendCode()

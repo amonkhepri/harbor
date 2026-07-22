@@ -57,6 +57,7 @@ import org.briarproject.briar.R
 import org.briarproject.briar.android.activity.ActivityComponent
 import org.briarproject.briar.android.fragment.BaseFragment
 import org.briarproject.briar.api.telegram.TelegramAuthSession.RecoverableErrorDetail
+import org.briarproject.briar.api.telegram.TelegramAuthSession.Snapshot
 import org.briarproject.briar.api.telegram.TelegramAuthState
 import javax.inject.Inject
 
@@ -254,16 +255,14 @@ internal fun TelegramLoginScreen(viewModel: StartupViewModel) {
 }
 
 @Composable
-private fun rememberTelegramAuthSnapshot(
-	viewModel: StartupViewModel,
-): State<StartupViewModel.TelegramAuthSnapshot> {
+private fun rememberTelegramAuthSnapshot(viewModel: StartupViewModel): State<Snapshot> {
 	val lifecycleOwner = LocalLifecycleOwner.current
 	val authLiveData = viewModel.getTelegramAuthSnapshot()
 	val snapshot = remember(viewModel, authLiveData) {
 		mutableStateOf(authLiveData.value!!)
 	}
 	DisposableEffect(viewModel, authLiveData, lifecycleOwner) {
-		val observer = Observer<StartupViewModel.TelegramAuthSnapshot> { authSnapshot ->
+		val observer = Observer<Snapshot> { authSnapshot ->
 			snapshot.value = authSnapshot
 		}
 		authLiveData.observe(lifecycleOwner, observer)

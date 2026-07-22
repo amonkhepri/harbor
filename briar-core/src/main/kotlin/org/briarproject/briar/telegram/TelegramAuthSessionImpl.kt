@@ -2,6 +2,7 @@ package org.briarproject.briar.telegram
 
 import org.briarproject.briar.api.telegram.TelegramAuthSession
 import org.briarproject.briar.api.telegram.TelegramAuthSession.RecoverableErrorDetail
+import org.briarproject.briar.api.telegram.TelegramAuthSession.Snapshot
 import org.briarproject.briar.api.telegram.TelegramAuthState
 import org.briarproject.bramble.api.lifecycle.Service
 import java.io.File
@@ -16,10 +17,11 @@ class TelegramAuthSessionImpl(
 	@Volatile
 	private var currentState = TelegramAuthState.CLOSED
 
-	override fun getCurrentState(): TelegramAuthState = currentState
-
-	override fun getRecoverableErrorDetail(): RecoverableErrorDetail =
-		tdlibLoginClient.getRecoverableErrorDetail()
+	override fun getSnapshot(): Snapshot = accessGate.run(
+		Snapshot(TelegramAuthState.CLOSED, RecoverableErrorDetail.NONE),
+	) {
+		Snapshot(currentState, tdlibLoginClient.getRecoverableErrorDetail())
+	}
 
 	override fun start() = updateState(tdlibLoginClient::start)
 

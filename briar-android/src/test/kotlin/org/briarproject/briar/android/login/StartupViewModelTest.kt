@@ -15,6 +15,7 @@ import org.briarproject.briar.android.viewmodel.LiveDataTestUtil.getOrAwaitValue
 import org.briarproject.briar.api.android.AndroidNotificationManager
 import org.briarproject.briar.api.telegram.TelegramAuthSession
 import org.briarproject.briar.api.telegram.TelegramAuthSession.RecoverableErrorDetail
+import org.briarproject.briar.api.telegram.TelegramAuthSession.Snapshot
 import org.briarproject.briar.api.telegram.TelegramAuthState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -132,7 +133,7 @@ class StartupViewModelTest {
 
 	@Test
 	fun testTelegramAuthActionCancelledInFlightDoesNotPostStaleState() {
-		val observedSnapshots = mutableListOf<StartupViewModel.TelegramAuthSnapshot>()
+		val observedSnapshots = mutableListOf<Snapshot>()
 		viewModel.telegramAuthSnapshot.observeForever(observedSnapshots::add)
 		telegramAuthSession.onIdentifierSubmitted = viewModel::showPasswordFragment
 
@@ -338,9 +339,10 @@ class StartupViewModelTest {
 		var codeSubmitCalls = 0
 		var passwordSubmitCalls = 0
 
-		override fun getCurrentState(): TelegramAuthState = currentAuthState
-
-		override fun getRecoverableErrorDetail(): RecoverableErrorDetail = currentRecoverableErrorDetail
+		override fun getSnapshot() = TelegramAuthSession.Snapshot(
+			currentAuthState,
+			currentRecoverableErrorDetail,
+		)
 
 		override fun start() {
 			startCalls++

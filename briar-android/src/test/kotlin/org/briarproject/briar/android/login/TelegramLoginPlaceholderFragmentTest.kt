@@ -317,9 +317,10 @@ class TelegramLoginPlaceholderFragmentTest {
 		var resendCodeCalls = 0
 		var closeCalls = 0
 
-		override fun getCurrentState(): TelegramAuthState = currentAuthState
-
-		override fun getRecoverableErrorDetail(): RecoverableErrorDetail = currentRecoverableErrorDetail
+		override fun getSnapshot() = TelegramAuthSession.Snapshot(
+			currentAuthState,
+			currentRecoverableErrorDetail,
+		)
 
 		override fun start() {
 			currentAuthState = TelegramAuthState.IDENTIFIER_ENTRY

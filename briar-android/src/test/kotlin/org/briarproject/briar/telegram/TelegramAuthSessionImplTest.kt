@@ -27,9 +27,14 @@ class TelegramAuthSessionImplTest {
 	}
 
 	private fun assertDisabledSessionClosed(session: TelegramAuthSessionImpl) {
+		val snapshot = session.getSnapshot()
 		assertEquals(
-			TelegramAuthState.CLOSED to RecoverableErrorDetail.NONE,
-			session.getCurrentState() to session.getRecoverableErrorDetail(),
+			TelegramAuthState.CLOSED,
+			snapshot.authState,
+		)
+		assertEquals(
+			RecoverableErrorDetail.NONE,
+			snapshot.errorDetail,
 		)
 	}
 }
