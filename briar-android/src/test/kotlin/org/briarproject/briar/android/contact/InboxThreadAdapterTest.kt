@@ -1,6 +1,7 @@
 package org.briarproject.briar.android.contact
 
 import org.briarproject.briar.api.connector.ConnectorSource
+import org.briarproject.briar.api.connector.ConnectorMessageType
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -21,10 +22,14 @@ class InboxThreadAdapterTest {
 		fun assertContentsChanged(changed: FakeConnectorInboxThreadItem) =
 			assertEquals(false, callback.areContentsTheSame(item, changed))
 
-		assertEquals(true to true, callback.areItemsTheSame(item, item.copy()) to
-				callback.areContentsTheSame(item, item.copy()))
+		assertEquals(
+			true to true,
+			callback.areItemsTheSame(item, item.copy()) to
+				callback.areContentsTheSame(item, item.copy()),
+		)
 		assertContentsChanged(item.copy(title = "new"))
 		assertContentsChanged(item.copy(previewText = "new"))
+		assertContentsChanged(item.copy(previewType = ConnectorMessageType.PHOTO))
 		assertContentsChanged(item.copy(isLastMessageOutgoing = true))
 		assertContentsChanged(item.copy(isPreviewLoading = true))
 		assertContentsChanged(item.copy(latestActivityMillis = 2L))

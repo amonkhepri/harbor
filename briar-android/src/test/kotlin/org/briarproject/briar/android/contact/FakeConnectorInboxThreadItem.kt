@@ -1,5 +1,6 @@
 package org.briarproject.briar.android.contact
 
+import org.briarproject.briar.api.connector.ConnectorMessageType
 import org.briarproject.briar.api.connector.ConnectorSource
 
 internal data class FakeConnectorInboxThreadItem(
@@ -8,6 +9,7 @@ internal data class FakeConnectorInboxThreadItem(
 	override val title: String = "synthetic title",
 	override val latestActivityMillis: Long = 42L,
 	override val previewText: String = "",
+	override val previewType: ConnectorMessageType = ConnectorMessageType.TEXT,
 	override val isLastMessageOutgoing: Boolean = false,
 	override val isPreviewLoading: Boolean = false,
 ) : ConnectorInboxThreadItem
