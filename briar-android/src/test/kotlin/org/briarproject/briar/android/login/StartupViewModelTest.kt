@@ -7,9 +7,11 @@ import org.briarproject.bramble.api.account.AccountManager
 import org.briarproject.bramble.api.event.EventBus
 import org.briarproject.bramble.api.lifecycle.LifecycleManager
 import org.briarproject.bramble.api.lifecycle.LifecycleManager.LifecycleState
+import org.briarproject.bramble.api.lifecycle.event.LifecycleEvent
 import org.briarproject.bramble.api.settings.SettingsManager
 import org.briarproject.bramble.test.ImmediateExecutor
 import org.briarproject.briar.android.login.StartupViewModel.State.SIGNED_OUT
+import org.briarproject.briar.android.login.StartupViewModel.State.STARTED
 import org.briarproject.briar.android.login.StartupViewModel.State.TELEGRAM_LOGIN
 import org.briarproject.briar.android.viewmodel.LiveDataTestUtil.getOrAwaitValue
 import org.briarproject.briar.api.android.AndroidNotificationManager
@@ -34,6 +36,7 @@ class StartupViewModelTest {
 
 	private lateinit var viewModel: StartupViewModel
 	private lateinit var telegramAuthSession: FakeTelegramAuthSession
+	private lateinit var accountManager: AccountManager
 
 	@Before
 	fun setUp() {
@@ -43,7 +46,7 @@ class StartupViewModelTest {
 
 	private fun createViewModel(ioExecutor: Executor): StartupViewModel {
 		val app = mock(Application::class.java)
-		val accountManager = mock(AccountManager::class.java)
+		accountManager = mock(AccountManager::class.java)
 		val lifecycleManager = mock(LifecycleManager::class.java)
 		val notificationManager = mock(AndroidNotificationManager::class.java)
 		val eventBus = mock(EventBus::class.java)
@@ -177,7 +180,7 @@ class StartupViewModelTest {
 	}
 
 	@Test
-	fun testPasswordValidationStoresIdentityFromSubmittedAttempt() {
+	fun testPasswordValidationStoresIdentityAfterDatabaseStarts() {
 		val executor = QueuedExecutor()
 		viewModel = createViewModel(executor)
 		setPrivateString("pendingTelegramLinkedIdentity", "first")
@@ -186,8 +189,14 @@ class StartupViewModelTest {
 		setPrivateString("pendingTelegramLinkedIdentity", "replacement")
 		executor.runNext()
 
+		assertEquals("", getPrivateString("lastTelegramLinkedIdentityStaged"))
+		`when`(accountManager.hasDatabaseKey()).thenReturn(true)
+		viewModel.eventOccurred(LifecycleEvent(LifecycleState.RUNNING))
+		executor.runNext()
+
 		assertEquals("first", getPrivateString("lastTelegramLinkedIdentityStaged"))
 		assertEquals("replacement", getPrivateString("pendingTelegramLinkedIdentity"))
+		assertEquals(STARTED, getOrAwaitValue(viewModel.state))
 	}
 
 	@Test

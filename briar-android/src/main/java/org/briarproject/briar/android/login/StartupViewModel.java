@@ -89,6 +89,8 @@ public class StartupViewModel extends AndroidViewModel
 	private String telegramLoginPassword = "";
 	private volatile String pendingTelegramLinkedIdentity = "";
 	private volatile String lastTelegramLinkedIdentityStaged = "";
+	private volatile String signedInTelegramLinkedIdentity = "";
+	private boolean storingTelegramLinkedIdentity = false;
 
 	@Inject
 	StartupViewModel(Application app,
@@ -132,12 +134,27 @@ public class StartupViewModel extends AndroidViewModel
 	@UiThread
 	private void updateState(LifecycleState s) {
 		if (accountManager.hasDatabaseKey()) {
-			if (s.isAfter(STARTING_SERVICES)) state.setValue(STARTED);
+			if (s.isAfter(STARTING_SERVICES)) finishStartup();
 			else if (s == MIGRATING_DATABASE) state.setValue(MIGRATING);
 			else if (s == COMPACTING_DATABASE) state.setValue(COMPACTING);
 			else state.setValue(STARTING);
 		} else {
 			if (state.getValue() != TELEGRAM_LOGIN) state.setValue(SIGNED_OUT);
+		}
+	}
+
+	@UiThread
+	private void finishStartup() {
+		String linkedIdentity = signedInTelegramLinkedIdentity;
+		if (linkedIdentity.isEmpty()) {
+			state.setValue(STARTED);
+		} else if (!storingTelegramLinkedIdentity) {
+			storingTelegramLinkedIdentity = true;
+			ioExecutor.execute(() -> {
+				storePendingTelegramLinkedIdentity(linkedIdentity);
+				signedInTelegramLinkedIdentity = "";
+				state.postValue(STARTED);
+			});
 		}
 	}
 
@@ -155,7 +172,7 @@ public class StartupViewModel extends AndroidViewModel
 		ioExecutor.execute(() -> {
 			try {
 				accountManager.signIn(password);
-				storePendingTelegramLinkedIdentity(linkedIdentity);
+				signedInTelegramLinkedIdentity = linkedIdentity;
 				passwordValidated.postEvent(SUCCESS);
 				state.postValue(SIGNED_IN);
 			} catch (DecryptionException e) {
