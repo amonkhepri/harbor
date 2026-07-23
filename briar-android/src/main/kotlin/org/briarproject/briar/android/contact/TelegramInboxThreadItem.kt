@@ -1,6 +1,7 @@
 package org.briarproject.briar.android.contact
 
 import org.briarproject.briar.api.connector.ConnectorSources
+import org.briarproject.briar.api.connector.ConnectorMessageType
 import org.briarproject.briar.api.connector.ConnectorThread
 
 class TelegramInboxThreadItem(
@@ -10,6 +11,7 @@ class TelegramInboxThreadItem(
 	override val previewText: String,
 	override val isLastMessageOutgoing: Boolean,
 	override val isPreviewLoading: Boolean,
+	override val previewType: ConnectorMessageType = ConnectorMessageType.TEXT,
 ) : ConnectorInboxThreadItem {
 
 	constructor(thread: ConnectorThread) : this(
@@ -19,6 +21,7 @@ class TelegramInboxThreadItem(
 		cleanPreviewText(thread.latestMessageText),
 		thread.isLatestMessageOutgoing,
 		false,
+		thread.latestMessageType,
 	)
 
 	constructor(

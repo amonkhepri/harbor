@@ -1,6 +1,7 @@
 package org.briarproject.briar.android.connector
 
 import org.briarproject.briar.api.connector.ConnectorMessage
+import org.briarproject.briar.api.connector.ConnectorMessageType
 import org.briarproject.briar.api.connector.ConnectorSource
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -8,11 +9,12 @@ import org.junit.Test
 class ConnectorConversationMessageItemTest {
 
 	@Test
-	fun testFromMessagesSkipsBlankTextAndSortsByConnectorOrder() {
+	fun testFromMessagesKeepsPhotoButSkipsBlankTextAndSortsByConnectorOrder() {
 		val items = ConnectorConversationMessageItem.fromMessages(
 			listOf(
 				connectorMessage("30", 30, true, "new", 30L),
 				connectorMessage("2", 20, false, "", 2L),
+				connectorMessage("3", 25, false, "", 3L, ConnectorMessageType.PHOTO),
 				connectorMessage("4", 40, false, " \t\n", 4L),
 				connectorMessage("1", 10, false, "old", 1L),
 				connectorMessage("20", 30, false, "same time", 20L),
@@ -22,6 +24,13 @@ class ConnectorConversationMessageItemTest {
 		assertEquals(
 			listOf(
 				connectorMessageItem("1", false, "old", 10000L),
+				connectorMessageItem(
+					"3",
+					false,
+					"",
+					25000L,
+					ConnectorMessageType.PHOTO,
+				),
 				connectorMessageItem("20", false, "same time", 30000L),
 				connectorMessageItem("30", true, "new", 30000L),
 			),
@@ -34,6 +43,7 @@ class ConnectorConversationMessageItemTest {
 		isOutgoing: Boolean,
 		text: String,
 		dateMillis: Long,
+		type: ConnectorMessageType = ConnectorMessageType.TEXT,
 	): ConnectorConversationMessageItem = ConnectorConversationMessageItem(
 		connectorSource = CONNECTOR_SOURCE,
 		connectorThreadId = "thread-1",
@@ -41,6 +51,7 @@ class ConnectorConversationMessageItemTest {
 		dateMillis = dateMillis,
 		isOutgoing = isOutgoing,
 		text = text,
+		type = type,
 	)
 
 	private fun connectorMessage(
@@ -49,6 +60,7 @@ class ConnectorConversationMessageItemTest {
 		isOutgoing: Boolean,
 		text: String,
 		sourceMessageOrder: Long,
+		type: ConnectorMessageType = ConnectorMessageType.TEXT,
 	): ConnectorMessage = ConnectorMessage(
 		source = CONNECTOR_SOURCE,
 		threadId = "thread-1",
@@ -57,6 +69,7 @@ class ConnectorConversationMessageItemTest {
 		isOutgoing = isOutgoing,
 		text = text,
 		sourceMessageOrder = sourceMessageOrder,
+		type = type,
 	)
 
 	companion object {

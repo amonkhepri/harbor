@@ -2,6 +2,7 @@ package org.briarproject.briar.android.connector
 
 import org.briarproject.briar.api.connector.ConnectorMessage
 import org.briarproject.briar.api.connector.ConnectorSource
+import org.briarproject.briar.api.connector.ConnectorMessageType
 
 data class ConnectorConversationMessageItem(
 	val connectorSource: ConnectorSource,
@@ -10,6 +11,7 @@ data class ConnectorConversationMessageItem(
 	val dateMillis: Long,
 	val isOutgoing: Boolean,
 	val text: String,
+	val type: ConnectorMessageType = ConnectorMessageType.TEXT,
 ) {
 	val stableId: String
 		get() = "${connectorSource.id}:$connectorThreadId:$connectorMessageId"
@@ -25,7 +27,7 @@ data class ConnectorConversationMessageItem(
 
 		fun fromMessages(messages: List<ConnectorMessage>): List<ConnectorConversationMessageItem> =
 			messages.sortedWith(byDateAscending)
-				.filter { it.text.trim().isNotEmpty() }
+				.filter { it.type == ConnectorMessageType.PHOTO || it.text.trim().isNotEmpty() }
 				.map { from(it) }
 
 		fun from(message: ConnectorMessage): ConnectorConversationMessageItem =
@@ -36,6 +38,7 @@ data class ConnectorConversationMessageItem(
 				message.dateSeconds * 1000L,
 				message.isOutgoing,
 				message.text,
+				message.type,
 			)
 	}
 }

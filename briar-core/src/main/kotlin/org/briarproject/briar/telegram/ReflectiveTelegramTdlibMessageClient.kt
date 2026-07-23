@@ -1,6 +1,7 @@
 package org.briarproject.briar.telegram
 
 import org.briarproject.briar.api.connector.ConnectorMessage
+import org.briarproject.briar.api.connector.ConnectorMessageType
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult.LoadFailed
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult.Success
@@ -61,7 +62,7 @@ class ReflectiveTelegramTdlibMessageClient(
 						val messageId = getMessageId(rawMessage) ?: continue
 						if (!seenMessageIds.add(messageId)) continue
 						newRawMessage = true
-						val message = mapTextMessage(rawMessage) ?: continue
+						val message = mapMessage(rawMessage) ?: continue
 						if (messages.size < safeLimit) messages += message
 					}
 					requestCount++
@@ -188,23 +189,32 @@ class ReflectiveTelegramTdlibMessageClient(
 	private fun mapChat(chat: Any): ConnectorThread? {
 		if (chat.javaClass.simpleName != "Chat") return null
 		val lastMessage = getObjectField(chat, "lastMessage")
-		val lastTextMessage = mapTextMessage(lastMessage)
+		val latestMessage = mapMessage(lastMessage)
 		return ConnectorThread(
 			source = ConnectorSources.TELEGRAM,
 			threadId = getLongField(chat, "id").toString(),
 			title = getStringField(chat, "title"),
 			latestActivityDateSeconds = lastMessage?.let { getIntField(it, "date") } ?: 0,
-			latestMessageText = lastTextMessage?.text.orEmpty(),
+			latestMessageText = latestMessage?.text.orEmpty(),
 			isLatestMessageOutgoing = lastMessage?.let { getBooleanField(it, "isOutgoing") } ?: false,
+			latestMessageType = latestMessage?.type ?: ConnectorMessageType.TEXT,
 		)
 	}
 
 	@Throws(ReflectiveOperationException::class)
-	private fun mapTextMessage(message: Any?): ConnectorMessage? {
+	private fun mapMessage(message: Any?): ConnectorMessage? {
 		if (message == null || message.javaClass.simpleName != "Message") return null
 		val content = getObjectField(message, "content")
-		if (content?.javaClass?.simpleName != "MessageText") return null
-		val formattedText = getObjectField(content, "text")
+		val type = when (content?.javaClass?.simpleName) {
+			"MessageText" -> ConnectorMessageType.TEXT
+			"MessagePhoto" -> ConnectorMessageType.PHOTO
+			else -> return null
+		}
+		val formattedText = if (type == ConnectorMessageType.TEXT) {
+			getObjectField(content, "text")
+		} else {
+			null
+		}
 		val chatId = getLongField(message, "chatId")
 		val messageId = getLongField(message, "id")
 		return ConnectorMessage(
@@ -215,6 +225,7 @@ class ReflectiveTelegramTdlibMessageClient(
 			isOutgoing = getBooleanField(message, "isOutgoing"),
 			text = formattedText?.let { getStringField(it, "text") }.orEmpty(),
 			sourceMessageOrder = messageId,
+			type = type,
 		)
 	}
 

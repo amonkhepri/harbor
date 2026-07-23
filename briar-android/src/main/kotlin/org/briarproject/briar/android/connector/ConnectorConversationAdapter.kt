@@ -9,6 +9,7 @@ import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
 import org.briarproject.briar.R
 import org.briarproject.briar.android.util.UiUtils.formatDate
+import org.briarproject.briar.api.connector.ConnectorMessageType
 
 internal class ConnectorConversationAdapter :
 	ListAdapter<
@@ -38,7 +39,11 @@ internal class ConnectorConversationAdapter :
 			itemView.findViewById(R.id.connectorMessageDate)
 
 		fun bind(item: ConnectorConversationMessageItem) {
-			text.text = item.text
+			text.text = if (item.type == ConnectorMessageType.PHOTO) {
+				text.resources.getString(R.string.connector_message_photo)
+			} else {
+				item.text
+			}
 			direction.setText(
 				if (item.isOutgoing) {
 					R.string.connector_conversation_direction_outgoing
@@ -63,6 +68,7 @@ internal class ConnectorConversationAdapter :
 			i2: ConnectorConversationMessageItem,
 		): Boolean = i1.dateMillis == i2.dateMillis &&
 			i1.isOutgoing == i2.isOutgoing &&
-			i1.text == i2.text
+			i1.text == i2.text &&
+			i1.type == i2.type
 	}
 }

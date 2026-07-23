@@ -1,6 +1,7 @@
 package org.briarproject.briar.telegram
 
 import org.briarproject.briar.api.connector.ConnectorMessage
+import org.briarproject.briar.api.connector.ConnectorMessageType
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult.LoadFailed
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult.Success
@@ -22,6 +23,7 @@ private fun telegramMessage(
 	dateSeconds: Int,
 	isOutgoing: Boolean,
 	text: String,
+	type: ConnectorMessageType = ConnectorMessageType.TEXT,
 ) = ConnectorMessage(
 	ConnectorSources.TELEGRAM,
 	chatId.toString(),
@@ -30,6 +32,7 @@ private fun telegramMessage(
 	isOutgoing,
 	text,
 	messageId,
+	type,
 )
 
 private fun telegramThread(
@@ -38,6 +41,7 @@ private fun telegramThread(
 	latestActivityDateSeconds: Int,
 	latestMessageText: String = "",
 	isLatestMessageOutgoing: Boolean = false,
+	latestMessageType: ConnectorMessageType = ConnectorMessageType.TEXT,
 ) = ConnectorThread(
 	ConnectorSources.TELEGRAM,
 	chatId.toString(),
@@ -45,6 +49,7 @@ private fun telegramThread(
 	latestActivityDateSeconds,
 	latestMessageText,
 	isLatestMessageOutgoing,
+	latestMessageType,
 )
 
 class TelegramConnectorMessageTest {
@@ -185,10 +190,25 @@ class TelegramConnectorMessageTest {
 					"chat preview",
 					true,
 				),
-				telegramThread(11L, "", 1_700_000_001, "", true),
+				telegramThread(
+					11L,
+					"",
+					1_700_000_001,
+					"",
+					true,
+					ConnectorMessageType.PHOTO,
+				),
 			) to
 				listOf(
 					telegramMessage(10L, 20L, 1_700_000_001, false, ""),
+					telegramMessage(
+						10L,
+						21L,
+						1_700_000_002,
+						false,
+						"",
+						ConnectorMessageType.PHOTO,
+					),
 				),
 			client.getRecentThreads(3) to readMessages(client, "10", 3),
 		)

@@ -11,6 +11,7 @@ import androidx.recyclerview.widget.RecyclerView
 import org.briarproject.briar.R
 import org.briarproject.briar.android.util.UiUtils.formatDate
 import org.briarproject.briar.api.connector.ConnectorSources
+import org.briarproject.briar.api.connector.ConnectorMessageType
 
 @UiThread
 class ConnectorInboxThreadViewHolder(view: View) : RecyclerView.ViewHolder(view) {
@@ -34,6 +35,8 @@ class ConnectorInboxThreadViewHolder(view: View) : RecyclerView.ViewHolder(view)
 		preview.text = when {
 			item.isPreviewLoading ->
 				preview.resources.getString(R.string.connector_thread_preview_loading)
+			item.previewType == ConnectorMessageType.PHOTO ->
+				previewText(preview.resources, item, R.string.connector_message_photo)
 			item.hasPreviewText() -> previewText(preview.resources, item)
 			else -> preview.resources.getString(R.string.connector_thread_preview_empty)
 		}
@@ -76,13 +79,25 @@ class ConnectorInboxThreadViewHolder(view: View) : RecyclerView.ViewHolder(view)
 		}
 
 		fun previewText(resources: Resources, item: ConnectorInboxThreadItem): CharSequence =
-			if (!item.isLastMessageOutgoing) {
-				item.previewText
-			} else {
-				resources.getString(
-					R.string.connector_thread_preview_outgoing,
-					item.previewText,
-				)
-			}
+			previewText(resources, item, item.previewText)
+
+		fun previewText(
+			resources: Resources,
+			item: ConnectorInboxThreadItem,
+			@androidx.annotation.StringRes textRes: Int,
+		): CharSequence = previewText(resources, item, resources.getString(textRes))
+
+		private fun previewText(
+			resources: Resources,
+			item: ConnectorInboxThreadItem,
+			text: CharSequence,
+		): CharSequence = if (!item.isLastMessageOutgoing) {
+			text
+		} else {
+			resources.getString(
+				R.string.connector_thread_preview_outgoing,
+				text,
+			)
+		}
 	}
 }

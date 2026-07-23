@@ -169,6 +169,7 @@
 	<string name="connector_thread_preview_loading">Loading preview...</string>
 	<string name="connector_thread_preview_empty">No recent text</string>
 	<string name="connector_thread_preview_outgoing">Outgoing: %1$s</string>
+	<string name="connector_message_photo">Photo</string>
 	<string name="telegram_inbox_loading">Loading Telegram inbox...</string>
 	<string name="telegram_inbox_account_unavailable">Telegram account unavailable</string>
 	<string name="telegram_inbox_empty">No recent Telegram chats</string>

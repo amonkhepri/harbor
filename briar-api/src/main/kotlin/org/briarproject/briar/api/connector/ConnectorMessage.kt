@@ -8,4 +8,10 @@ data class ConnectorMessage(
 	val isOutgoing: Boolean,
 	val text: String,
 	val sourceMessageOrder: Long = 0L,
+	val type: ConnectorMessageType = ConnectorMessageType.TEXT,
 )
+
+enum class ConnectorMessageType {
+	TEXT,
+	PHOTO,
+}
