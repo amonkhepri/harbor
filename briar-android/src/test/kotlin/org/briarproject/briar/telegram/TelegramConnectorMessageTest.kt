@@ -162,6 +162,12 @@ class TelegramConnectorMessageTest {
 					body = "chat preview",
 					isOutgoing = true,
 				),
+				chat(
+					11L,
+					lastMessageDateSeconds = 1_700_000_001,
+					isOutgoing = true,
+					isText = false,
+				),
 			)
 			Client.setMessages(
 				10L,
@@ -179,6 +185,7 @@ class TelegramConnectorMessageTest {
 					"chat preview",
 					true,
 				),
+				telegramThread(11L, "", 1_700_000_001, "", true),
 			) to
 				listOf(
 					telegramMessage(10L, 20L, 1_700_000_001, false, ""),
@@ -391,16 +398,18 @@ class TelegramConnectorMessageTest {
 		lastMessageDateSeconds: Int,
 		body: String = "",
 		isOutgoing: Boolean = false,
+		isText: Boolean = true,
 	): TdApi.Chat = TdApi.Chat().also {
 		it.id = id
 		it.title = ""
-		it.lastMessage = textMessage(
-			id,
-			id * 10,
-			lastMessageDateSeconds,
-			isOutgoing,
-			body,
-		)
+		it.lastMessage =
+			if (isText) {
+				textMessage(id, id * 10, lastMessageDateSeconds, isOutgoing, body)
+			} else {
+				photoMessage(id, id * 10, lastMessageDateSeconds).also { message ->
+					message.isOutgoing = isOutgoing
+				}
+			}
 	}
 
 	private fun textMessage(

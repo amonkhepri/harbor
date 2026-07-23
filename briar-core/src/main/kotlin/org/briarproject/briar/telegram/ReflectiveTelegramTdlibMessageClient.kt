@@ -195,7 +195,7 @@ class ReflectiveTelegramTdlibMessageClient(
 			title = getStringField(chat, "title"),
 			latestActivityDateSeconds = lastMessage?.let { getIntField(it, "date") } ?: 0,
 			latestMessageText = lastTextMessage?.text.orEmpty(),
-			isLatestMessageOutgoing = lastTextMessage?.isOutgoing ?: false,
+			isLatestMessageOutgoing = lastMessage?.let { getBooleanField(it, "isOutgoing") } ?: false,
 		)
 	}
 
