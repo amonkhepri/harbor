@@ -142,10 +142,12 @@ class SettingsViewModel extends DbViewModel implements EventListener {
 
 	private void loadSettings() {
 		runOnDbThread(() -> {
+			boolean settingsLoaded = false;
 			try {
 				long start = now();
 				settings = settingsManager.getSettings(SETTINGS_NAMESPACE);
 				updateSettings(settings);
+				settingsLoaded = true;
 				connectionsManager.updateBtSetting(
 						settingsManager.getSettings(BT_NAMESPACE));
 				connectionsManager.updateWifiSettings(
@@ -154,6 +156,7 @@ class SettingsViewModel extends DbViewModel implements EventListener {
 						settingsManager.getSettings(TOR_NAMESPACE));
 				logDuration(LOG, "Loading settings", start);
 			} catch (DbException e) {
+				if (!settingsLoaded) telegramLinkedIdentity.postValue(null);
 				handleException(e);
 			}
 		});
