@@ -34,7 +34,6 @@ import com.google.android.material.textfield.TextInputLayout;
 import org.briarproject.bramble.api.contact.Contact;
 import org.briarproject.bramble.api.identity.Author;
 import org.briarproject.bramble.api.system.AndroidExecutor;
-import org.briarproject.bramble.util.StringUtils;
 import org.briarproject.briar.R;
 import org.briarproject.briar.android.reporting.FeedbackActivity;
 import org.briarproject.briar.android.view.ArticleMovementMethod;
@@ -53,6 +52,7 @@ import androidx.annotation.ColorRes;
 import androidx.annotation.DrawableRes;
 import androidx.annotation.Nullable;
 import androidx.annotation.UiThread;
+import androidx.annotation.VisibleForTesting;
 import androidx.core.content.ContextCompat;
 import androidx.core.hardware.fingerprint.FingerprintManagerCompat;
 import androidx.core.text.HtmlCompat;
@@ -516,15 +516,18 @@ public class UiUtils {
 			AndroidExecutor androidExecutor, Logger logger, Exception e) {
 		logException(logger, WARNING, e);
 		androidExecutor.runOnUiThread(() -> {
-			String msg = "Error: " + e.getClass().getSimpleName();
-			if (!StringUtils.isNullOrEmpty(e.getMessage())) {
-				msg += " " + e.getMessage();
-			}
-			if (e.getCause() != null) {
-				msg += " caused by " + e.getCause().getClass().getSimpleName();
-			}
-			Toast.makeText(context, msg, LENGTH_LONG).show();
+			Toast.makeText(context, formatExceptionForUser(e), LENGTH_LONG)
+					.show();
 		});
+	}
+
+	@VisibleForTesting
+	static String formatExceptionForUser(Exception e) {
+		String msg = "Error: " + e.getClass().getSimpleName();
+		if (e.getCause() != null) {
+			msg += " caused by " + e.getCause().getClass().getSimpleName();
+		}
+		return msg;
 	}
 
 	public static void setInputStateAlwaysVisible(Activity activity) {
