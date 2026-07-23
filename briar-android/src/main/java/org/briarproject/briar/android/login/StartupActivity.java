@@ -105,6 +105,14 @@ public class StartupActivity extends BaseActivity implements
 	}
 
 	@Override
+	protected void onStop() {
+		super.onStop();
+		if (!isChangingConfigurations()) {
+			viewModel.abandonPendingTelegramLinkedIdentity();
+		}
+	}
+
+	@Override
 	@SuppressLint("MissingSuperCall")
 	public void onBackPressed() {
 		if (viewModel.getState().getValue() == TELEGRAM_LOGIN) {
