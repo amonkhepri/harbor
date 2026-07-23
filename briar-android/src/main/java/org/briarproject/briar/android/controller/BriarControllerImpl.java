@@ -121,6 +121,7 @@ public class BriarControllerImpl implements BriarController {
 				handler.onResult(settings.get("pref_key_telegram_linked_identity"));
 			} catch (DbException e) {
 				logException(LOG, WARNING, e);
+				handler.onResult(null);
 			}
 		});
 	}
