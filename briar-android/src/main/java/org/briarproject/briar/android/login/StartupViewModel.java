@@ -151,10 +151,11 @@ public class StartupViewModel extends AndroidViewModel
 	}
 
 	void validatePassword(String password) {
+		String linkedIdentity = pendingTelegramLinkedIdentity;
 		ioExecutor.execute(() -> {
 			try {
 				accountManager.signIn(password);
-				storePendingTelegramLinkedIdentity();
+				storePendingTelegramLinkedIdentity(linkedIdentity);
 				passwordValidated.postEvent(SUCCESS);
 				state.postValue(SIGNED_IN);
 			} catch (DecryptionException e) {
@@ -309,16 +310,18 @@ public class StartupViewModel extends AndroidViewModel
 		});
 	}
 
-	private void storePendingTelegramLinkedIdentity() {
-		if (pendingTelegramLinkedIdentity.isEmpty()) return;
+	private void storePendingTelegramLinkedIdentity(String linkedIdentity) {
+		if (linkedIdentity.isEmpty()) return;
 		try {
 			Settings settings = new Settings();
 			settings.put("pref_key_telegram_linked_identity",
-					pendingTelegramLinkedIdentity);
+					linkedIdentity);
 			settingsManager.mergeSettings(settings, SETTINGS_NAMESPACE);
-			lastTelegramLinkedIdentityStaged = pendingTelegramLinkedIdentity;
+			lastTelegramLinkedIdentityStaged = linkedIdentity;
 			telegramLinkedIdentityStaged.postEvent(lastTelegramLinkedIdentityStaged);
-			pendingTelegramLinkedIdentity = "";
+			if (pendingTelegramLinkedIdentity.equals(linkedIdentity)) {
+				pendingTelegramLinkedIdentity = "";
+			}
 		} catch (DbException e) {
 			logException(LOG, WARNING, e);
 		}

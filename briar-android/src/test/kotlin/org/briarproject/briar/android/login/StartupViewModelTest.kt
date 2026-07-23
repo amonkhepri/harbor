@@ -177,6 +177,20 @@ class StartupViewModelTest {
 	}
 
 	@Test
+	fun testPasswordValidationStoresIdentityFromSubmittedAttempt() {
+		val executor = QueuedExecutor()
+		viewModel = createViewModel(executor)
+		setPrivateString("pendingTelegramLinkedIdentity", "first")
+		viewModel.validatePassword("password")
+
+		setPrivateString("pendingTelegramLinkedIdentity", "replacement")
+		executor.runNext()
+
+		assertEquals("first", getPrivateString("lastTelegramLinkedIdentityStaged"))
+		assertEquals("replacement", getPrivateString("pendingTelegramLinkedIdentity"))
+	}
+
+	@Test
 	fun testShowTelegramLoginPlaceholderClearsStaleAuthStateBeforeStart() {
 		val executor = QueuedExecutor()
 		viewModel = createViewModel(executor)
@@ -339,6 +353,18 @@ class StartupViewModelTest {
 			TelegramAuthState.IDENTIFIER_ENTRY,
 			getOrAwaitValue(viewModel.getTelegramAuthSnapshot()).authState,
 		)
+	}
+
+	private fun getPrivateString(name: String): String {
+		val field = StartupViewModel::class.java.getDeclaredField(name)
+			.apply { isAccessible = true }
+		return field.get(viewModel) as String
+	}
+
+	private fun setPrivateString(name: String, value: String) {
+		val field = StartupViewModel::class.java.getDeclaredField(name)
+			.apply { isAccessible = true }
+		field.set(viewModel, value)
 	}
 
 	private class FakeTelegramAuthSession : TelegramAuthSession {
