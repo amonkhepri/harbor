@@ -163,6 +163,20 @@ class StartupViewModelTest {
 	}
 
 	@Test
+	fun testAbandoningLocalSignInClearsPendingTelegramIdentity() {
+		viewModel.setTelegramLoginIdentifier("submitted")
+		viewModel.submitTelegramLoginIdentifier()
+		viewModel.completeTelegramLoginConfirmation()
+
+		viewModel.abandonPendingTelegramLinkedIdentity()
+
+		val field = StartupViewModel::class.java
+			.getDeclaredField("pendingTelegramLinkedIdentity")
+			.apply { isAccessible = true }
+		assertEquals("", field.get(viewModel))
+	}
+
+	@Test
 	fun testShowTelegramLoginPlaceholderClearsStaleAuthStateBeforeStart() {
 		val executor = QueuedExecutor()
 		viewModel = createViewModel(executor)

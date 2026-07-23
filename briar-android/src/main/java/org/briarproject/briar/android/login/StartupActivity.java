@@ -118,6 +118,7 @@ public class StartupActivity extends BaseActivity implements
 		// Move task and activity to the background instead of showing another
 		// password prompt.
 		// onActivityResult() won't be called in BriarActivity
+		viewModel.abandonPendingTelegramLinkedIdentity();
 		moveTaskToBack(true);
 	}
 

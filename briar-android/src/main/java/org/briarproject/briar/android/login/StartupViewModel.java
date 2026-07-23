@@ -294,6 +294,10 @@ public class StartupViewModel extends AndroidViewModel
 		runTelegramAuthAction(telegramAuthSession::close);
 	}
 
+	void abandonPendingTelegramLinkedIdentity() {
+		pendingTelegramLinkedIdentity = "";
+	}
+
 	private void runTelegramAuthAction(Runnable action) {
 		int generation = telegramAuthGeneration.get();
 		telegramAuthExecutor.execute(() -> {
