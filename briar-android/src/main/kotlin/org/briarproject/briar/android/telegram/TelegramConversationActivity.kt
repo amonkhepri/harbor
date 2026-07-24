@@ -95,7 +95,6 @@ class TelegramConversationActivity : BriarActivity() {
 	private lateinit var list: BriarRecyclerView
 	private var chatId = 0L
 	private var messageState = ConnectorConversationMessageListState()
-	private var submittedMessages: List<ConnectorConversationMessageItem>? = null
 	private val loadOwner = ConnectorConversationLoadOwner()
 
 	override fun injectActivity(component: ActivityComponent) {
@@ -234,12 +233,10 @@ class TelegramConversationActivity : BriarActivity() {
 	private fun submitMessageState(state: ConnectorConversationMessageListState) {
 		messageState = state
 		list.setEmptyText(state.emptyText)
-		val messagesAlreadyPublished = submittedMessages === state.messages
-		submittedMessages = state.messages
 		adapter.submitList(state.messages)
 		if (state.isLoading) {
 			list.showProgressBar()
-		} else if (state.messages.isEmpty() || messagesAlreadyPublished) {
+		} else {
 			list.showData()
 		}
 		state.visibleStatusText?.let {
