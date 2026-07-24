@@ -233,11 +233,11 @@ class TelegramConversationActivity : BriarActivity() {
 	private fun submitMessageState(state: ConnectorConversationMessageListState) {
 		messageState = state
 		list.setEmptyText(state.emptyText)
-		adapter.submitList(state.messages)
+		adapter.submitList(state.messages) {
+			if (!state.isLoading) list.showData()
+		}
 		if (state.isLoading) {
 			list.showProgressBar()
-		} else {
-			list.showData()
 		}
 		state.visibleStatusText?.let {
 			BriarSnackbarBuilder()
