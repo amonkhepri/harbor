@@ -12,7 +12,6 @@ interface ConnectorInboxThreadItem : InboxThreadItem {
 
 	val previewText: String
 	val previewType: ConnectorMessageType
-		get() = ConnectorMessageType.TEXT
 
 	val isLastMessageOutgoing: Boolean
 
