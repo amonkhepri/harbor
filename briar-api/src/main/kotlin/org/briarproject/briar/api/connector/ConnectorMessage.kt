@@ -7,7 +7,7 @@ data class ConnectorMessage(
 	val dateSeconds: Int,
 	val isOutgoing: Boolean,
 	val text: String,
-	val sourceMessageOrder: Long = 0L,
+	val sourceMessageOrder: Long,
 	val type: ConnectorMessageType,
 )
 
