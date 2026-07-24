@@ -11,7 +11,7 @@ class TelegramInboxThreadItem(
 	override val previewText: String,
 	override val isLastMessageOutgoing: Boolean,
 	override val isPreviewLoading: Boolean,
-	override val previewType: ConnectorMessageType = ConnectorMessageType.TEXT,
+	override val previewType: ConnectorMessageType,
 ) : ConnectorInboxThreadItem {
 
 	constructor(thread: ConnectorThread) : this(
@@ -28,7 +28,7 @@ class TelegramInboxThreadItem(
 		chatId: Long,
 		title: String,
 		latestActivityMillis: Long,
-	) : this(chatId, title, latestActivityMillis, "", true)
+	) : this(chatId, title, latestActivityMillis, "", false, true, ConnectorMessageType.TEXT)
 
 	constructor(
 		chatId: Long,
@@ -43,6 +43,7 @@ class TelegramInboxThreadItem(
 		previewText,
 		false,
 		previewLoading,
+		ConnectorMessageType.TEXT,
 	)
 
 	override val connectorThreadId: String
