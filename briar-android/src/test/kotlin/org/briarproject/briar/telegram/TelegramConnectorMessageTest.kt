@@ -129,6 +129,7 @@ class TelegramConnectorMessageTest {
 							false,
 							"body",
 							20L,
+							ConnectorMessageType.TEXT,
 						),
 					),
 				),
