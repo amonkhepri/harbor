@@ -5,7 +5,7 @@ data class ConnectorThread(
 	val threadId: String,
 	val title: String,
 	val latestActivityDateSeconds: Int,
-	val latestMessageText: String = "",
+	val latestMessageText: String,
 	val isLatestMessageOutgoing: Boolean,
 	val latestMessageType: ConnectorMessageType,
 )
