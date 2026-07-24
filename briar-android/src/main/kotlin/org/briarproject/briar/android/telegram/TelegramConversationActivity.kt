@@ -233,10 +233,11 @@ class TelegramConversationActivity : BriarActivity() {
 	private fun submitMessageState(state: ConnectorConversationMessageListState) {
 		messageState = state
 		list.setEmptyText(state.emptyText)
+		val messagesAlreadyPublished = adapter.currentList === state.messages
 		adapter.submitList(state.messages)
 		if (state.isLoading) {
 			list.showProgressBar()
-		} else if (state.messages.isEmpty()) {
+		} else if (state.messages.isEmpty() || messagesAlreadyPublished) {
 			list.showData()
 		}
 		state.visibleStatusText?.let {
