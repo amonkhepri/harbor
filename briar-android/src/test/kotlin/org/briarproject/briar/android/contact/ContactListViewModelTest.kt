@@ -12,6 +12,7 @@ import org.briarproject.bramble.test.ImmediateExecutor
 import org.briarproject.briar.android.viewmodel.LiveDataTestUtil.getOrAwaitValue
 import org.briarproject.briar.api.android.AndroidNotificationManager
 import org.briarproject.briar.api.conversation.ConversationManager
+import org.briarproject.briar.api.connector.ConnectorMessageType
 import org.briarproject.briar.api.connector.ConnectorSources
 import org.briarproject.briar.api.connector.ConnectorThread
 import org.briarproject.briar.api.identity.AuthorManager
@@ -49,7 +50,19 @@ class ContactListViewModelTest {
 		`when`(connector.isEnabled()).thenReturn(true)
 		`when`(connector.isAuthorized()).thenReturn(true)
 		`when`(connector.getRecentThreads(20))
-			.thenReturn(listOf(ConnectorThread(ConnectorSources.TELEGRAM, "7", "", 11)))
+			.thenReturn(
+				listOf(
+					ConnectorThread(
+						ConnectorSources.TELEGRAM,
+						"7",
+						"",
+						11,
+						"",
+						false,
+						ConnectorMessageType.TEXT,
+					),
+				),
+			)
 			.thenThrow(IllegalStateException())
 		val viewModel = createViewModel(connector)
 

@@ -91,6 +91,7 @@ class TelegramConnectorMessageTest {
 					1_700_000_000,
 					"preview",
 					true,
+					ConnectorMessageType.TEXT,
 				),
 			),
 			messages = listOf(
@@ -115,6 +116,7 @@ class TelegramConnectorMessageTest {
 					1_700_000_000,
 					"preview",
 					true,
+					ConnectorMessageType.TEXT,
 				),
 			) to
 				ConnectorMessageReadResult.Success(

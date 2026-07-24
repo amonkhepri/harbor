@@ -1,5 +1,6 @@
 package org.briarproject.briar.android.contact
 
+import org.briarproject.briar.api.connector.ConnectorMessageType
 import org.briarproject.briar.api.connector.ConnectorSource
 import org.briarproject.briar.api.connector.ConnectorSources
 import org.briarproject.briar.api.connector.ConnectorThread
@@ -61,7 +62,15 @@ class InboxThreadMergerTest {
 	)
 
 	private fun telegramItem(text: String = "", outgoing: Boolean = false) = TelegramInboxThreadItem(
-		ConnectorThread(ConnectorSources.TELEGRAM, "7", "chat", 42, text, outgoing),
+		ConnectorThread(
+			ConnectorSources.TELEGRAM,
+			"7",
+			"chat",
+			42,
+			text,
+			outgoing,
+			ConnectorMessageType.TEXT,
+		),
 	)
 
 	private fun assertPreviewState(
