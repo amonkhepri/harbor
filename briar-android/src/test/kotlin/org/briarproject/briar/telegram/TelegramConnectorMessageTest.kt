@@ -16,6 +16,9 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit.MILLISECONDS
+import java.util.concurrent.TimeUnit.SECONDS
 
 private fun telegramMessage(
 	chatId: Long,
@@ -359,6 +362,37 @@ class TelegramConnectorMessageTest {
 		)
 	}
 
+	@Test
+	fun testSharedAccessGateMakesSessionStopWaitForMessageRead() {
+		Client.resetTestState()
+		Client.setAuthorizationStateAfterTdlibParameters(TdApi.AuthorizationStateReady())
+		Client.setAuthorizationUpdateDelaySequenceMs(0L, 1_000L)
+		Client.prepareSetTdlibParametersAcceptedLatch()
+		val accessGate = TelegramTdlibAccessGate()
+		val client = configuredReflectiveMessageClient(
+			tdlibDirectory = testFolder.newFolder("tdlib-shared-gate"),
+			requestTimeoutMs = 2_000L,
+			accessGate = accessGate,
+		)
+		val session = TelegramAuthSessionImpl(DisabledTelegramTdlibLoginClient(), accessGate)
+		val readFinished = CountDownLatch(1)
+		val stopFinished = CountDownLatch(1)
+
+		Thread {
+			client.getRecentMessageReadResult("11", 1)
+			readFinished.countDown()
+		}.start()
+		assertEquals(true, Client.awaitSetTdlibParametersAccepted(1_000L))
+		Thread {
+			session.stopService()
+			stopFinished.countDown()
+		}.start()
+
+		assertEquals(false, stopFinished.await(100L, MILLISECONDS))
+		assertEquals(true, readFinished.await(2L, SECONDS))
+		assertEquals(true, stopFinished.await(1L, SECONDS))
+	}
+
 	private fun readyReflectiveMessageClient(
 		configureClientState: () -> Unit = {},
 	): ReflectiveTelegramTdlibMessageClient {
@@ -371,12 +405,14 @@ class TelegramConnectorMessageTest {
 	private fun configuredReflectiveMessageClient(
 		tdlibDirectory: File = testFolder.newFolder("tdlib"),
 		requestTimeoutMs: Long = 1_000L,
+		accessGate: TelegramTdlibAccessGate = TelegramTdlibAccessGate(),
 	) = ReflectiveTelegramTdlibMessageClient(
 		tdlibDirectory = tdlibDirectory,
 		apiId = 1,
 		apiHash = "x",
 		tdlibKeyProvider = StaticTelegramTdlibDatabaseKeyProvider(TDLIB_KEY),
 		requestTimeoutMs = requestTimeoutMs,
+		accessGate = accessGate,
 	)
 
 	private class StaticTelegramTdlibDatabaseKeyProvider(private val key: ByteArray) :
