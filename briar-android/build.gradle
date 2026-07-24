@@ -174,11 +174,13 @@ android {
 			setIgnore(true)
 		}
 	}
-	sourceSets {
-		main {
-			// Consume official TDLib Android build output when present.
-			java.srcDirs += [tdlibJavaDir]
-			jniLibs.srcDirs += [tdlibJniLibsDir]
+	if (telegramConnectorEnabled) {
+		sourceSets {
+			main {
+				// Consume official TDLib Android build output when present.
+				java.srcDirs += [tdlibJavaDir]
+				jniLibs.srcDirs += [tdlibJniLibsDir]
+			}
 		}
 	}
 
