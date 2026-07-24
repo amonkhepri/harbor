@@ -193,7 +193,7 @@ class TelegramConversationActivity : BriarActivity() {
 						val state = ConnectorConversationMessageListState(
 							ConnectorConversationMessageItem.fromMessages(result.messages),
 						)
-						showMessages(loadGeneration, state)
+						showMessages(loadGeneration, state, EMPTY)
 					}
 					ConnectorMessageReadResult.LoadFailed -> {
 						showMessages(
@@ -216,7 +216,7 @@ class TelegramConversationActivity : BriarActivity() {
 	private fun showMessages(
 		loadGeneration: Long,
 		state: ConnectorConversationMessageListState,
-		availabilityState: ConnectorConversationAvailabilityState = EMPTY,
+		availabilityState: ConnectorConversationAvailabilityState,
 	) {
 		runOnUiThread {
 			if (!loadOwner.owns(loadGeneration)) return@runOnUiThread
