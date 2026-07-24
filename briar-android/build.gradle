@@ -69,6 +69,13 @@ def configuredTelegramApiId =
 if (telegramConnectorEnabled && !(configuredTelegramApiId ==~ /[0-9]+/)) {
 	throw new GradleException('harbor.telegram.apiId must be a non-negative integer')
 }
+if (telegramConnectorEnabled &&
+		(!new File(tdlibJavaDir, 'org/drinkless/tdlib/Client.java').isFile() ||
+				!new File(tdlibJavaDir, 'org/drinkless/tdlib/TdApi.java').isFile() ||
+				fileTree(tdlibJniLibsDir).matching { include '**/libtdjni.so' }.isEmpty())) {
+	throw new GradleException(
+			'Telegram connector requires generated TDLib Java and JNI artifacts')
+}
 def configuredTelegramApiHash =
 		telegramConfigValue(
 				['harbor.telegram.apiHash'],
