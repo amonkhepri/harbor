@@ -3,6 +3,7 @@ package org.briarproject.briar.android.connector
 import org.briarproject.briar.android.connector.ConnectorConversationAvailabilityState.ACCOUNT_UNAVAILABLE
 import org.briarproject.briar.android.connector.ConnectorConversationAvailabilityState.EMPTY
 import org.briarproject.briar.android.connector.ConnectorConversationAvailabilityState.LOAD_FAILED
+import org.briarproject.briar.api.connector.ConnectorMessageType
 import org.briarproject.briar.api.connector.ConnectorSource
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -55,6 +56,7 @@ class ConnectorConversationMessageListStateTest {
 			dateMillis = 1_700_000_000_000L,
 			isOutgoing = false,
 			text = "body",
+			type = ConnectorMessageType.TEXT,
 		)
 
 	companion object {

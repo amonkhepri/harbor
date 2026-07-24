@@ -11,7 +11,7 @@ data class ConnectorConversationMessageItem(
 	val dateMillis: Long,
 	val isOutgoing: Boolean,
 	val text: String,
-	val type: ConnectorMessageType = ConnectorMessageType.TEXT,
+	val type: ConnectorMessageType,
 ) {
 	val stableId: String
 		get() = "${connectorSource.id}:$connectorThreadId:$connectorMessageId"
