@@ -221,6 +221,16 @@ class TelegramLoginPlaceholderFragmentTest {
 	}
 
 	@Test
+	fun testMissingApiCredentialsShowsSpecificMessageAndDisablesRetry() {
+		assertIdentifierRecoverableErrorMessage(
+			RecoverableErrorDetail.MISSING_API_CREDENTIALS,
+			R.string.telegram_connector_login_api_credentials_missing_message,
+		)
+		composeRule.onNodeWithTag(TELEGRAM_LOGIN_CONTINUE_TAG)
+			.assertIsNotEnabled()
+	}
+
+	@Test
 	fun testDeviceKeystoreUnavailableShowsSpecificMessageAndDisablesRetry() {
 		assertIdentifierRecoverableErrorMessage(
 			RecoverableErrorDetail.DEVICE_KEYSTORE_UNAVAILABLE,
