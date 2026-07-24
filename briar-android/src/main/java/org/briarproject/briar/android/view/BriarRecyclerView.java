@@ -111,7 +111,7 @@ public class BriarRecyclerView extends FrameLayout {
 			@Override
 			public void onItemRangeInserted(int positionStart, int itemCount) {
 				super.onItemRangeInserted(positionStart, itemCount);
-				showData();
+				if (itemCount > 0) showData();
 			}
 
 			@Override
