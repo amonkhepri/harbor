@@ -51,6 +51,7 @@ class TelegramConversationActivity : BriarActivity() {
 		const val CHAT_TITLE = "telegram.CHAT_TITLE"
 
 		private const val MESSAGE_LIMIT = 50
+		private const val TELEGRAM_REFRESH_INTERVAL_MS = 15_000L
 
 		private fun emptyTextForState(state: ConnectorConversationAvailabilityState): Int = when (state) {
 			LOADING ->
@@ -95,6 +96,13 @@ class TelegramConversationActivity : BriarActivity() {
 	private lateinit var list: BriarRecyclerView
 	private var chatId = 0L
 	private var messageState = ConnectorConversationMessageListState()
+	private var automaticRefreshRunning = false
+	private val automaticRefresh = Runnable {
+		if (!automaticRefreshRunning && !messageState.isLoading) {
+			automaticRefreshRunning = true
+			loadMessages(showLoading = false)
+		}
+	}
 	private val loadOwner = ConnectorConversationLoadOwner()
 
 	override fun injectActivity(component: ActivityComponent) {
@@ -128,6 +136,16 @@ class TelegramConversationActivity : BriarActivity() {
 		return super.onCreateOptionsMenu(menu)
 	}
 
+	override fun onStart() {
+		super.onStart()
+		list.startPeriodicUpdate(TELEGRAM_REFRESH_INTERVAL_MS, automaticRefresh)
+	}
+
+	override fun onStop() {
+		list.stopPeriodicUpdate()
+		super.onStop()
+	}
+
 	override fun onPrepareOptionsMenu(menu: Menu): Boolean {
 		menu.findItem(R.id.action_refresh_connector_conversation)?.isVisible =
 			shouldShowManualRefreshAction(
@@ -155,19 +173,21 @@ class TelegramConversationActivity : BriarActivity() {
 		super.onDestroy()
 	}
 
-	private fun loadMessages() {
+	private fun loadMessages(showLoading: Boolean = true) {
 		val loadGeneration = loadOwner.begin()
 		if (!hasValidChatId(chatId)) {
 			showMessages(loadGeneration, ConnectorConversationMessageListState(), LOAD_FAILED)
 			return
 		}
-		submitMessageState(
-			ConnectorConversationMessageListState(
-				messageState.messages,
-				getString(emptyTextForState(LOADING)),
-				isLoading = true,
-			),
-		)
+		if (showLoading) {
+			submitMessageState(
+				ConnectorConversationMessageListState(
+					messageState.messages,
+					getString(emptyTextForState(LOADING)),
+					isLoading = true,
+				),
+			)
+		}
 		ioExecutor.execute {
 			if (!loadOwner.owns(loadGeneration)) return@execute
 			if (!readOnlyConnector.isEnabled()) {
@@ -220,6 +240,7 @@ class TelegramConversationActivity : BriarActivity() {
 	) {
 		runOnUiThread {
 			if (!loadOwner.owns(loadGeneration)) return@runOnUiThread
+			automaticRefreshRunning = false
 			submitMessageState(
 				state.withAvailabilityState(
 					availabilityState,

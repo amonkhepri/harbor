@@ -50,6 +50,7 @@ public class ContactListFragment extends BaseFragment
 		OnInboxThreadClickListener {
 
 	public static final String TAG = ContactListFragment.class.getName();
+	private static final long TELEGRAM_REFRESH_INTERVAL_MS = 15_000;
 
 	@Inject
 	ViewModelProvider.Factory viewModelFactory;
@@ -200,7 +201,8 @@ public class ContactListFragment extends BaseFragment
 		viewModel.loadContacts();
 		viewModel.loadTelegramThreads();
 		viewModel.checkForPendingContacts();
-		list.startPeriodicUpdate();
+		list.startPeriodicUpdate(TELEGRAM_REFRESH_INTERVAL_MS,
+				viewModel::loadTelegramThreads);
 	}
 
 	@Override

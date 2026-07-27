@@ -83,6 +83,7 @@ internal class ContactListViewModel @Inject constructor(
 	fun clearAllContactAddedNotifications() = notificationManager.clearAllContactAddedNotifications()
 
 	fun loadTelegramThreads() {
+		if (_telegramAvailabilityState.value == TelegramInboxAvailabilityState.LOADING) return
 		if (!telegramConnector.isEnabled()) {
 			_telegramAvailabilityState.value = TelegramInboxAvailabilityState.NONE
 			_telegramThreadItems.value = emptyList()
