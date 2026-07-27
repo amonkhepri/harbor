@@ -239,7 +239,7 @@ public class ContactListFragment extends BaseFragment
 
 	private void submitInboxItems() {
 		updateEmptyState();
-		adapter.submitList(InboxThreadMerger.merge(briarItems, telegramItems));
+		adapter.submitList(InboxThreadMerger.merge(briarItems, telegramItems), list::showData);
 	}
 
 	private void updateEmptyState() {
