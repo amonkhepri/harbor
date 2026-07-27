@@ -67,18 +67,17 @@ public class StartupActivity extends BaseActivity implements
 					KEY_STAGED_TELEGRAM_LOGIN_IDENTITY, "");
 		}
 
+		viewModel.getAccountDeleted().observeEvent(this, deleted -> {
+			if (deleted) onAccountDeleted();
+		});
 		if (!viewModel.accountExists()) {
 			// TODO ideally we would not have to delete the account again
 			// The account needs to deleted again to remove the database folder,
 			// because if it exists, we assume the database also exists
 			// and when clearing app data, the folder does not get deleted.
 			viewModel.deleteAccount();
-			onAccountDeleted();
 			return;
 		}
-		viewModel.getAccountDeleted().observeEvent(this, deleted -> {
-			if (deleted) onAccountDeleted();
-		});
 		viewModel.getTelegramLinkedIdentityStaged().observeEvent(this,
 				identifier -> {
 					stagedTelegramLoginIdentity = identifier;
