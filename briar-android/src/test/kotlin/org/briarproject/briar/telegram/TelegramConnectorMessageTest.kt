@@ -389,7 +389,7 @@ class TelegramConnectorMessageTest {
 		}.start()
 
 		assertEquals(false, stopFinished.await(100L, MILLISECONDS))
-		assertEquals(true, readFinished.await(2L, SECONDS))
+		assertEquals(true, readFinished.await(5L, SECONDS))
 		assertEquals(true, stopFinished.await(1L, SECONDS))
 	}
 

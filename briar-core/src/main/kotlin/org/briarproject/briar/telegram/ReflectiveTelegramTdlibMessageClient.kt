@@ -118,6 +118,7 @@ class ReflectiveTelegramTdlibMessageClient(
 				authorizationState = awaitPreparedAuthorizationStateClassName(readyUpdate)
 			}
 			if (authorizationState != "AuthorizationStateReady") return fallback
+			Thread.sleep(3_000L)
 			read(client)
 		} catch (e: ReflectiveOperationException) {
 			fallback
