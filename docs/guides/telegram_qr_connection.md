@@ -12,8 +12,8 @@ remains available on the same screen and is unaffected.
 3. Harbor requests TDLib `RequestQrCodeAuthentication` and renders the
    returned link as an in-app QR code. The link is held in memory only; it is
    never logged, persisted, or included in exceptions.
-4. Scan the code with a second device's Telegram camera/QR scanner, or, on
-   the same device, tap **Open Telegram** to hand the link to the
+4. Scan the code from **Telegram Settings -> Devices -> Link Desktop Device**
+   on a second device, or tap **Open Telegram** on the same device to hand the
    `org.telegram.messenger` app via an explicit `ACTION_VIEW` intent.
 5. Confirm the login from within Telegram. Harbor polls TDLib for
    `AuthorizationStateWaitOtherDeviceConfirmation` updates and rotates the
@@ -30,10 +30,9 @@ remains available on the same screen and is unaffected.
 - The QR route reuses the existing login/session/UI boundaries
   (`StartupViewModel`, `TelegramAuthSessionImpl`, `TelegramAuthSession`); it
   does not add a separate login surface.
-- Process death while waiting on QR confirmation is recovered the same way
-  as any other in-progress auth state: the persisted
-  `AuthorizationStateWaitOtherDeviceConfirmation` TDLib state maps back to
-  `QR_WAITING` on restart and polling resumes.
+- If the process dies while waiting, re-enter Telegram login. The persisted
+  `AuthorizationStateWaitOtherDeviceConfirmation` TDLib state then maps back
+  to `QR_WAITING`, and polling resumes without requesting a new challenge.
 
 ## Historical/recovery reference
 
