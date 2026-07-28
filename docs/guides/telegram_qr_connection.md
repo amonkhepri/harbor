@@ -13,7 +13,7 @@ remains available on the same screen and is unaffected.
    returned link as an in-app QR code. The link is held in memory only; it is
    never logged, persisted, or included in exceptions.
 4. Scan the code with a second device's Telegram camera/QR scanner, or, on
-   the same device, tap **Open in Telegram** to hand the link to the
+   the same device, tap **Open Telegram** to hand the link to the
    `org.telegram.messenger` app via an explicit `ACTION_VIEW` intent.
 5. Confirm the login from within Telegram. Harbor polls TDLib for
    `AuthorizationStateWaitOtherDeviceConfirmation` updates and rotates the
