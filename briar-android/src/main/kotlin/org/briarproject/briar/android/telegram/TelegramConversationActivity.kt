@@ -256,6 +256,7 @@ class TelegramConversationActivity : BriarActivity() {
 		list.setEmptyText(state.emptyText)
 		adapter.submitList(state.messages) {
 			if (!state.isLoading) list.showData()
+			if (!list.recyclerView.canScrollVertically(1)) list.scrollToPosition(state.messages.lastIndex)
 		}
 		if (state.isLoading) {
 			list.showProgressBar()
