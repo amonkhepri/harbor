@@ -2,10 +2,6 @@
 
 package org.briarproject.briar.android.login
 
-import android.content.ActivityNotFoundException
-import android.content.Context
-import android.content.Intent
-import android.net.Uri
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
@@ -85,7 +81,6 @@ const val TELEGRAM_LOGIN_CONFIRMATION_CONTINUE_TAG =
 const val TELEGRAM_LOGIN_CONFIRMATION_BACK_TAG =
 	"btn_telegram_login_confirmation_back"
 const val TELEGRAM_LOGIN_BACK_TAG = "btn_telegram_login_back"
-private const val TELEGRAM_PACKAGE = "org.telegram.messenger"
 
 class TelegramLoginPlaceholderFragment : BaseFragment() {
 
@@ -367,25 +362,6 @@ private fun QrStep(link: String?) {
 			stringResource(R.string.telegram_connector_login_qr_scan_message),
 			textAlign = TextAlign.Center,
 		)
-		Spacer(Modifier.height(16.dp))
-		Button(
-			onClick = { if (link != null) openTelegramQrAuthorization(context, link) },
-			enabled = link != null,
-			modifier = Modifier.fillMaxWidth(),
-		) {
-			Text(stringResource(R.string.telegram_connector_login_qr_open_button))
-		}
-	}
-}
-
-internal fun telegramQrAuthorizationIntent(link: String): Intent =
-	Intent(Intent.ACTION_VIEW, Uri.parse(link)).setPackage(TELEGRAM_PACKAGE)
-
-private fun openTelegramQrAuthorization(context: Context, link: String) {
-	try {
-		context.startActivity(telegramQrAuthorizationIntent(link))
-	} catch (_: ActivityNotFoundException) {
-	} catch (_: SecurityException) {
 	}
 }
 

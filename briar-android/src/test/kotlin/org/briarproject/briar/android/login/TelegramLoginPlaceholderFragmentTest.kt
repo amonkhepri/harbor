@@ -113,16 +113,13 @@ class TelegramLoginPlaceholderFragmentTest {
 	}
 
 	@Test
-	fun testQrActionUsesQrReadyRouteAndExplicitTelegramIntent() {
+	fun testQrActionUsesQrReadyRoute() {
 		composeRule.onNodeWithTag(TELEGRAM_LOGIN_QR_TAG).performClick()
 		composeRule.waitForIdle()
 
 		assertEquals(1, telegramAuthSession.qrRequestCalls)
 		assertEquals(SIGNED_OUT, getOrAwaitValue(viewModel.state))
 		assertEquals(1, telegramAuthSession.closeCalls)
-		val intent = telegramQrAuthorizationIntent("tg://login")
-		assertEquals("android.intent.action.VIEW", intent.action)
-		assertEquals("org.telegram.messenger", intent.`package`)
 	}
 
 	@Test

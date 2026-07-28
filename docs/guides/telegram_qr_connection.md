@@ -1,7 +1,10 @@
 # Telegram QR Connection
 
 Canonical procedure for authorizing Harbor's Telegram connector with a QR
-code, in-app, on the same or a second device. Phone-number/code entry
+code. This requires a second device that already has Telegram signed in and
+has a camera; official Telegram Android does not accept the login-token link
+from another app on the same device and its login scanner has no gallery
+import, so same-device completion is not possible. Phone-number/code entry
 remains available on the same screen and is unaffected.
 
 ## Procedure
@@ -12,9 +15,8 @@ remains available on the same screen and is unaffected.
 3. Harbor requests TDLib `RequestQrCodeAuthentication` and renders the
    returned link as an in-app QR code. The link is held in memory only; it is
    never logged, persisted, or included in exceptions.
-4. Scan the code from **Telegram Settings -> Devices -> Link Desktop Device**
-   on a second device, or tap **Open Telegram** on the same device to hand the
-   `org.telegram.messenger` app via an explicit `ACTION_VIEW` intent.
+4. On a second device that is already signed in to Telegram, scan the code
+   from **Telegram Settings -> Devices -> Link Desktop Device**.
 5. Confirm the login from within Telegram. Harbor polls TDLib for
    `AuthorizationStateWaitOtherDeviceConfirmation` updates and rotates the
    displayed QR automatically if Telegram issues a new link.
