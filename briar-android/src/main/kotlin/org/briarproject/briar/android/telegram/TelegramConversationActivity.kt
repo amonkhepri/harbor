@@ -252,20 +252,18 @@ class TelegramConversationActivity : BriarActivity() {
 	}
 
 	private fun submitMessageState(state: ConnectorConversationMessageListState) {
-		messageState = state
 		list.setEmptyText(state.emptyText)
 		adapter.submitList(state.messages) {
 			if (!state.isLoading) list.showData()
 			if (!list.recyclerView.canScrollVertically(1)) list.scrollToPosition(state.messages.lastIndex)
 		}
-		if (state.isLoading) {
-			list.showProgressBar()
-		}
-		state.visibleStatusText?.let {
+		if (state.isLoading) list.showProgressBar()
+		state.visibleStatusText?.takeIf { it != messageState.visibleStatusText }?.let {
 			BriarSnackbarBuilder()
 				.make(list, it, Snackbar.LENGTH_LONG)
 				.show()
 		}
+		messageState = state
 		invalidateOptionsMenu()
 	}
 }
