@@ -2,6 +2,10 @@
 
 package org.briarproject.briar.android.login
 
+import android.content.ActivityNotFoundException
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
@@ -40,7 +44,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.compose.ui.platform.testTag
@@ -56,6 +62,7 @@ import androidx.lifecycle.ViewModelProvider
 import org.briarproject.briar.R
 import org.briarproject.briar.android.activity.ActivityComponent
 import org.briarproject.briar.android.fragment.BaseFragment
+import org.briarproject.briar.android.qrcode.QrCodeUtils
 import org.briarproject.briar.api.telegram.TelegramAuthSession.RecoverableErrorDetail
 import org.briarproject.briar.api.telegram.TelegramAuthSession.Snapshot
 import org.briarproject.briar.api.telegram.TelegramAuthState
@@ -69,6 +76,7 @@ const val TELEGRAM_LOGIN_IDENTIFIER_TAG = "telegram_login_identifier"
 const val TELEGRAM_LOGIN_CODE_TAG = "telegram_login_code"
 const val TELEGRAM_LOGIN_PASSWORD_TAG = "telegram_login_password"
 const val TELEGRAM_LOGIN_CONTINUE_TAG = "btn_telegram_login_continue"
+const val TELEGRAM_LOGIN_QR_TAG = "btn_telegram_login_qr"
 const val TELEGRAM_LOGIN_CODE_CONTINUE_TAG = "btn_telegram_login_code_continue"
 const val TELEGRAM_LOGIN_CODE_RESEND_TAG = "btn_telegram_login_code_resend"
 const val TELEGRAM_LOGIN_PASSWORD_CONTINUE_TAG = "btn_telegram_login_password_continue"
@@ -77,6 +85,7 @@ const val TELEGRAM_LOGIN_CONFIRMATION_CONTINUE_TAG =
 const val TELEGRAM_LOGIN_CONFIRMATION_BACK_TAG =
 	"btn_telegram_login_confirmation_back"
 const val TELEGRAM_LOGIN_BACK_TAG = "btn_telegram_login_back"
+private const val TELEGRAM_PACKAGE = "org.telegram.messenger"
 
 class TelegramLoginPlaceholderFragment : BaseFragment() {
 
@@ -128,6 +137,7 @@ internal fun TelegramLoginScreen(viewModel: StartupViewModel) {
 	val authSnapshot by rememberTelegramAuthSnapshot(viewModel)
 	val authState = authSnapshot.authState
 	val errorDetail = authSnapshot.errorDetail
+	val qrLink = authSnapshot.qrAuthorizationLink
 	var identifier by remember { mutableStateOf(viewModel.getTelegramLoginIdentifier()) }
 	var code by remember { mutableStateOf(viewModel.getTelegramLoginCode()) }
 	var password by remember { mutableStateOf(viewModel.getTelegramLoginPassword()) }
@@ -136,6 +146,12 @@ internal fun TelegramLoginScreen(viewModel: StartupViewModel) {
 		identifier = viewModel.getTelegramLoginIdentifier()
 		code = viewModel.getTelegramLoginCode()
 		password = viewModel.getTelegramLoginPassword()
+		if (authState == TelegramAuthState.READY && qrLink != null) {
+			viewModel.completeTelegramQrLoginConfirmation()
+		}
+	}
+	LaunchedEffect(authState) {
+		if (authState == TelegramAuthState.QR_WAITING) viewModel.awaitTelegramQrAuthorization()
 	}
 
 	val hasIdentifier = identifier.trim().isNotEmpty()
@@ -152,6 +168,11 @@ internal fun TelegramLoginScreen(viewModel: StartupViewModel) {
 	val persistedSessionIdentityUnverified =
 		authState == TelegramAuthState.RECOVERABLE_ERROR &&
 			errorDetail == RecoverableErrorDetail.PERSISTED_SESSION_IDENTITY_UNVERIFIED
+	val canStartAuth = !missingTdlib &&
+		!missingApiCredentials &&
+		!deviceKeystoreUnavailable &&
+		!tdlibDatabaseKeyMismatch &&
+		!persistedSessionIdentityUnverified
 
 	Column(
 		modifier = Modifier
@@ -189,6 +210,10 @@ internal fun TelegramLoginScreen(viewModel: StartupViewModel) {
 			Spacer(Modifier.height(24.dp))
 
 			when {
+				authState == TelegramAuthState.READY && qrLink != null -> Unit
+				authState == TelegramAuthState.QR_WAITING -> {
+					QrStep(qrLink)
+				}
 				authState == TelegramAuthState.CODE_ENTRY ||
 					authState == TelegramAuthState.RECOVERABLE_ERROR &&
 					(
@@ -233,13 +258,10 @@ internal fun TelegramLoginScreen(viewModel: StartupViewModel) {
 							identifier = it
 							viewModel.setTelegramLoginIdentifier(it)
 						},
-						enabled = hasIdentifier &&
-							!missingTdlib &&
-							!missingApiCredentials &&
-							!deviceKeystoreUnavailable &&
-							!tdlibDatabaseKeyMismatch &&
-							!persistedSessionIdentityUnverified,
+						enabled = hasIdentifier && canStartAuth,
 						onContinue = viewModel::submitTelegramLoginIdentifier,
+						qrEnabled = canStartAuth,
+						onQr = viewModel::requestTelegramQrAuthorization,
 					)
 				}
 			}
@@ -280,6 +302,8 @@ private fun IdentifierStep(
 	onIdentifierChange: (String) -> Unit,
 	enabled: Boolean,
 	onContinue: () -> Unit,
+	qrEnabled: Boolean,
+	onQr: () -> Unit,
 ) {
 	Column(
 		modifier = Modifier
@@ -308,6 +332,60 @@ private fun IdentifierStep(
 		) {
 			Text(stringResource(R.string.telegram_connector_login_continue_button))
 		}
+		Spacer(Modifier.height(8.dp))
+		OutlinedButton(
+			onClick = onQr,
+			enabled = qrEnabled,
+			modifier = Modifier
+				.fillMaxWidth()
+				.testTag(TELEGRAM_LOGIN_QR_TAG),
+		) {
+			Text(stringResource(R.string.telegram_connector_login_qr_button))
+		}
+	}
+}
+
+@Composable
+private fun QrStep(link: String?) {
+	val context = LocalContext.current
+	val bitmap = remember(link) {
+		link?.let { QrCodeUtils.createQrCode(context.resources.displayMetrics, it) }
+	}
+	Column(
+		modifier = Modifier.fillMaxWidth(),
+		horizontalAlignment = Alignment.CenterHorizontally,
+	) {
+		if (bitmap != null) {
+			Image(
+				bitmap = bitmap.asImageBitmap(),
+				contentDescription = stringResource(R.string.telegram_connector_login_qr_description),
+				modifier = Modifier.widthIn(max = 280.dp).fillMaxWidth(),
+			)
+		}
+		Spacer(Modifier.height(16.dp))
+		Text(
+			stringResource(R.string.telegram_connector_login_qr_scan_message),
+			textAlign = TextAlign.Center,
+		)
+		Spacer(Modifier.height(16.dp))
+		Button(
+			onClick = { if (link != null) openTelegramQrAuthorization(context, link) },
+			enabled = link != null,
+			modifier = Modifier.fillMaxWidth(),
+		) {
+			Text(stringResource(R.string.telegram_connector_login_qr_open_button))
+		}
+	}
+}
+
+internal fun telegramQrAuthorizationIntent(link: String): Intent =
+	Intent(Intent.ACTION_VIEW, Uri.parse(link)).setPackage(TELEGRAM_PACKAGE)
+
+private fun openTelegramQrAuthorization(context: Context, link: String) {
+	try {
+		context.startActivity(telegramQrAuthorizationIntent(link))
+	} catch (_: ActivityNotFoundException) {
+	} catch (_: SecurityException) {
 	}
 }
 

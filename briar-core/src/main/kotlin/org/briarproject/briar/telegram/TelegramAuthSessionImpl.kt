@@ -20,7 +20,11 @@ class TelegramAuthSessionImpl(
 	override fun getSnapshot(): Snapshot = accessGate.run(
 		Snapshot(TelegramAuthState.CLOSED, RecoverableErrorDetail.NONE),
 	) {
-		Snapshot(currentState, tdlibLoginClient.getRecoverableErrorDetail())
+		Snapshot(
+			currentState,
+			tdlibLoginClient.getRecoverableErrorDetail(),
+			tdlibLoginClient.getQrAuthorizationLink(),
+		)
 	}
 
 	override fun start() = updateState(tdlibLoginClient::start)
@@ -34,6 +38,12 @@ class TelegramAuthSessionImpl(
 
 	override fun submitPassword(password: String) =
 		updateState { tdlibLoginClient.submitPassword(password) }
+
+	override fun requestQrCodeAuthentication() =
+		updateState(tdlibLoginClient::requestQrCodeAuthentication)
+
+	override fun awaitQrAuthorizationUpdate() =
+		updateState(tdlibLoginClient::awaitQrAuthorizationUpdate)
 
 	override fun close() = updateState(tdlibLoginClient::close)
 
@@ -61,6 +71,12 @@ class DisabledTelegramTdlibLoginClient : TelegramTdlibLoginClient {
 
 	override fun submitPassword(password: String): TelegramAuthState = TelegramAuthState.CLOSED
 
+	override fun requestQrCodeAuthentication(): TelegramAuthState = TelegramAuthState.CLOSED
+
+	override fun awaitQrAuthorizationUpdate(): TelegramAuthState = TelegramAuthState.CLOSED
+
+	override fun getQrAuthorizationLink(): String? = null
+
 	override fun close(): TelegramAuthState = TelegramAuthState.CLOSED
 }
 
@@ -71,6 +87,8 @@ class ReflectiveTelegramTdlibLoginClient(
 	private val tdlibKeyProvider: TelegramTdlibDatabaseKeyProvider =
 		NoOpTelegramTdlibDatabaseKeyProvider,
 	private val authorizationUpdateTimeoutMs: Long = 30_000L,
+	private val qrAuthorizationTimeoutMs: Long = 300_000L,
+	private val qrAuthorizationPollMs: Long = 1_000L,
 ) : TelegramTdlibLoginClient {
 
 	private val log = Logger.getLogger(ReflectiveTelegramTdlibLoginClient::class.java.name)
@@ -81,6 +99,7 @@ class ReflectiveTelegramTdlibLoginClient(
 		TIMEOUT,
 	}
 
+	@Volatile
 	private var lastAuthorizationStateClassName = ""
 
 	@Volatile
@@ -92,7 +111,13 @@ class ReflectiveTelegramTdlibLoginClient(
 
 	@Volatile
 	private var recoverableErrorDetail = RecoverableErrorDetail.NONE
+
+	@Volatile
+	private var qrAuthorizationLink: String? = null
 	private var tdlibClient: Any? = null
+
+	@Volatile
+	private var qrAuthorizationDeadlineNanos = 0L
 
 	override fun start(): TelegramAuthState {
 		closeTdlibClient()
@@ -113,35 +138,7 @@ class ReflectiveTelegramTdlibLoginClient(
 			if (restartedState != TelegramAuthState.IDENTIFIER_ENTRY) return restartedState
 		}
 		try {
-			if (lastAuthorizationStateClassName == "AuthorizationStateWaitTdlibParameters") {
-				if (apiId <= 0 || !hasText(apiHash)) {
-					return recoverableError(RecoverableErrorDetail.MISSING_API_CREDENTIALS)
-				}
-				val parametersRequest = createTelegramTdlibParametersRequest(
-					tdlibKeyProvider,
-					tdlibDirectory,
-					apiId,
-					apiHash,
-				) ?: return recoverableDatabaseKeyUnavailable()
-				val tdlibParametersUpdate = prepareAuthorizationUpdate()
-				when (sendForResult(parametersRequest)) {
-					CommandResult.OK -> Unit
-					CommandResult.ERROR ->
-						return recoverableError(
-							RecoverableErrorDetail.TDLIB_DATABASE_KEY_MISMATCH,
-						)
-					CommandResult.TIMEOUT ->
-						return recoverableError(RecoverableErrorDetail.NONE)
-				}
-				val authorizationStateAfterParameters =
-					awaitPreparedAuthorizationStateClassName(tdlibParametersUpdate)
-				if (authorizationStateAfterParameters != "AuthorizationStateWaitPhoneNumber") {
-					return recoverablePersistedSessionIdentityUnverified()
-				}
-			}
-			if (lastAuthorizationStateClassName != "AuthorizationStateWaitPhoneNumber") {
-				return recoverableError(RecoverableErrorDetail.NONE)
-			}
+			ensureAtWaitPhoneNumber()?.let { return it }
 			val phoneNumberUpdate = prepareAuthorizationUpdate()
 			when (sendForResult(createSetAuthenticationPhoneNumberRequest(identifier))) {
 				CommandResult.OK -> Unit
@@ -159,6 +156,42 @@ class ReflectiveTelegramTdlibLoginClient(
 			return recoverableErrorAfterClientFailure()
 		} catch (e: InterruptedException) {
 			return recoverableErrorAfterClientFailure(interrupted = true)
+		}
+	}
+
+	@Throws(ReflectiveOperationException::class, InterruptedException::class)
+	private fun ensureAtWaitPhoneNumber(allowQrChallenge: Boolean = false): TelegramAuthState? {
+		if (lastAuthorizationStateClassName == "AuthorizationStateWaitTdlibParameters") {
+			if (apiId <= 0 || !hasText(apiHash)) {
+				return recoverableError(RecoverableErrorDetail.MISSING_API_CREDENTIALS)
+			}
+			val request = createTelegramTdlibParametersRequest(
+				tdlibKeyProvider,
+				tdlibDirectory,
+				apiId,
+				apiHash,
+			) ?: return recoverableDatabaseKeyUnavailable()
+			val update = prepareAuthorizationUpdate()
+			when (sendForResult(request)) {
+				CommandResult.OK -> Unit
+				CommandResult.ERROR ->
+					return recoverableError(RecoverableErrorDetail.TDLIB_DATABASE_KEY_MISMATCH)
+				CommandResult.TIMEOUT -> return recoverableError(RecoverableErrorDetail.NONE)
+			}
+			val state = awaitPreparedAuthorizationStateClassName(update)
+			if (allowQrChallenge &&
+				state == "AuthorizationStateWaitOtherDeviceConfirmation"
+			) {
+				return mapAuthorizationStateClassName(state)
+			}
+			if (state != "AuthorizationStateWaitPhoneNumber") {
+				return recoverablePersistedSessionIdentityUnverified()
+			}
+		}
+		return if (lastAuthorizationStateClassName == "AuthorizationStateWaitPhoneNumber") {
+			null
+		} else {
+			recoverableError(RecoverableErrorDetail.NONE)
 		}
 	}
 
@@ -202,6 +235,75 @@ class ReflectiveTelegramTdlibLoginClient(
 		createRequest = ::createCheckAuthenticationPasswordRequest,
 		invalidDetail = RecoverableErrorDetail.INVALID_PASSWORD,
 	)
+
+	override fun getQrAuthorizationLink(): String? = qrAuthorizationLink
+
+	override fun requestQrCodeAuthentication(): TelegramAuthState {
+		if (tdlibClient == null) {
+			val state = start()
+			if (state != TelegramAuthState.IDENTIFIER_ENTRY) return state
+		}
+		return try {
+			val state = ensureAtWaitPhoneNumber(allowQrChallenge = true)
+				?: requestQrAuthorization()
+			if (state == TelegramAuthState.QR_WAITING) {
+				qrAuthorizationDeadlineNanos =
+					System.nanoTime() + qrAuthorizationTimeoutMs * NANOS_PER_MILLISECOND
+			}
+			state
+		} catch (e: ReflectiveOperationException) {
+			recoverableErrorAfterClientFailure()
+		} catch (e: LinkageError) {
+			recoverableErrorAfterClientFailure()
+		} catch (e: InterruptedException) {
+			recoverableErrorAfterClientFailure(interrupted = true)
+		}
+	}
+
+	@Throws(ReflectiveOperationException::class, InterruptedException::class)
+	private fun requestQrAuthorization(): TelegramAuthState {
+		val update = prepareAuthorizationUpdate()
+		return when (sendForResult(createTdApiObject("RequestQrCodeAuthentication"))) {
+			CommandResult.OK ->
+				mapAuthorizationStateClassName(awaitPreparedAuthorizationStateClassName(update))
+			CommandResult.ERROR -> recoverableError(RecoverableErrorDetail.NONE)
+			CommandResult.TIMEOUT -> recoverableError(RecoverableErrorDetail.NONE)
+		}
+	}
+
+	override fun awaitQrAuthorizationUpdate(): TelegramAuthState {
+		val observedState = lastAuthorizationStateClassName
+		if (observedState != "AuthorizationStateWaitOtherDeviceConfirmation") {
+			return mapAuthorizationStateClassName(observedState)
+		}
+		if (qrAuthorizationDeadlineNanos == 0L) {
+			qrAuthorizationDeadlineNanos =
+				System.nanoTime() + qrAuthorizationTimeoutMs * NANOS_PER_MILLISECOND
+		}
+		val remainingNanos = qrAuthorizationDeadlineNanos - System.nanoTime()
+		if (remainingNanos <= 0L) return recoverableErrorAfterClientFailure()
+		val waitMs = minOf(
+			qrAuthorizationPollMs,
+			(remainingNanos / NANOS_PER_MILLISECOND).coerceAtLeast(1L),
+		)
+		return try {
+			val state = prepareAuthorizationUpdate().await(waitMs)
+			if (state == null) {
+				if (System.nanoTime() >= qrAuthorizationDeadlineNanos) {
+					recoverableErrorAfterClientFailure()
+				} else {
+					clearRecoverableErrorDetail(TelegramAuthState.QR_WAITING)
+				}
+			} else {
+				lastAuthorizationStateClassName = state
+				mapAuthorizationStateClassName(state).also {
+					if (it != TelegramAuthState.QR_WAITING) qrAuthorizationDeadlineNanos = 0L
+				}
+			}
+		} catch (e: InterruptedException) {
+			recoverableErrorAfterClientFailure(interrupted = true)
+		}
+	}
 
 	private fun submitCredential(
 		credential: String,
@@ -291,13 +393,16 @@ class ReflectiveTelegramTdlibLoginClient(
 		activeClientGeneration = clientGeneration
 		return createReflectiveTdlibClient { update ->
 			val pendingAuthorizationUpdate = pendingAuthorizationUpdate
-			if (clientGeneration == activeClientGeneration &&
-				pendingAuthorizationUpdate != null
-			) {
+			if (clientGeneration == activeClientGeneration) {
+				getQrAuthorizationLink(update)?.let { qrAuthorizationLink = it }
+				val className = getAuthorizationStateClassName(update)
+				if (qrAuthorizationDeadlineNanos != 0L && className.isNotEmpty()) {
+					lastAuthorizationStateClassName = className
+				}
+				if (pendingAuthorizationUpdate == null) return@createReflectiveTdlibClient
 				getTelegramCodeDeliveryStatus(update)?.let {
 					log.info("Telegram auth code delivery: $it")
 				}
-				val className = getAuthorizationStateClassName(update)
 				pendingAuthorizationUpdate.capture(className)
 			}
 		}
@@ -352,6 +457,8 @@ class ReflectiveTelegramTdlibLoginClient(
 			)
 			"AuthorizationStateWaitCode" -> clearRecoverableErrorDetail(TelegramAuthState.CODE_ENTRY)
 			"AuthorizationStateWaitPassword" -> clearRecoverableErrorDetail(TelegramAuthState.PASSWORD_ENTRY)
+			"AuthorizationStateWaitOtherDeviceConfirmation" ->
+				clearRecoverableErrorDetail(TelegramAuthState.QR_WAITING)
 			"AuthorizationStateReady" -> clearRecoverableErrorDetail(TelegramAuthState.READY)
 			"AuthorizationStateClosed" -> clearRecoverableErrorDetail(TelegramAuthState.CLOSED)
 			else -> {
@@ -400,6 +507,8 @@ class ReflectiveTelegramTdlibLoginClient(
 
 	private fun closeTdlibClient() {
 		lastAuthorizationStateClassName = ""
+		qrAuthorizationLink = null
+		qrAuthorizationDeadlineNanos = 0L
 		completePendingAuthorizationUpdate("AuthorizationStateClosed")
 		val client = tdlibClient ?: return
 		tdlibClient = null
@@ -422,5 +531,9 @@ class ReflectiveTelegramTdlibLoginClient(
 		pendingAuthorizationUpdate?.let {
 			it.capture(className)
 		}
+	}
+
+	private companion object {
+		const val NANOS_PER_MILLISECOND = 1_000_000L
 	}
 }

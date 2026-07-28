@@ -1,7 +1,14 @@
 package org.briarproject.briar.api.telegram
 
 interface TelegramAuthSession {
-	data class Snapshot(val authState: TelegramAuthState, val errorDetail: RecoverableErrorDetail)
+	data class Snapshot @JvmOverloads constructor(
+		val authState: TelegramAuthState,
+		val errorDetail: RecoverableErrorDetail,
+		val qrAuthorizationLink: String? = null,
+	) {
+		override fun toString(): String =
+			"Snapshot(authState=$authState, errorDetail=$errorDetail, hasQrAuthorizationLink=${qrAuthorizationLink != null})"
+	}
 
 	enum class RecoverableErrorDetail {
 		NONE,
@@ -23,5 +30,7 @@ interface TelegramAuthSession {
 	fun resendCode()
 	fun submitCode(code: String)
 	fun submitPassword(password: String)
+	fun requestQrCodeAuthentication()
+	fun awaitQrAuthorizationUpdate()
 	fun close()
 }

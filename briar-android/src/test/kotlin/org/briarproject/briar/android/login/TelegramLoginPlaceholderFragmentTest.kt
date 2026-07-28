@@ -113,6 +113,19 @@ class TelegramLoginPlaceholderFragmentTest {
 	}
 
 	@Test
+	fun testQrActionUsesQrReadyRouteAndExplicitTelegramIntent() {
+		composeRule.onNodeWithTag(TELEGRAM_LOGIN_QR_TAG).performClick()
+		composeRule.waitForIdle()
+
+		assertEquals(1, telegramAuthSession.qrRequestCalls)
+		assertEquals(SIGNED_OUT, getOrAwaitValue(viewModel.state))
+		assertEquals(1, telegramAuthSession.closeCalls)
+		val intent = telegramQrAuthorizationIntent("tg://login")
+		assertEquals("android.intent.action.VIEW", intent.action)
+		assertEquals("org.telegram.messenger", intent.`package`)
+	}
+
+	@Test
 	fun testRejectedCodeResendKeepsCodeStepVisible() {
 		telegramAuthSession.stateAfterSubmitIdentifier = TelegramAuthState.CODE_ENTRY
 		composeRule.onNodeWithTag(TELEGRAM_LOGIN_IDENTIFIER_TAG)
@@ -326,10 +339,13 @@ class TelegramLoginPlaceholderFragmentTest {
 		var identifierSubmitCalls = 0
 		var resendCodeCalls = 0
 		var closeCalls = 0
+		var qrRequestCalls = 0
+		var qrLink: String? = null
 
 		override fun getSnapshot() = TelegramAuthSession.Snapshot(
 			currentAuthState,
 			currentRecoverableErrorDetail,
+			qrLink,
 		)
 
 		override fun start() {
@@ -356,6 +372,16 @@ class TelegramLoginPlaceholderFragmentTest {
 		}
 
 		override fun submitPassword(password: String) = Unit
+
+		override fun requestQrCodeAuthentication() {
+			qrRequestCalls++
+			qrLink = "test-qr-link"
+			currentAuthState = TelegramAuthState.QR_WAITING
+		}
+
+		override fun awaitQrAuthorizationUpdate() {
+			currentAuthState = TelegramAuthState.READY
+		}
 
 		override fun close() {
 			closeCalls++

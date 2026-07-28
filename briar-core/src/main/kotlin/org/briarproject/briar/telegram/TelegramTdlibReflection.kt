@@ -131,6 +131,20 @@ internal fun getTelegramCodeDeliveryStatus(update: Any?): String? {
 	}
 }
 
+internal fun getQrAuthorizationLink(update: Any?): String? {
+	if (update?.javaClass?.simpleName != "UpdateAuthorizationState") return null
+	return try {
+		val state = update.javaClass.getField("authorizationState").get(update)
+		if (state?.javaClass?.simpleName != "AuthorizationStateWaitOtherDeviceConfirmation") {
+			null
+		} else {
+			state.javaClass.getField("link").get(state) as? String
+		}
+	} catch (_: ReflectiveOperationException) {
+		null
+	}
+}
+
 private fun codeDeliveryType(type: Any?): String {
 	if (type == null) return "NONE"
 	return type.javaClass.simpleName

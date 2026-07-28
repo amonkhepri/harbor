@@ -67,6 +67,12 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 				resultHandler?.onResult(TdApi.Ok())
 				emitAuthorizationState(TdApi.AuthorizationStateWaitCode())
 			}
+			is TdApi.RequestQrCodeAuthentication -> {
+				resultHandler?.onResult(TdApi.Ok())
+				emitAuthorizationState(
+					TdApi.AuthorizationStateWaitOtherDeviceConfirmation(qrAuthorizationLink),
+				)
+			}
 			is TdApi.CheckAuthenticationPassword -> {
 				if (request.password.contains("invalid")) {
 					resultHandler?.onResult(TdApi.Error())
@@ -195,13 +201,19 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 		private var rejectSetTdlibParameters = false
 		private var rejectResendAuthenticationCode = false
 		private var rejectGetChatHistory = false
+		private var qrAuthorizationLink = "test-qr-link"
+		private var activeInstance: Client? = null
 
 		@JvmStatic
 		fun create(
 			updateHandler: ResultHandler,
 			updatesExceptionHandler: ExceptionHandler?,
 			defaultExceptionHandler: ExceptionHandler?,
-		): Client = Client(updateHandler)
+		): Client = Client(updateHandler).also { activeInstance = it }
+
+		fun emitAuthorizationStateForTest(authorizationState: Any) {
+			activeInstance?.emitAuthorizationState(authorizationState)
+		}
 
 		fun resetTestState() {
 			sentRequestNames.clear()
@@ -228,6 +240,8 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 			rejectSetTdlibParameters = false
 			rejectResendAuthenticationCode = false
 			rejectGetChatHistory = false
+			qrAuthorizationLink = "test-qr-link"
+			activeInstance = null
 		}
 
 		fun setAuthorizationUpdateDelayMs(delayMs: Long) {
@@ -257,6 +271,10 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 
 		fun setAuthorizationStateAfterTdlibParameters(authorizationState: Any) {
 			authorizationStateAfterTdlibParameters = authorizationState
+		}
+
+		fun setQrAuthorizationLink(link: String) {
+			qrAuthorizationLink = link
 		}
 
 		fun setChats(vararg chats: TdApi.Chat) {

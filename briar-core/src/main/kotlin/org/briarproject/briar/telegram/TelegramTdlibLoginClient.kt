@@ -10,5 +10,8 @@ interface TelegramTdlibLoginClient {
 	fun resendCode(): TelegramAuthState
 	fun submitCode(code: String): TelegramAuthState
 	fun submitPassword(password: String): TelegramAuthState
+	fun requestQrCodeAuthentication(): TelegramAuthState
+	fun awaitQrAuthorizationUpdate(): TelegramAuthState
+	fun getQrAuthorizationLink(): String?
 	fun close(): TelegramAuthState
 }

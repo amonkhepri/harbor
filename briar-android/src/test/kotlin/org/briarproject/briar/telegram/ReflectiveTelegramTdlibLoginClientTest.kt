@@ -22,12 +22,16 @@ class ReflectiveTelegramTdlibLoginClientTest {
 		tdlibKeyProvider: TelegramTdlibDatabaseKeyProvider =
 			StaticTelegramTdlibDatabaseKeyProvider(TDLIB_KEY),
 		authorizationUpdateTimeoutMs: Long = 10_000L,
+		qrAuthorizationTimeoutMs: Long = 300_000L,
+		qrAuthorizationPollMs: Long = 1_000L,
 	) = ReflectiveTelegramTdlibLoginClient(
 		tdlibDirectory = tdlibDirectory,
 		apiId = 12345,
 		apiHash = "test-api-hash",
 		tdlibKeyProvider = tdlibKeyProvider,
 		authorizationUpdateTimeoutMs = authorizationUpdateTimeoutMs,
+		qrAuthorizationTimeoutMs = qrAuthorizationTimeoutMs,
+		qrAuthorizationPollMs = qrAuthorizationPollMs,
 	)
 
 	private fun createTimeoutClient() = createClient(authorizationUpdateTimeoutMs = 1_000L)
@@ -182,6 +186,7 @@ class ReflectiveTelegramTdlibLoginClientTest {
 		private const val SET_PHONE = "SetAuthenticationPhoneNumber"
 		private const val CHECK_CODE = "CheckAuthenticationCode"
 		private const val RESEND_CODE = "ResendAuthenticationCode"
+		private const val REQUEST_QR = "RequestQrCodeAuthentication"
 		private const val CHECK_PASSWORD = "CheckAuthenticationPassword"
 		private const val CLOSE = "Close"
 		private val TDLIB_KEY = ByteArray(32) { (it + 1).toByte() }
@@ -520,5 +525,41 @@ class ReflectiveTelegramTdlibLoginClientTest {
 			client.submitIdentifier("test-login-identifier"),
 		)
 		assertPasswordFlowRequestsAndClose(client, CLOSE, SET_PARAMETERS, SET_PHONE)
+	}
+
+	@Test
+	fun testQrAuthorizationCapturesRotatedLinkAndTransitionsToReady() {
+		val client = createClient(qrAuthorizationPollMs = 1L)
+		client.start()
+
+		client.assertSuccessfulState(TelegramAuthState.QR_WAITING, client.requestQrCodeAuthentication())
+		assertEquals("test-qr-link", client.getQrAuthorizationLink())
+
+		Client.emitAuthorizationStateForTest(
+			TdApi.AuthorizationStateWaitOtherDeviceConfirmation("rotated-test-qr-link"),
+		)
+		client.assertSuccessfulState(TelegramAuthState.QR_WAITING, client.awaitQrAuthorizationUpdate())
+		assertEquals("rotated-test-qr-link", client.getQrAuthorizationLink())
+
+		Client.emitAuthorizationStateForTest(TdApi.AuthorizationStateWaitPassword())
+		client.assertSuccessfulState(
+			TelegramAuthState.PASSWORD_ENTRY,
+			client.awaitQrAuthorizationUpdate(),
+		)
+		client.assertSuccessfulState(TelegramAuthState.READY, client.submitPassword("valid-password"))
+		assertSentRequestsAndClose(client, SET_PARAMETERS, REQUEST_QR, CHECK_PASSWORD)
+	}
+
+	@Test
+	fun testQrAuthorizationTimeoutClosesClientAndClearsLink() {
+		val client = createClient(qrAuthorizationTimeoutMs = 0L)
+		client.start()
+		client.requestQrCodeAuthentication()
+
+		assertRecoverableError(client, RecoverableErrorDetail.NONE) {
+			client.awaitQrAuthorizationUpdate()
+		}
+		assertEquals(null, client.getQrAuthorizationLink())
+		assertSentRequestsAndClose(client, SET_PARAMETERS, REQUEST_QR, CLOSE)
 	}
 }

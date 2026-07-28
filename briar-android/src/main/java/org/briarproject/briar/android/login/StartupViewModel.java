@@ -246,6 +246,26 @@ public class StartupViewModel extends AndroidViewModel
 		runTelegramAuthAction(() -> telegramAuthSession.submitIdentifier(identifier));
 	}
 
+	void requestTelegramQrAuthorization() {
+		submittedTelegramLoginIdentifier =
+				telegramLoginCode = telegramLoginPassword = "";
+		runTelegramAuthAction(telegramAuthSession::requestQrCodeAuthentication);
+	}
+
+	void awaitTelegramQrAuthorization() {
+		int generation = telegramAuthGeneration.get();
+		telegramAuthExecutor.execute(() -> {
+			if (generation != telegramAuthGeneration.get()) return;
+			while (generation == telegramAuthGeneration.get()) {
+				telegramAuthSession.awaitQrAuthorizationUpdate();
+				if (generation != telegramAuthGeneration.get()) return;
+				Snapshot snapshot = telegramAuthSession.getSnapshot();
+				telegramAuthSnapshot.postValue(snapshot);
+				if (snapshot.getAuthState() != TelegramAuthState.QR_WAITING) return;
+			}
+		});
+	}
+
 	void submitTelegramLoginCode() {
 		String code = telegramLoginCode.trim();
 		runTelegramAuthAction(() -> {
@@ -281,6 +301,11 @@ public class StartupViewModel extends AndroidViewModel
 		showPasswordFragment();
 	}
 
+	void completeTelegramQrLoginConfirmation() {
+		pendingTelegramLinkedIdentity = "";
+		showPasswordFragment();
+	}
+
 	void showTelegramLoginIdentifierStep() {
 		telegramAuthGeneration.incrementAndGet();
 		submittedTelegramLoginIdentifier = telegramLoginCode = telegramLoginPassword = "";
@@ -297,6 +322,7 @@ public class StartupViewModel extends AndroidViewModel
 		TelegramAuthState authState = snapshot.getAuthState();
 		return authState == TelegramAuthState.CODE_ENTRY ||
 				authState == TelegramAuthState.PASSWORD_ENTRY ||
+				authState == TelegramAuthState.QR_WAITING ||
 				authState == TelegramAuthState.READY ||
 				authState == TelegramAuthState.RECOVERABLE_ERROR &&
 						(snapshot.getErrorDetail() == RecoverableErrorDetail.INVALID_CODE ||

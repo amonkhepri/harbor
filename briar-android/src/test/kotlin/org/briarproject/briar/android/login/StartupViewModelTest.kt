@@ -421,6 +421,10 @@ class StartupViewModelTest {
 			currentAuthState = TelegramAuthState.READY
 		}
 
+		override fun requestQrCodeAuthentication() = Unit
+
+		override fun awaitQrAuthorizationUpdate() = Unit
+
 		override fun close() {
 			closeCalls++
 			currentAuthState = TelegramAuthState.CLOSED

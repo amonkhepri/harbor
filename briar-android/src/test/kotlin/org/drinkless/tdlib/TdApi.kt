@@ -63,6 +63,8 @@ abstract class TdApi {
 
 	class AuthorizationStateWaitPassword
 
+	class AuthorizationStateWaitOtherDeviceConfirmation(@JvmField val link: String)
+
 	class AuthorizationStateWaitRegistration
 
 	class AuthorizationStateReady
@@ -109,6 +111,8 @@ abstract class TdApi {
 	class CheckAuthenticationCode(@JvmField val code: String) : Function()
 
 	class ResendAuthenticationCode : Function()
+
+	class RequestQrCodeAuthentication : Function()
 
 	class CheckAuthenticationPassword(@JvmField val password: String) : Function()
 
