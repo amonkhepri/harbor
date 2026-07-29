@@ -7,11 +7,8 @@ import org.briarproject.bramble.api.account.AccountManager
 import org.briarproject.bramble.api.event.EventBus
 import org.briarproject.bramble.api.lifecycle.LifecycleManager
 import org.briarproject.bramble.api.lifecycle.LifecycleManager.LifecycleState
-import org.briarproject.bramble.api.lifecycle.event.LifecycleEvent
-import org.briarproject.bramble.api.settings.SettingsManager
 import org.briarproject.bramble.test.ImmediateExecutor
 import org.briarproject.briar.android.login.StartupViewModel.State.SIGNED_OUT
-import org.briarproject.briar.android.login.StartupViewModel.State.STARTED
 import org.briarproject.briar.android.login.StartupViewModel.State.TELEGRAM_LOGIN
 import org.briarproject.briar.android.viewmodel.LiveDataTestUtil.getOrAwaitValue
 import org.briarproject.briar.api.android.AndroidNotificationManager
@@ -50,7 +47,6 @@ class StartupViewModelTest {
 		val lifecycleManager = mock(LifecycleManager::class.java)
 		val notificationManager = mock(AndroidNotificationManager::class.java)
 		val eventBus = mock(EventBus::class.java)
-		val settingsManager = mock(SettingsManager::class.java)
 		val featureFlags = mock(FeatureFlags::class.java)
 
 		`when`(lifecycleManager.lifecycleState).thenReturn(LifecycleState.STOPPED)
@@ -63,7 +59,6 @@ class StartupViewModelTest {
 			notificationManager,
 			eventBus,
 			ioExecutor,
-			settingsManager,
 			featureFlags,
 			telegramAuthSession,
 		)
@@ -164,58 +159,6 @@ class StartupViewModelTest {
 		)
 		assertEquals(0, telegramAuthSession.closeCalls)
 		assertEquals(0, telegramAuthSession.startCalls)
-	}
-
-	@Test
-	fun testConfirmationUsesSubmittedIdentifierAfterInFlightEdit() {
-		val executor = QueuedExecutor()
-		viewModel = createViewModel(executor)
-		viewModel.setTelegramLoginIdentifier(" submitted ")
-
-		viewModel.submitTelegramLoginIdentifier()
-		viewModel.setTelegramLoginIdentifier("unverified")
-		executor.runNext()
-		viewModel.completeTelegramLoginConfirmation()
-		viewModel.completeTelegramLoginConfirmation()
-
-		val field = StartupViewModel::class.java
-			.getDeclaredField("pendingTelegramLinkedIdentity")
-			.apply { isAccessible = true }
-		assertEquals("submitted", field.get(viewModel))
-	}
-
-	@Test
-	fun testAbandoningLocalSignInClearsPendingTelegramIdentity() {
-		viewModel.setTelegramLoginIdentifier("submitted")
-		viewModel.submitTelegramLoginIdentifier()
-		viewModel.completeTelegramLoginConfirmation()
-
-		viewModel.abandonPendingTelegramLinkedIdentity()
-
-		val field = StartupViewModel::class.java
-			.getDeclaredField("pendingTelegramLinkedIdentity")
-			.apply { isAccessible = true }
-		assertEquals("", field.get(viewModel))
-	}
-
-	@Test
-	fun testPasswordValidationStoresIdentityAfterDatabaseStarts() {
-		val executor = QueuedExecutor()
-		viewModel = createViewModel(executor)
-		setPrivateString("pendingTelegramLinkedIdentity", "first")
-		viewModel.validatePassword("password")
-
-		setPrivateString("pendingTelegramLinkedIdentity", "replacement")
-		executor.runNext()
-
-		assertEquals("", getPrivateString("lastTelegramLinkedIdentityStaged"))
-		`when`(accountManager.hasDatabaseKey()).thenReturn(true)
-		viewModel.eventOccurred(LifecycleEvent(LifecycleState.RUNNING))
-		executor.runNext()
-
-		assertEquals("first", getPrivateString("lastTelegramLinkedIdentityStaged"))
-		assertEquals("replacement", getPrivateString("pendingTelegramLinkedIdentity"))
-		assertEquals(STARTED, getOrAwaitValue(viewModel.state))
 	}
 
 	@Test
@@ -381,18 +324,6 @@ class StartupViewModelTest {
 			TelegramAuthState.IDENTIFIER_ENTRY,
 			getOrAwaitValue(viewModel.getTelegramAuthSnapshot()).authState,
 		)
-	}
-
-	private fun getPrivateString(name: String): String {
-		val field = StartupViewModel::class.java.getDeclaredField(name)
-			.apply { isAccessible = true }
-		return field.get(viewModel) as String
-	}
-
-	private fun setPrivateString(name: String, value: String) {
-		val field = StartupViewModel::class.java.getDeclaredField(name)
-			.apply { isAccessible = true }
-		field.set(viewModel, value)
 	}
 
 	private class FakeTelegramAuthSession : TelegramAuthSession {

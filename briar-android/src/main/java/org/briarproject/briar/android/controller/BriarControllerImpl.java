@@ -16,7 +16,6 @@ import org.briarproject.briar.android.BriarService;
 import org.briarproject.briar.android.BriarService.BriarServiceConnection;
 import org.briarproject.briar.android.controller.handler.ResultHandler;
 import org.briarproject.briar.api.android.DozeWatchdog;
-import org.briarproject.briar.api.telegram.TelegramConnector;
 import org.briarproject.nullsafety.NotNullByDefault;
 
 import java.util.concurrent.Executor;
@@ -48,7 +47,6 @@ public class BriarControllerImpl implements BriarController {
 	private final SettingsManager settingsManager;
 	private final DozeWatchdog dozeWatchdog;
 	private final AndroidWakeLockManager wakeLockManager;
-	private final TelegramConnector telegramConnector;
 	private final Activity activity;
 
 	private boolean bound = false;
@@ -60,7 +58,6 @@ public class BriarControllerImpl implements BriarController {
 			@DatabaseExecutor Executor databaseExecutor,
 			SettingsManager settingsManager,
 			DozeWatchdog dozeWatchdog,
-			TelegramConnector telegramConnector,
 			AndroidWakeLockManager wakeLockManager,
 			Activity activity) {
 		this.serviceConnection = serviceConnection;
@@ -69,7 +66,6 @@ public class BriarControllerImpl implements BriarController {
 		this.databaseExecutor = databaseExecutor;
 		this.settingsManager = settingsManager;
 		this.dozeWatchdog = dozeWatchdog;
-		this.telegramConnector = telegramConnector;
 		this.wakeLockManager = wakeLockManager;
 		this.activity = activity;
 	}
@@ -105,25 +101,6 @@ public class BriarControllerImpl implements BriarController {
 	public boolean accountSignedIn() {
 		return accountManager.hasDatabaseKey() &&
 				lifecycleManager.getLifecycleState().isAfter(STARTING_SERVICES);
-	}
-
-	@Override
-	public boolean isTelegramConnectorReady() {
-		return accountSignedIn() && telegramConnector.isEnabled();
-	}
-
-	@Override
-	public void getTelegramLinkedIdentity(ResultHandler<String> handler) {
-		databaseExecutor.execute(() -> {
-			try {
-				Settings settings =
-						settingsManager.getSettings(SETTINGS_NAMESPACE);
-				handler.onResult(settings.get("pref_key_telegram_linked_identity"));
-			} catch (DbException e) {
-				logException(LOG, WARNING, e);
-				handler.onResult(null);
-			}
-		});
 	}
 
 	@Override

@@ -85,12 +85,6 @@ public class AddNearbyContactActivity extends BriarActivity
 				.observe(this, this::onAddContactStateChanged);
 	}
 
-	@Override
-	protected void onTelegramLinkedIdentityAvailable(
-			@Nullable String linkedIdentity) {
-		showTelegramLinkedIdentitySubtitle(linkedIdentity);
-	}
-
 	private void onBluetoothDiscoverableResult(boolean discoverable) {
 		if (discoverable) {
 			LOG.info("Bluetooth discoverability was accepted");

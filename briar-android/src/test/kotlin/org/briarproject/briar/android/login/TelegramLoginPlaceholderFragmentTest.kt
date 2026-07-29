@@ -23,7 +23,6 @@ import org.briarproject.bramble.api.account.AccountManager
 import org.briarproject.bramble.api.event.EventBus
 import org.briarproject.bramble.api.lifecycle.LifecycleManager
 import org.briarproject.bramble.api.lifecycle.LifecycleManager.LifecycleState
-import org.briarproject.bramble.api.settings.SettingsManager
 import org.briarproject.briar.R
 import org.briarproject.briar.android.login.StartupViewModel.State.SIGNED_OUT
 import org.briarproject.briar.android.viewmodel.LiveDataTestUtil.getOrAwaitValue
@@ -307,7 +306,6 @@ class TelegramLoginPlaceholderFragmentTest {
 		val lifecycleManager = mock(LifecycleManager::class.java)
 		val notificationManager = mock(AndroidNotificationManager::class.java)
 		val eventBus = mock(EventBus::class.java)
-		val settingsManager = mock(SettingsManager::class.java)
 		val featureFlags = mock(FeatureFlags::class.java)
 
 		`when`(lifecycleManager.lifecycleState).thenReturn(LifecycleState.STOPPED)
@@ -320,7 +318,6 @@ class TelegramLoginPlaceholderFragmentTest {
 			notificationManager,
 			eventBus,
 			Runnable::run,
-			settingsManager,
 			featureFlags,
 			telegramAuthSession,
 		)

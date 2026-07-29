@@ -9,10 +9,6 @@ interface BriarController : ActivityLifecycleController {
 
 	fun accountSignedIn(): Boolean
 
-	fun isTelegramConnectorReady(): Boolean
-
-	fun getTelegramLinkedIdentity(handler: ResultHandler<String>)
-
 	/**
 	 * Returns true via handler when app has dozed
 	 * without being white-listed.
@@ -25,5 +21,4 @@ interface BriarController : ActivityLifecycleController {
 	fun signOut(handler: ResultHandler<Void>, deleteAccount: Boolean)
 
 	fun deleteAccount()
-
 }

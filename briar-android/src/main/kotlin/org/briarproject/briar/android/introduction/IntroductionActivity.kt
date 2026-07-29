@@ -12,12 +12,13 @@ import org.briarproject.briar.android.conversation.ConversationActivity.CONTACT_
 import org.briarproject.briar.android.fragment.BaseFragment.BaseFragmentListener
 import org.briarproject.nullsafety.MethodsNotNullByDefault
 import org.briarproject.nullsafety.ParametersNotNullByDefault
-import javax.annotation.Nullable
 import javax.inject.Inject
 
 @MethodsNotNullByDefault
 @ParametersNotNullByDefault
-class IntroductionActivity : BriarActivity(), BaseFragmentListener {
+class IntroductionActivity :
+	BriarActivity(),
+	BaseFragmentListener {
 
 	companion object {
 		private const val BUNDLE_CONTACT2 = "contact2"
@@ -31,7 +32,7 @@ class IntroductionActivity : BriarActivity(), BaseFragmentListener {
 	override fun injectActivity(component: ActivityComponent) {
 		component.inject(this)
 		viewModel = ViewModelProvider(this, viewModelFactory)
-				.get(IntroductionViewModel::class.java)
+			.get(IntroductionViewModel::class.java)
 	}
 
 	override fun onCreate(savedInstanceState: Bundle?) {
@@ -63,11 +64,5 @@ class IntroductionActivity : BriarActivity(), BaseFragmentListener {
 		if (secondContactId != null) {
 			outState.putInt(BUNDLE_CONTACT2, secondContactId.getInt())
 		}
-	}
-
-	override fun onTelegramLinkedIdentityAvailable(
-			@Nullable linkedIdentity: String?
-	) {
-		showTelegramLinkedIdentitySubtitle(linkedIdentity)
 	}
 }

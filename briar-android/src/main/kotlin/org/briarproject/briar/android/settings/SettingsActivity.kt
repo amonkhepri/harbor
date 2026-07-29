@@ -1,6 +1,5 @@
 package org.briarproject.briar.android.settings
 
-import android.content.Intent
 import android.content.Intent.ACTION_MANAGE_NETWORK_USAGE
 import android.os.Bundle
 import android.view.MenuItem
@@ -18,10 +17,11 @@ import org.briarproject.nullsafety.ParametersNotNullByDefault
 
 @MethodsNotNullByDefault
 @ParametersNotNullByDefault
-class SettingsActivity : BriarActivity(), OnPreferenceStartFragmentCallback {
+class SettingsActivity :
+	BriarActivity(),
+	OnPreferenceStartFragmentCallback {
 
 	companion object {
-		const val EXTRA_OPEN_TELEGRAM_SETUP = "openTelegramSetup"
 		const val EXTRA_THEME_CHANGE = "themeChange"
 
 		/**
@@ -53,13 +53,16 @@ class SettingsActivity : BriarActivity(), OnPreferenceStartFragmentCallback {
 
 		val launchIntent = intent
 		val extras = launchIntent.extras
-		if (bundle == null && extras != null &&
-				extras.getBoolean(EXTRA_THEME_CHANGE, false)) {
+		if (bundle == null &&
+			extras != null &&
+			extras.getBoolean(EXTRA_THEME_CHANGE, false)
+		) {
 			// show display fragment after theme change
 			val fragmentManager = supportFragmentManager
 			showNextFragment(fragmentManager, DisplayFragment())
 		} else if (bundle == null &&
-				ACTION_MANAGE_NETWORK_USAGE == launchIntent.action) {
+			ACTION_MANAGE_NETWORK_USAGE == launchIntent.action
+		) {
 			// show connection if coming from network settings
 			val fragmentManager = supportFragmentManager
 			showNextFragment(fragmentManager, ConnectionsFragment())
@@ -77,13 +80,14 @@ class SettingsActivity : BriarActivity(), OnPreferenceStartFragmentCallback {
 	}
 
 	override fun onPreferenceStartFragment(
-			caller: PreferenceFragmentCompat,
-			pref: Preference
+		caller: PreferenceFragmentCompat,
+		pref: Preference,
 	): Boolean {
 		val fragmentManager = supportFragmentManager
 		val fragmentFactory: FragmentFactory = fragmentManager.fragmentFactory
 		val fragment = fragmentFactory.instantiate(
-				classLoader, requireNotNull(pref.fragment)
+			classLoader,
+			requireNotNull(pref.fragment),
 		)
 		fragment.setTargetFragment(caller, 0)
 		// Replace the existing Fragment with the new Fragment
@@ -91,27 +95,16 @@ class SettingsActivity : BriarActivity(), OnPreferenceStartFragmentCallback {
 		return true
 	}
 
-	fun isTelegramConnectorReady(): Boolean =
-			getBriarController().isTelegramConnectorReady()
-
-	fun consumeOpenTelegramSetup(): Boolean {
-		val openTelegramSetup = intent.getBooleanExtra(
-				EXTRA_OPEN_TELEGRAM_SETUP, false
-		)
-		intent.removeExtra(EXTRA_OPEN_TELEGRAM_SETUP)
-		return openTelegramSetup
-	}
-
 	private fun showNextFragment(fragmentManager: FragmentManager, f: Fragment) {
 		fragmentManager.beginTransaction()
-				.setCustomAnimations(
-						R.anim.step_next_in,
-						R.anim.step_previous_out,
-						R.anim.step_previous_in,
-						R.anim.step_next_out
-				)
-				.replace(R.id.fragmentContainer, f)
-				.addToBackStack(null)
-				.commit()
+			.setCustomAnimations(
+				R.anim.step_next_in,
+				R.anim.step_previous_out,
+				R.anim.step_previous_in,
+				R.anim.step_next_out,
+			)
+			.replace(R.id.fragmentContainer, f)
+			.addToBackStack(null)
+			.commit()
 	}
 }

@@ -194,12 +194,6 @@ public class NavDrawerActivity extends BriarActivity implements
 		}
 	}
 
-	@Override
-	protected void onTelegramLinkedIdentityAvailable(
-			@Nullable String linkedIdentity) {
-		showTelegramLinkedIdentitySubtitle(linkedIdentity);
-	}
-
 	private void observeTransportsOnboarding() {
 		observeOnce(navDrawerViewModel.showTransportsOnboarding(), this,
 				show -> {

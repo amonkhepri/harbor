@@ -102,12 +102,6 @@ public class TransportsActivity extends BriarActivity {
 	}
 
 	@Override
-	protected void onTelegramLinkedIdentityAvailable(
-			@Nullable String linkedIdentity) {
-		showTelegramLinkedIdentitySubtitle(linkedIdentity);
-	}
-
-	@Override
 	public boolean onOptionsItemSelected(MenuItem item) {
 		if (item.getItemId() == android.R.id.home) {
 			onBackPressed();
