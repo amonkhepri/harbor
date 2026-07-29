@@ -98,10 +98,7 @@ class TelegramConversationActivity : BriarActivity() {
 	private var messageState = ConnectorConversationMessageListState()
 	private var automaticRefreshRunning = false
 	private val automaticRefresh = Runnable {
-		if (!automaticRefreshRunning && !messageState.isLoading) {
-			automaticRefreshRunning = true
-			loadMessages(showLoading = false)
-		}
+		if (!automaticRefreshRunning && !messageState.isLoading) loadMessages(showLoading = false)
 	}
 	private val loadOwner = ConnectorConversationLoadOwner()
 
@@ -174,6 +171,7 @@ class TelegramConversationActivity : BriarActivity() {
 	}
 
 	private fun loadMessages(showLoading: Boolean = true) {
+		automaticRefreshRunning = !showLoading
 		val loadGeneration = loadOwner.begin()
 		if (!hasValidChatId(chatId)) {
 			showMessages(loadGeneration, ConnectorConversationMessageListState(), LOAD_FAILED)
