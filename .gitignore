@@ -39,3 +39,6 @@ projectFilesBackup/
 # Local third-party sources (must remain untracked)
 /third_party/td/
 /third_party/tdlib/
+
+# Local QR authorization notes
+/docs/guides/telegram_qr_connection.md

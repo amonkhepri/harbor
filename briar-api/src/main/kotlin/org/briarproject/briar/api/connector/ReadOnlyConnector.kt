@@ -1,8 +1,6 @@
 package org.briarproject.briar.api.connector
 
 interface ReadOnlyConnector {
-	val source: ConnectorSource
-
 	fun isEnabled(): Boolean
 
 	fun isAuthorized(): Boolean

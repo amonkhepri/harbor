@@ -109,7 +109,6 @@ class TelegramConnectorMessageTest {
 		)
 
 		assertEquals(listOf(true, true), listOf(connector.isEnabled(), connector.isAuthorized()))
-		assertEquals(ConnectorSources.TELEGRAM, connector.source)
 		assertEquals(
 			listOf(
 				ConnectorThread(
