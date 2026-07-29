@@ -148,6 +148,25 @@ class StartupViewModelTest {
 	}
 
 	@Test
+	fun testActiveQrSessionSurvivesViewModelReplacement() {
+		telegramAuthSession.currentAuthState = TelegramAuthState.QR_WAITING
+
+		StartupViewModel::class.java.getDeclaredMethod("onCleared")
+			.apply { isAccessible = true }
+			.invoke(viewModel)
+		viewModel = createViewModel(ImmediateExecutor())
+
+		assertEquals(TelegramAuthState.QR_WAITING, telegramAuthSession.currentAuthState)
+		assertEquals(TELEGRAM_LOGIN, getOrAwaitValue(viewModel.state))
+		assertEquals(
+			TelegramAuthState.QR_WAITING,
+			getOrAwaitValue(viewModel.telegramAuthSnapshot).authState,
+		)
+		assertEquals(0, telegramAuthSession.closeCalls)
+		assertEquals(0, telegramAuthSession.startCalls)
+	}
+
+	@Test
 	fun testConfirmationUsesSubmittedIdentifierAfterInFlightEdit() {
 		val executor = QueuedExecutor()
 		viewModel = createViewModel(executor)

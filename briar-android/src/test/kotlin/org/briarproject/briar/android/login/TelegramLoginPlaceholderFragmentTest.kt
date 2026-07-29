@@ -114,10 +114,13 @@ class TelegramLoginPlaceholderFragmentTest {
 
 	@Test
 	fun testQrActionUsesQrReadyRoute() {
+		composeRule.onNodeWithTag(TELEGRAM_LOGIN_IDENTIFIER_TAG)
+			.performTextInput("+123456789")
 		composeRule.onNodeWithTag(TELEGRAM_LOGIN_QR_TAG).performClick()
 		composeRule.waitForIdle()
 
 		assertEquals(1, telegramAuthSession.qrRequestCalls)
+		composeRule.onNodeWithTag(TELEGRAM_LOGIN_CONFIRMATION_CONTINUE_TAG).performClick()
 		assertEquals(SIGNED_OUT, getOrAwaitValue(viewModel.state))
 		assertEquals(1, telegramAuthSession.closeCalls)
 	}

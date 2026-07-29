@@ -239,7 +239,7 @@ class ReflectiveTelegramTdlibLoginClient(
 	override fun getQrAuthorizationLink(): String? = qrAuthorizationLink
 
 	override fun requestQrCodeAuthentication(): TelegramAuthState {
-		if (tdlibClient == null) {
+		if (tdlibClient == null || lastAuthorizationStateClassName == "AuthorizationStateClosed") {
 			val state = start()
 			if (state != TelegramAuthState.IDENTIFIER_ENTRY) return state
 		}

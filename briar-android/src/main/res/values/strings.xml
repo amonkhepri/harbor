@@ -65,9 +65,9 @@
 	<string name="telegram_connector_login_continue_button">Continue</string>
 	<string name="telegram_connector_login_qr_button">Connect with QR code</string>
 	<string name="telegram_connector_login_qr_description">Telegram authorization QR code</string>
-	<string name="telegram_connector_login_qr_scan_message">You need a second device that is already signed in to Telegram, with a camera. On that device, open Telegram\'s Settings > Devices > Link Desktop Device and scan this code.</string>
+	<string name="telegram_connector_login_qr_scan_message">Scan this QR from Telegram\'s Settings > Devices > Link Desktop Device on a phone already signed in to your account. If this is your only phone, mirror Harbor to a computer, capture immediately after this QR changes, and open every capture as a new unsaved image before using the same Telegram scanner on this phone. Never reuse an older capture.</string>
 	<string name="telegram_connector_login_resend_button">Send code another way</string>
-	<string name="telegram_connector_login_confirmation_message">Telegram phone number staged for internal Harbor testing: %1$s</string>
+	<string name="telegram_connector_login_confirmation_message">Telegram is connected. Return to Harbor sign-in to continue.</string>
 	<string name="telegram_connector_login_retry_message">Telegram login hit a recoverable issue in this build. Check your phone number or local TDLib setup, then continue to retry. You can also use Harbor password instead.</string>
 	<string name="telegram_connector_login_confirmation_continue_button">Return to Harbor sign-in</string>
 	<string name="telegram_connector_login_handoff_staged">Telegram identity staged for Harbor internal testing: %1$s</string>

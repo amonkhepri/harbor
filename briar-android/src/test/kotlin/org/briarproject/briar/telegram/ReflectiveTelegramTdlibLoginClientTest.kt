@@ -551,6 +551,16 @@ class ReflectiveTelegramTdlibLoginClientTest {
 	}
 
 	@Test
+	fun testQrAuthorizationRestartsClosedClient() {
+		Client.setInitialAuthorizationState(TdApi.AuthorizationStateClosed())
+		val client = createClient()
+		assertEquals(TelegramAuthState.CLOSED, client.start())
+		Client.setInitialAuthorizationState(TdApi.AuthorizationStateWaitTdlibParameters())
+		assertEquals(TelegramAuthState.QR_WAITING, client.requestQrCodeAuthentication())
+		assertSentRequestsAndClose(client, CLOSE, SET_PARAMETERS, REQUEST_QR)
+	}
+
+	@Test
 	fun testQrAuthorizationTimeoutClosesClientAndClearsLink() {
 		val client = createClient(qrAuthorizationTimeoutMs = 0L)
 		client.start()

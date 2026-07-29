@@ -141,9 +141,6 @@ internal fun TelegramLoginScreen(viewModel: StartupViewModel) {
 		identifier = viewModel.getTelegramLoginIdentifier()
 		code = viewModel.getTelegramLoginCode()
 		password = viewModel.getTelegramLoginPassword()
-		if (authState == TelegramAuthState.READY && qrLink != null) {
-			viewModel.completeTelegramQrLoginConfirmation()
-		}
 	}
 	LaunchedEffect(authState) {
 		if (authState == TelegramAuthState.QR_WAITING) viewModel.awaitTelegramQrAuthorization()
@@ -205,7 +202,6 @@ internal fun TelegramLoginScreen(viewModel: StartupViewModel) {
 			Spacer(Modifier.height(24.dp))
 
 			when {
-				authState == TelegramAuthState.READY && qrLink != null -> Unit
 				authState == TelegramAuthState.QR_WAITING -> {
 					QrStep(qrLink)
 				}

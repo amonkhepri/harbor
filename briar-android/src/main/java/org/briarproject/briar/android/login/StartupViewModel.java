@@ -113,14 +113,25 @@ public class StartupViewModel extends AndroidViewModel
 		this.telegramAuthSession = telegramAuthSession;
 
 		updateState(lifecycleManager.getLifecycleState());
+		Snapshot activeTelegramAuth = telegramAuthSession.getSnapshot();
+		if (isResumableQrSession(activeTelegramAuth)) {
+			telegramAuthSnapshot.setValue(activeTelegramAuth);
+			state.setValue(TELEGRAM_LOGIN);
+		}
 		eventBus.addListener(this);
 	}
 
 	@Override
 	protected void onCleared() {
-		telegramAuthGeneration.incrementAndGet();
-		telegramAuthExecutor.execute(telegramAuthSession::close);
 		eventBus.removeListener(this);
+		telegramAuthGeneration.incrementAndGet();
+		if (isResumableQrSession(telegramAuthSession.getSnapshot())) return;
+		telegramAuthExecutor.execute(telegramAuthSession::close);
+	}
+
+	private static boolean isResumableQrSession(Snapshot snapshot) {
+		return snapshot.getAuthState() == TelegramAuthState.QR_WAITING ||
+				snapshot.getQrAuthorizationLink() != null;
 	}
 
 	@Override
@@ -296,13 +307,11 @@ public class StartupViewModel extends AndroidViewModel
 	}
 
 	void completeTelegramLoginConfirmation() {
-		if (submittedTelegramLoginIdentifier.isEmpty()) return;
+		if (submittedTelegramLoginIdentifier.isEmpty()) {
+			if (pendingTelegramLinkedIdentity.isEmpty()) showPasswordFragment();
+			return;
+		}
 		pendingTelegramLinkedIdentity = submittedTelegramLoginIdentifier;
-		showPasswordFragment();
-	}
-
-	void completeTelegramQrLoginConfirmation() {
-		pendingTelegramLinkedIdentity = "";
 		showPasswordFragment();
 	}
 
