@@ -36,7 +36,15 @@ class InboxThreadMergerTest {
 
 	@Test
 	fun testTelegramRowsExposeLoadingState() {
-		val item = TelegramInboxThreadItem(7L, "chat", 42000L)
+		val item = TelegramInboxThreadItem(
+			chatId = 7L,
+			title = "chat",
+			latestActivityMillis = 42000L,
+			previewText = "",
+			isLastMessageOutgoing = false,
+			isPreviewLoading = true,
+			previewType = ConnectorMessageType.TEXT,
+		)
 
 		assertPreviewState(item, isPreviewLoading = true)
 	}

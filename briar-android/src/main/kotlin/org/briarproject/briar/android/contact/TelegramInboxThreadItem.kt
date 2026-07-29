@@ -24,28 +24,6 @@ class TelegramInboxThreadItem(
 		thread.latestMessageType,
 	)
 
-	constructor(
-		chatId: Long,
-		title: String,
-		latestActivityMillis: Long,
-	) : this(chatId, title, latestActivityMillis, "", false, true, ConnectorMessageType.TEXT)
-
-	constructor(
-		chatId: Long,
-		title: String,
-		latestActivityMillis: Long,
-		previewText: String,
-		previewLoading: Boolean,
-	) : this(
-		chatId,
-		title,
-		latestActivityMillis,
-		previewText,
-		false,
-		previewLoading,
-		ConnectorMessageType.TEXT,
-	)
-
 	override val connectorThreadId: String
 		get() = chatId.toString()
 
