@@ -10,6 +10,11 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 import java.io.File
 
+internal class StaticTelegramTdlibDatabaseKeyProvider(private val key: ByteArray) :
+	TelegramTdlibDatabaseKeyProvider {
+	override fun getDatabaseEncryptionKey(tdlibDirectory: File): ByteArray = key.copyOf()
+}
+
 class ReflectiveTelegramTdlibLoginClientTest {
 
 	@After
@@ -190,11 +195,6 @@ class ReflectiveTelegramTdlibLoginClientTest {
 		private const val CHECK_PASSWORD = "CheckAuthenticationPassword"
 		private const val CLOSE = "Close"
 		private val TDLIB_KEY = ByteArray(32) { (it + 1).toByte() }
-	}
-
-	private class StaticTelegramTdlibDatabaseKeyProvider(private val key: ByteArray) :
-		TelegramTdlibDatabaseKeyProvider {
-		override fun getDatabaseEncryptionKey(tdlibDirectory: File): ByteArray = key.copyOf()
 	}
 
 	private class UnavailableTelegramTdlibDatabaseKeyProvider(

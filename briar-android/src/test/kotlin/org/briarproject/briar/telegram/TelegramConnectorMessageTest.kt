@@ -414,11 +414,6 @@ class TelegramConnectorMessageTest {
 		accessGate = accessGate,
 	)
 
-	private class StaticTelegramTdlibDatabaseKeyProvider(private val key: ByteArray) :
-		TelegramTdlibDatabaseKeyProvider {
-		override fun getDatabaseEncryptionKey(tdlibDirectory: File): ByteArray = key.copyOf()
-	}
-
 	private class FakeTelegramConnector(
 		val authorized: Boolean = true,
 		val chats: List<ConnectorThread> = listOf(telegramThread(10L, "", 1_700_000_000)),
