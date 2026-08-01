@@ -179,19 +179,17 @@ class ReflectiveTelegramTdlibLoginClient(
 				CommandResult.TIMEOUT -> return recoverableError(RecoverableErrorDetail.NONE)
 			}
 			val state = awaitPreparedAuthorizationStateClassName(update)
-			if (allowQrChallenge &&
-				state == "AuthorizationStateWaitOtherDeviceConfirmation"
+			if (state != "AuthorizationStateWaitPhoneNumber" &&
+				(!allowQrChallenge || state != QR_AUTHORIZATION_STATE)
 			) {
-				return mapAuthorizationStateClassName(state)
-			}
-			if (state != "AuthorizationStateWaitPhoneNumber") {
 				return recoverablePersistedSessionIdentityUnverified()
 			}
 		}
-		return if (lastAuthorizationStateClassName == "AuthorizationStateWaitPhoneNumber") {
-			null
-		} else {
-			recoverableError(RecoverableErrorDetail.NONE)
+		return when {
+			lastAuthorizationStateClassName == "AuthorizationStateWaitPhoneNumber" -> null
+			allowQrChallenge && lastAuthorizationStateClassName == QR_AUTHORIZATION_STATE ->
+				mapAuthorizationStateClassName(lastAuthorizationStateClassName)
+			else -> recoverableError(RecoverableErrorDetail.NONE)
 		}
 	}
 
@@ -247,8 +245,7 @@ class ReflectiveTelegramTdlibLoginClient(
 			val state = ensureAtWaitPhoneNumber(allowQrChallenge = true)
 				?: requestQrAuthorization()
 			if (state == TelegramAuthState.QR_WAITING) {
-				qrAuthorizationDeadlineNanos =
-					System.nanoTime() + qrAuthorizationTimeoutMs * NANOS_PER_MILLISECOND
+				qrAuthorizationDeadlineNanos = System.nanoTime() + qrAuthorizationTimeoutMs * NANOS_PER_MS
 			}
 			state
 		} catch (e: ReflectiveOperationException) {
@@ -273,18 +270,17 @@ class ReflectiveTelegramTdlibLoginClient(
 
 	override fun awaitQrAuthorizationUpdate(): TelegramAuthState {
 		val observedState = lastAuthorizationStateClassName
-		if (observedState != "AuthorizationStateWaitOtherDeviceConfirmation") {
+		if (observedState != QR_AUTHORIZATION_STATE) {
 			return mapAuthorizationStateClassName(observedState)
 		}
 		if (qrAuthorizationDeadlineNanos == 0L) {
-			qrAuthorizationDeadlineNanos =
-				System.nanoTime() + qrAuthorizationTimeoutMs * NANOS_PER_MILLISECOND
+			qrAuthorizationDeadlineNanos = System.nanoTime() + qrAuthorizationTimeoutMs * NANOS_PER_MS
 		}
 		val remainingNanos = qrAuthorizationDeadlineNanos - System.nanoTime()
 		if (remainingNanos <= 0L) return recoverableErrorAfterClientFailure()
 		val waitMs = minOf(
 			qrAuthorizationPollMs,
-			(remainingNanos / NANOS_PER_MILLISECOND).coerceAtLeast(1L),
+			(remainingNanos / NANOS_PER_MS).coerceAtLeast(1L),
 		)
 		return try {
 			val state = prepareAuthorizationUpdate().await(waitMs)
@@ -457,7 +453,7 @@ class ReflectiveTelegramTdlibLoginClient(
 			)
 			"AuthorizationStateWaitCode" -> clearRecoverableErrorDetail(TelegramAuthState.CODE_ENTRY)
 			"AuthorizationStateWaitPassword" -> clearRecoverableErrorDetail(TelegramAuthState.PASSWORD_ENTRY)
-			"AuthorizationStateWaitOtherDeviceConfirmation" ->
+			QR_AUTHORIZATION_STATE ->
 				clearRecoverableErrorDetail(TelegramAuthState.QR_WAITING)
 			"AuthorizationStateReady" -> clearRecoverableErrorDetail(TelegramAuthState.READY)
 			"AuthorizationStateClosed" -> clearRecoverableErrorDetail(TelegramAuthState.CLOSED)
@@ -534,6 +530,7 @@ class ReflectiveTelegramTdlibLoginClient(
 	}
 
 	private companion object {
-		const val NANOS_PER_MILLISECOND = 1_000_000L
+		const val QR_AUTHORIZATION_STATE = "AuthorizationStateWaitOtherDeviceConfirmation"
+		const val NANOS_PER_MS = 1_000_000L
 	}
 }

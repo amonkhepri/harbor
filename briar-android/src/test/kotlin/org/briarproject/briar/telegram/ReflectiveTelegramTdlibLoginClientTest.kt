@@ -528,10 +528,11 @@ class ReflectiveTelegramTdlibLoginClientTest {
 	}
 
 	@Test
-	fun testQrAuthorizationCapturesRotatedLinkAndTransitionsToReady() {
+	fun testQrAuthorizationRequestIsIdempotentAndCapturesRotatedLink() {
 		val client = createClient(qrAuthorizationPollMs = 1L)
 		client.start()
 
+		client.assertSuccessfulState(TelegramAuthState.QR_WAITING, client.requestQrCodeAuthentication())
 		client.assertSuccessfulState(TelegramAuthState.QR_WAITING, client.requestQrCodeAuthentication())
 		assertEquals("test-qr-link", client.getQrAuthorizationLink())
 
