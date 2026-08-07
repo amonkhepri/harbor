@@ -124,18 +124,13 @@ public class StartupViewModel extends AndroidViewModel
 	@UiThread
 	private void updateState(LifecycleState s) {
 		if (accountManager.hasDatabaseKey()) {
-			if (s.isAfter(STARTING_SERVICES)) finishStartup();
+			if (s.isAfter(STARTING_SERVICES)) state.setValue(STARTED);
 			else if (s == MIGRATING_DATABASE) state.setValue(MIGRATING);
 			else if (s == COMPACTING_DATABASE) state.setValue(COMPACTING);
 			else state.setValue(STARTING);
 		} else {
 			if (state.getValue() != TELEGRAM_LOGIN) state.setValue(SIGNED_OUT);
 		}
-	}
-
-	@UiThread
-	private void finishStartup() {
-		state.setValue(STARTED);
 	}
 
 	boolean accountExists() {
