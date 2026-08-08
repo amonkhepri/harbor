@@ -19,6 +19,10 @@ import org.briarproject.briar.api.android.AndroidNotificationManager
 import org.briarproject.briar.api.conversation.ConversationManager
 import org.briarproject.briar.api.identity.AuthorManager
 import org.briarproject.briar.api.telegram.TelegramConnector
+import org.briarproject.briar.android.contact.TelegramInboxAvailabilityState.ACCOUNT_UNAVAILABLE
+import org.briarproject.briar.android.contact.TelegramInboxAvailabilityState.EMPTY
+import org.briarproject.briar.android.contact.TelegramInboxAvailabilityState.LOAD_FAILED
+import org.briarproject.briar.android.contact.TelegramInboxAvailabilityState.NONE
 import java.util.concurrent.Executor
 import javax.inject.Inject
 
@@ -51,8 +55,7 @@ internal class ContactListViewModel @Inject constructor(
 
 	private val _hasPendingContacts = MutableLiveData<Boolean>()
 	private val _telegramThreadItems = MutableLiveData<List<TelegramInboxThreadItem>>(emptyList())
-	private val _telegramAvailabilityState =
-		MutableLiveData(TelegramInboxAvailabilityState.NONE)
+	private val _telegramAvailabilityState = MutableLiveData(NONE)
 
 	val hasPendingContacts: LiveData<Boolean> = _hasPendingContacts
 	val telegramThreadItems: LiveData<List<TelegramInboxThreadItem>> = _telegramThreadItems
@@ -85,7 +88,7 @@ internal class ContactListViewModel @Inject constructor(
 	fun loadTelegramThreads() {
 		if (_telegramAvailabilityState.value == TelegramInboxAvailabilityState.LOADING) return
 		if (!telegramConnector.isEnabled()) {
-			_telegramAvailabilityState.value = TelegramInboxAvailabilityState.NONE
+			_telegramAvailabilityState.value = NONE
 			_telegramThreadItems.value = emptyList()
 			return
 		}
@@ -93,36 +96,16 @@ internal class ContactListViewModel @Inject constructor(
 		ioExecutor.execute {
 			try {
 				if (!telegramConnector.isAuthorized()) {
-					_telegramAvailabilityState.postValue(
-						telegramAvailabilityStateFor(true, false, false, false),
-					)
+					_telegramAvailabilityState.postValue(ACCOUNT_UNAVAILABLE)
+					_telegramThreadItems.postValue(emptyList())
 					return@execute
 				}
 				val threads = telegramConnector.getRecentThreads(20)
-				_telegramAvailabilityState.postValue(
-					telegramAvailabilityStateFor(true, true, false, threads.isNotEmpty()),
-				)
+				_telegramAvailabilityState.postValue(if (threads.isEmpty()) EMPTY else NONE)
 				_telegramThreadItems.postValue(threads.map(::TelegramInboxThreadItem))
 			} catch (e: RuntimeException) {
-				_telegramAvailabilityState.postValue(
-					telegramAvailabilityStateFor(true, true, true, false),
-				)
+				_telegramAvailabilityState.postValue(LOAD_FAILED)
 			}
-		}
-	}
-
-	companion object {
-		@JvmStatic
-		fun telegramAvailabilityStateFor(
-			connectorEnabled: Boolean,
-			authorized: Boolean,
-			loadFailed: Boolean,
-			hasRows: Boolean,
-		): TelegramInboxAvailabilityState = when {
-			!connectorEnabled || hasRows -> TelegramInboxAvailabilityState.NONE
-			loadFailed -> TelegramInboxAvailabilityState.LOAD_FAILED
-			!authorized -> TelegramInboxAvailabilityState.ACCOUNT_UNAVAILABLE
-			else -> TelegramInboxAvailabilityState.EMPTY
 		}
 	}
 }

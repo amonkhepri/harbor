@@ -18,9 +18,7 @@ import org.briarproject.briar.api.connector.ConnectorThread
 import org.briarproject.briar.api.identity.AuthorManager
 import org.briarproject.briar.api.telegram.TelegramConnector
 import org.briarproject.briar.android.contact.TelegramInboxAvailabilityState.ACCOUNT_UNAVAILABLE
-import org.briarproject.briar.android.contact.TelegramInboxAvailabilityState.EMPTY
 import org.briarproject.briar.android.contact.TelegramInboxAvailabilityState.LOAD_FAILED
-import org.briarproject.briar.android.contact.TelegramInboxAvailabilityState.NONE
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -33,36 +31,12 @@ class ContactListViewModelTest {
 	val testRule = InstantTaskExecutorRule()
 
 	@Test
-	fun testTelegramAvailabilityStateSelection() {
-		val states = listOf(
-			ContactListViewModel.telegramAvailabilityStateFor(false, false, false, false),
-			ContactListViewModel.telegramAvailabilityStateFor(true, false, false, false),
-			ContactListViewModel.telegramAvailabilityStateFor(true, true, false, false),
-			ContactListViewModel.telegramAvailabilityStateFor(true, true, true, false),
-			ContactListViewModel.telegramAvailabilityStateFor(true, true, false, true),
-		)
-		assertEquals(listOf(NONE, ACCOUNT_UNAVAILABLE, EMPTY, LOAD_FAILED, NONE), states)
-	}
-
-	@Test
 	fun testTransientFailurePreservesLoadedTelegramThreads() {
 		val connector = mock(TelegramConnector::class.java)
 		`when`(connector.isEnabled()).thenReturn(true)
 		`when`(connector.isAuthorized()).thenReturn(true)
 		`when`(connector.getRecentThreads(20))
-			.thenReturn(
-				listOf(
-					ConnectorThread(
-						ConnectorSources.TELEGRAM,
-						"7",
-						"",
-						11,
-						"",
-						false,
-						ConnectorMessageType.TEXT,
-					),
-				),
-			)
+			.thenReturn(listOf(connectorThread()))
 			.thenThrow(IllegalStateException())
 		val viewModel = createViewModel(connector)
 
@@ -73,6 +47,32 @@ class ContactListViewModelTest {
 		assertEquals(loaded, getOrAwaitValue(viewModel.telegramThreadItems))
 		assertEquals(LOAD_FAILED, getOrAwaitValue(viewModel.telegramAvailabilityState))
 	}
+
+	@Test
+	fun testDeauthorizationClearsLoadedTelegramThreads() {
+		val connector = mock(TelegramConnector::class.java)
+		`when`(connector.isEnabled()).thenReturn(true)
+		`when`(connector.isAuthorized()).thenReturn(true, false)
+		`when`(connector.getRecentThreads(20)).thenReturn(listOf(connectorThread()))
+		val viewModel = createViewModel(connector)
+
+		viewModel.loadTelegramThreads()
+		assertEquals(1, getOrAwaitValue(viewModel.telegramThreadItems).size)
+		viewModel.loadTelegramThreads()
+
+		assertEquals(emptyList<TelegramInboxThreadItem>(), viewModel.telegramThreadItems.value)
+		assertEquals(ACCOUNT_UNAVAILABLE, viewModel.telegramAvailabilityState.value)
+	}
+
+	private fun connectorThread() = ConnectorThread(
+		ConnectorSources.TELEGRAM,
+		"7",
+		"",
+		11,
+		"",
+		false,
+		ConnectorMessageType.TEXT,
+	)
 
 	private fun createViewModel(connector: TelegramConnector) = ContactListViewModel(
 		mock(Application::class.java),
