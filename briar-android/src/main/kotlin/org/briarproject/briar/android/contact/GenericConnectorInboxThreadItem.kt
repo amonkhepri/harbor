@@ -6,10 +6,9 @@ import org.briarproject.briar.api.connector.ConnectorThread
 
 /**
  * Connector-neutral [ConnectorInboxThreadItem] backed by the string thread id
- * and source already carried by [ConnectorThread]. Unlike
- * [TelegramInboxThreadItem], this makes no assumption that the thread id is
- * numeric, so it also works for connectors such as Matrix whose room ids are
- * opaque strings.
+ * and source already carried by [ConnectorThread]. It makes no assumption
+ * that the thread id is numeric, so it works for Telegram and connectors such
+ * as Matrix whose room ids are opaque strings.
  */
 data class GenericConnectorInboxThreadItem(
 	override val connectorSource: ConnectorSource,
@@ -33,3 +32,5 @@ data class GenericConnectorInboxThreadItem(
 		thread.latestMessageType,
 	)
 }
+
+internal fun cleanPreviewText(text: String): String = text.replace(Regex("\\s+"), " ").trim()

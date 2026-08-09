@@ -31,7 +31,7 @@ class GenericConnectorInboxThreadItemTest {
 
 	@Test
 	fun testTelegramAndMatrixRowsWithTheSameThreadIdHaveDistinctStableIds() {
-		val telegram = TelegramInboxThreadItem(
+		val telegram = GenericConnectorInboxThreadItem(
 			ConnectorThread(
 				ConnectorSources.TELEGRAM,
 				"7",

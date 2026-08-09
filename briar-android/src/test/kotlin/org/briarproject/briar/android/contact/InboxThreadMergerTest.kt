@@ -13,9 +13,9 @@ class InboxThreadMergerTest {
 	fun testTelegramRowsMapSecondsToMillis() {
 		val items = InboxThreadMerger.merge(emptyList(), listOf(telegramItem()))
 
-		val item = items[0] as TelegramInboxThreadItem
-		val rowIdentity = Triple(item.chatId, item.title, item.latestActivityMillis)
-		assertEquals(Triple(7L, "chat", 42000L), rowIdentity)
+		val item = items[0] as ConnectorInboxThreadItem
+		val rowIdentity = Triple(item.connectorThreadId, item.title, item.latestActivityMillis)
+		assertEquals(Triple("7", "chat", 42000L), rowIdentity)
 		assertPreviewState(item)
 		assertEquals(ConnectorSources.TELEGRAM to "telegram:7", item.connectorSource to item.stableId)
 	}
@@ -36,8 +36,9 @@ class InboxThreadMergerTest {
 
 	@Test
 	fun testTelegramRowsExposeLoadingState() {
-		val item = TelegramInboxThreadItem(
-			chatId = 7L,
+		val item = GenericConnectorInboxThreadItem(
+			connectorSource = ConnectorSources.TELEGRAM,
+			connectorThreadId = "7",
 			title = "chat",
 			latestActivityMillis = 42000L,
 			previewText = "",
@@ -51,7 +52,7 @@ class InboxThreadMergerTest {
 
 	@Test
 	fun testMergeSortsTelegramAndMatrixRowsBySourceQualifiedStableId() {
-		val telegram = TelegramInboxThreadItem(
+		val telegram = GenericConnectorInboxThreadItem(
 			ConnectorThread(
 				ConnectorSources.TELEGRAM,
 				"7",
@@ -104,20 +105,21 @@ class InboxThreadMergerTest {
 		latestActivityMillis = latestActivityMillis,
 	)
 
-	private fun telegramItem(text: String = "", outgoing: Boolean = false) = TelegramInboxThreadItem(
-		ConnectorThread(
-			ConnectorSources.TELEGRAM,
-			"7",
-			"chat",
-			42,
-			text,
-			outgoing,
-			ConnectorMessageType.TEXT,
-		),
-	)
+	private fun telegramItem(text: String = "", outgoing: Boolean = false) =
+		GenericConnectorInboxThreadItem(
+			ConnectorThread(
+				ConnectorSources.TELEGRAM,
+				"7",
+				"chat",
+				42,
+				text,
+				outgoing,
+				ConnectorMessageType.TEXT,
+			),
+		)
 
 	private fun assertPreviewState(
-		item: TelegramInboxThreadItem,
+		item: ConnectorInboxThreadItem,
 		previewText: String = "",
 		isPreviewLoading: Boolean = false,
 		isLastMessageOutgoing: Boolean = false,
