@@ -14,27 +14,17 @@ compileTestKotlin {
 apply plugin: 'witness'
 apply from: 'witness.gradle'
 
-// MX-004: pin the Matrix Rust SDK Android/Kotlin bindings behind a
-// default-off flag so the official-debug build never resolves or bundles
-// the dependency (per the size caution recorded in
-// docs/plans/mx003_matrix_sdk_compatibility_spike.md). Mirrors the
-// harbor.telegramConnector.enabled gating pattern in briar-android/build.gradle,
-// and keeps this module a plain Kotlin/JVM library the same way the Telegram
-// connector's Kotlin code lives in briar-core rather than an Android library
-// module, so it does not collide with briar-android's Kotlin/AGP variant
-// metadata resolution as a sibling Android library would.
-def matrixConnectorEnabled =
-		(project.findProperty('harbor.matrixConnector.enabled') ?: 'false')
-				.toString().toBoolean()
-
+// MX-004/MX-004-REV-001: this module stays a plain Kotlin/JVM library (like
+// briar-api/briar-core) so it does not collide with briar-android's
+// Kotlin/AGP variant metadata resolution as a sibling Android library would
+// (reproduced previously as an IllegalStateException project-configuration
+// deadlock). The pinned org.matrix.rustcomponents:sdk-android dependency
+// only publishes an androidJvm variant, which this Kotlin/JVM consumer
+// cannot request; the default-off dependency is gated in
+// briar-android/build.gradle instead, where the Kotlin/Android consumer can
+// resolve it. This module holds connector-neutral, SDK-free Matrix code only
+// (see DisabledMatrixConnector).
 dependencies {
 	api project(':briar-api')
 	implementation "org.jetbrains.kotlin:kotlin-stdlib:$kotlin_version"
-
-	if (matrixConnectorEnabled) {
-		// Pinned per the MX-003 compatibility spike: minSdk 21, arm64-v8a/
-		// armeabi-v7a/x86/x86_64 ABIs, Apache-2.0. Not resolved or bundled
-		// while the flag is off (default).
-		implementation 'org.matrix.rustcomponents:sdk-android:26.08.05'
-	}
 }

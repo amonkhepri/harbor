@@ -9,7 +9,8 @@ import org.briarproject.briar.api.connector.ReadOnlyConnector
 /**
  * Default-off placeholder for the Matrix connector (MX-004). This compiles
  * and runs without the Matrix Rust SDK on the classpath, so it stays valid
- * whether or not [BuildConfig.MATRIX_CONNECTOR_ENABLED] pulls in the pinned
+ * whether or not the `harbor.matrixConnector.enabled` Gradle property (gated
+ * in briar-android/build.gradle) pulls in the pinned
  * `org.matrix.rustcomponents:sdk-android` dependency. An SDK-backed
  * implementation, Dagger wiring, and connector registry membership are later,
  * separately reviewed slices (M2 steps 3+ in

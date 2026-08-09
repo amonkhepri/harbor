@@ -1,3 +1,15 @@
+// MX-004-REV-001: org.matrix.rustcomponents:sdk-android and its transitive
+// androidx.annotation upgrade are only resolved into this project's
+// configurations when harbor.matrixConnector.enabled=true (see
+// briar-android/build.gradle). Gradle Witness fails a project's
+// configuration if any 'verify' entry has no matching resolved dependency,
+// so the flag-specific entries (including the androidx.annotation:
+// annotation-jvm version that changes depending on the flag) are appended
+// conditionally instead of listed statically below.
+def matrixConnectorEnabled =
+		(project.findProperty('harbor.matrixConnector.enabled') ?: 'false')
+				.toString().toBoolean()
+
 dependencyVerification {
 	verify = [
 		'androidx.activity:activity-compose:1.8.2:activity-compose-1.8.2.aar:5a67e984f14ed2afc585aa3a23edff1c1791c80caa2bf68a0f799c1b11a39038',
@@ -8,7 +20,6 @@ dependencyVerification {
 		'androidx.annotation:annotation-experimental:1.1.0:annotation-experimental-1.1.0.aar:0157de61a2064047896a058080f3fd67ba57ad9a94857b3f7a363660243e3f90',
 		'androidx.annotation:annotation-experimental:1.3.0:annotation-experimental-1.3.0.aar:abfd29c8556e5bd0325a9f769ab9e9d154ff4a5515c476cdd5a2a8285b1b19dc',
 		'androidx.annotation:annotation-experimental:1.4.0:annotation-experimental-1.4.0.aar:c6eb7e676011ec65b32428373d450debdfc45179c4f8b3a752174fb87c17b08a',
-		'androidx.annotation:annotation-jvm:1.7.0:annotation-jvm-1.7.0.jar:e36b8e4b8393a4adc74e3d4ab22ad5a36396f0cea2e40b5734eae14937dfd224',
 		'androidx.annotation:annotation:1.0.0:annotation-1.0.0.jar:0baae9755f7caf52aa80cd04324b91ba93af55d4d1d17dcc9a7b53d99ef7c016',
 		'androidx.annotation:annotation:1.7.0:annotation-metadata-1.7.0.jar:b11676837cad011a5285d6074418649107ef25eba17131517e9557ef8c9984ed',
 		'androidx.appcompat:appcompat-resources:1.5.0:appcompat-resources-1.5.0.aar:34511f11765eb4dfb61e7b3285019b6488b10f6a9093b028aa108ca0d33fc8c5',
@@ -361,9 +372,7 @@ dependencyVerification {
 		'org.jetbrains.kotlinx:atomicfu:0.20.2:atomicfu-metadata-0.20.2-all.jar:2a91f10b826d3febc47c2b664e268615757c311114239787f5dc37481fdec441',
 		'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.4.1:kotlinx-coroutines-android-1.4.1.jar:d4cadb673b2101f1ee5fbc147956ac78b1cfd9cc255fb53d3aeb88dff11d99ca',
 		'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.6.4:kotlinx-coroutines-android-1.6.4.jar:3fdc0eed5bc4b83ee9622774520a2db25470370eacd1581cac1e37704f095b00',
-		'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.1:kotlinx-coroutines-android-1.7.1.jar:107313760c18f8da174e8d8103504a468e806e88f7b55a84bd1c0eaeea118e9a',
 		'org.jetbrains.kotlinx:kotlinx-coroutines-core-jvm:1.5.0:kotlinx-coroutines-core-jvm-1.5.0.jar:78d6cc7135f84d692ff3752fcfd1fa1bbe0940d7df70652e4f1eaeec0c78afbb',
-		'org.jetbrains.kotlinx:kotlinx-coroutines-core-jvm:1.7.1:kotlinx-coroutines-core-jvm-1.7.1.jar:7496cffdd3eb10109acdda1c3212f6ac7815789e09380dc9e2ccdec496dba3fc',
 		'org.jetbrains.kotlinx:kotlinx-coroutines-core-jvm:1.7.3:kotlinx-coroutines-core-jvm-1.7.3.jar:1ab3acc38f3e7355c4f9d1ec62107a46fa73c899f3070d055e5d4373dfe67e12',
 		'org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.1:kotlinx-coroutines-core-metadata-1.7.1-all.jar:b7d5370ed0e54952003b13595a67b97ced3f873d919f5ddfbe50fcd499cbf0a7',
 		'org.jetbrains:annotations:13.0:annotations-13.0.jar:ace2a10dc8e2d5fd34925ecac03e4988b2c0f851650c94b8cef49ba1bd111478',
@@ -397,5 +406,21 @@ dependencyVerification {
 		'org.robolectric:utils:4.8.2:utils-4.8.2.jar:9192307232c2d0dbedde3089970449c9fb861f5d3161caf96bf43317ec19b9c7',
 		'tools.fastlane:screengrab:2.1.1:screengrab-2.1.1.aar:5a02781c0986e71ddbc691263115c2db70bdebb4b48d5b6dcf06ab1cb547d62d',
 		'uk.co.samuelwall:material-tap-target-prompt:3.3.2:material-tap-target-prompt-3.3.2.aar:1f7c7197149f65036d300e3c6f7bf28d1039ae500d6287cd0130817dbc47a5b2',
-	]
+	] + (matrixConnectorEnabled ? [
+		// MX-004-REV-001: org.matrix.rustcomponents:sdk-android and its
+		// transitive dependencies, resolved only when
+		// harbor.matrixConnector.enabled=true. Pinned per the MX-003
+		// compatibility spike.
+		'androidx.annotation:annotation-jvm:1.9.1:annotation-jvm-1.9.1.jar:1e343917ebf27ba96fe4dc52b1cad7fd32b738fbc6355bb6cd5b3b305d7212d0',
+		'net.java.dev.jna:jna:5.18.1:jna-5.18.1.aar:7f053e3ec99e14dd71259c82c1c8a02738d64a13c31226b2acc170f3060951e0',
+		'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3:kotlinx-coroutines-android-1.7.3.jar:59fffb26bee12c32dadcfa5d420c2a7db85d3253518128b170efda726613256d',
+		'org.matrix.rustcomponents:sdk-android:26.08.05:sdk-android-26.08.05.aar:89e78c7d457e522367f06d3145b58b67fb29ceffaa22d088e94240489a50ccd1',
+	] : [
+		// androidx.annotation:annotation-jvm and the kotlinx-coroutines
+		// artifacts below resolve to these lower versions only while the
+		// Matrix SDK dependency above is absent (default).
+		'androidx.annotation:annotation-jvm:1.7.0:annotation-jvm-1.7.0.jar:e36b8e4b8393a4adc74e3d4ab22ad5a36396f0cea2e40b5734eae14937dfd224',
+		'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.1:kotlinx-coroutines-android-1.7.1.jar:107313760c18f8da174e8d8103504a468e806e88f7b55a84bd1c0eaeea118e9a',
+		'org.jetbrains.kotlinx:kotlinx-coroutines-core-jvm:1.7.1:kotlinx-coroutines-core-jvm-1.7.1.jar:7496cffdd3eb10109acdda1c3212f6ac7815789e09380dc9e2ccdec496dba3fc',
+	])
 }
