@@ -216,6 +216,7 @@ dependencies {
 	implementation project(':bramble-core')
 	implementation project(':bramble-android')
 	implementation project(':briar-core')
+	implementation project(':briar-matrix')
 
 	// newer versions of the libraries below require compileSdk 34
 	implementation 'androidx.fragment:fragment:1.6.2'
