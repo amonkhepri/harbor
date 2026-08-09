@@ -50,6 +50,41 @@ class InboxThreadMergerTest {
 	}
 
 	@Test
+	fun testMergeSortsTelegramAndMatrixRowsBySourceQualifiedStableId() {
+		val telegram = TelegramInboxThreadItem(
+			ConnectorThread(
+				ConnectorSources.TELEGRAM,
+				"7",
+				"chat",
+				42,
+				"",
+				false,
+				ConnectorMessageType.TEXT,
+			),
+		)
+		val matrix = GenericConnectorInboxThreadItem(
+			ConnectorThread(
+				ConnectorSources.MATRIX,
+				"!room:matrix.example.org",
+				"room",
+				42,
+				"",
+				false,
+				ConnectorMessageType.TEXT,
+			),
+		)
+
+		val items = InboxThreadMerger.merge(emptyList(), listOf(telegram, matrix))
+
+		assertEquals(
+			setOf("telegram:7", "matrix:!room:matrix.example.org"),
+			items.map {
+				it.stableId
+			}.toSet(),
+		)
+	}
+
+	@Test
 	fun testMergeSortsNewestFirst() {
 		val items = InboxThreadMerger.merge(
 			emptyList(),

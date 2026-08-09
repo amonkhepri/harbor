@@ -77,6 +77,7 @@ class TelegramConnectorMessageTest {
 	fun testDisabledConnectorReturnsDisabledEmptyMessageLists() {
 		val connector = DisabledTelegramConnector()
 
+		assertEquals(ConnectorSources.TELEGRAM, connector.source)
 		assertEquals(listOf(false, false), listOf(connector.isEnabled(), connector.isAuthorized()))
 		assertEquals(
 			emptyList<ConnectorThread>() to Success(emptyList()),
@@ -186,6 +187,7 @@ class TelegramConnectorMessageTest {
 			)
 		}
 
+		assertEquals(ConnectorSources.TELEGRAM, client.source)
 		assertEquals(
 			listOf(
 				telegramThread(
@@ -425,6 +427,8 @@ class TelegramConnectorMessageTest {
 		var lastChatLimit = 0
 		var lastMessageChatId = 0L
 		var lastMessageLimit = 0
+
+		override val source = ConnectorSources.TELEGRAM
 
 		override fun isEnabled(): Boolean = true
 

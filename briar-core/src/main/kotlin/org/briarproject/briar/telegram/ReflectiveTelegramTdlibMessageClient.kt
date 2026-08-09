@@ -5,6 +5,7 @@ import org.briarproject.briar.api.connector.ConnectorMessageType
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult.LoadFailed
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult.Success
+import org.briarproject.briar.api.connector.ConnectorSource
 import org.briarproject.briar.api.connector.ConnectorSources
 import org.briarproject.briar.api.connector.ConnectorThread
 import org.briarproject.briar.api.telegram.TelegramConnector
@@ -23,6 +24,8 @@ class ReflectiveTelegramTdlibMessageClient(
 ) : TelegramConnector {
 
 	private val tdlibReadLock = Any()
+
+	override val source: ConnectorSource = ConnectorSources.TELEGRAM
 
 	override fun isEnabled(): Boolean = true
 
