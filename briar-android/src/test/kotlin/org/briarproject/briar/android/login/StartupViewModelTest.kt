@@ -155,6 +155,26 @@ class StartupViewModelTest {
 	}
 
 	@Test
+	fun testAccountDeletionBlocksPasswordValidation() {
+		val executor = QueuedExecutor()
+		viewModel = createViewModel(executor)
+
+		viewModel.deleteAccount()
+
+		assertTrue(viewModel.isAccountDeletionInProgress)
+		viewModel.validatePassword("test-password")
+		verify(accountManager, never()).signIn("test-password")
+		assertFalse(viewModel.isPasswordValidationInProgress)
+
+		executor.runNext()
+		verify(accountManager).deleteAccount()
+		assertTrue(viewModel.isAccountDeletionInProgress)
+
+		viewModel.validatePassword("test-password")
+		verify(accountManager, never()).signIn("test-password")
+	}
+
+	@Test
 	fun testTelegramAuthActionQueuedBeforeCancelIsSkipped() {
 		val executor = QueuedExecutor()
 		viewModel = createViewModel(executor)

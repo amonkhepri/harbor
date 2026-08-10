@@ -62,6 +62,8 @@ public class StartupViewModel extends AndroidViewModel
 	private final Executor telegramAuthExecutor;
 	private final AtomicBoolean passwordValidationInProgress =
 			new AtomicBoolean();
+	private final AtomicBoolean accountDeletionInProgress =
+			new AtomicBoolean();
 	private final AtomicInteger telegramAuthGeneration = new AtomicInteger();
 
 	private final MutableLiveEvent<DecryptionResult> passwordValidated =
@@ -146,6 +148,7 @@ public class StartupViewModel extends AndroidViewModel
 	}
 
 	void validatePassword(String password) {
+		if (accountDeletionInProgress.get()) return;
 		passwordValidationInProgress.set(true);
 		ioExecutor.execute(() -> {
 			try {
@@ -162,6 +165,10 @@ public class StartupViewModel extends AndroidViewModel
 
 	boolean isPasswordValidationInProgress() {
 		return passwordValidationInProgress.get();
+	}
+
+	boolean isAccountDeletionInProgress() {
+		return accountDeletionInProgress.get();
 	}
 
 	LiveEvent<DecryptionResult> getPasswordValidated() {
@@ -321,6 +328,7 @@ public class StartupViewModel extends AndroidViewModel
 	@UiThread
 	void deleteAccount() {
 		if (passwordValidationInProgress.get()) return;
+		if (!accountDeletionInProgress.compareAndSet(false, true)) return;
 		telegramAuthExecutor.execute(() -> {
 			telegramAuthSession.close();
 			accountManager.deleteAccount();
