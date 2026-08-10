@@ -84,6 +84,21 @@ if (telegramConnectorEnabled &&
 	throw new GradleException(
 			'Telegram connector requires generated TDLib Java and JNI artifacts')
 }
+// P318-001: the non-empty check above only requires one libtdjni.so
+// somewhere under tdlibJniLibsDir, so a partial-ABI drop (e.g. only
+// arm64-v8a) silently passes and ships an APK that only initializes TDLib
+// on the ABI(s) actually present. Fail loudly at build time instead.
+def requiredTdlibAbis = ['arm64-v8a', 'armeabi-v7a', 'x86', 'x86_64']
+if (telegramConnectorEnabled) {
+	def missingTdlibAbis = requiredTdlibAbis.findAll { abi ->
+		!new File(tdlibJniLibsDir, "${abi}/libtdjni.so").isFile()
+	}
+	if (!missingTdlibAbis.isEmpty()) {
+		throw new GradleException(
+				'Telegram connector TDLib artifacts are missing libtdjni.so ' +
+						"for ABI(s): ${missingTdlibAbis.join(', ')}")
+	}
+}
 def configuredTelegramApiHash =
 		telegramConfigValue(
 				['harbor.telegram.apiHash'],
