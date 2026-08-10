@@ -24,6 +24,8 @@ import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.mockito.Mockito.mock
+import org.mockito.Mockito.never
+import org.mockito.Mockito.verify
 import org.mockito.Mockito.`when`
 import java.util.ArrayDeque
 import java.util.concurrent.Executor
@@ -129,6 +131,27 @@ class StartupViewModelTest {
 		executor.runNext()
 		assertFalse(viewModel.isPasswordValidationInProgress)
 		assertEquals(SIGNED_IN, getOrAwaitValue(viewModel.state))
+	}
+
+	@Test
+	fun testPasswordValidationBlocksAccountDeletion() {
+		val executor = QueuedExecutor()
+		viewModel = createViewModel(executor)
+
+		viewModel.validatePassword("test-password")
+
+		assertTrue(viewModel.isPasswordValidationInProgress)
+		viewModel.deleteAccount()
+		verify(accountManager, never()).deleteAccount()
+		assertEquals(0, telegramAuthSession.closeCalls)
+
+		executor.runNext()
+		assertFalse(viewModel.isPasswordValidationInProgress)
+
+		viewModel.deleteAccount()
+		executor.runNext()
+		verify(accountManager).deleteAccount()
+		assertEquals(1, telegramAuthSession.closeCalls)
 	}
 
 	@Test

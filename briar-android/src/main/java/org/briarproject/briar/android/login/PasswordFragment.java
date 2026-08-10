@@ -58,6 +58,7 @@ public class PasswordFragment extends BaseFragment implements TextWatcher {
 	private StartupViewModel viewModel;
 	private Button signInButton;
 	private Button telegramLoginButton;
+	private View forgottenPasswordButton;
 	private ProgressBar progress;
 	private TextInputLayout input;
 	private TextInputEditText password;
@@ -105,8 +106,11 @@ public class PasswordFragment extends BaseFragment implements TextWatcher {
 			return false;
 		});
 		password.addTextChangedListener(this);
-		v.findViewById(R.id.btn_forgotten)
-				.setOnClickListener(view -> onForgottenPasswordClick());
+		forgottenPasswordButton = v.findViewById(R.id.btn_forgotten);
+		forgottenPasswordButton.setEnabled(
+				!viewModel.isPasswordValidationInProgress());
+		forgottenPasswordButton.setOnClickListener(
+				view -> onForgottenPasswordClick());
 
 		return v;
 	}
@@ -136,6 +140,7 @@ public class PasswordFragment extends BaseFragment implements TextWatcher {
 		hideSoftKeyboard(password);
 		signInButton.setVisibility(INVISIBLE);
 		telegramLoginButton.setEnabled(false);
+		forgottenPasswordButton.setEnabled(false);
 		progress.setVisibility(VISIBLE);
 		if (SDK_INT >= 33 &&
 				checkSelfPermission(requireContext(), POST_NOTIFICATIONS) !=
@@ -154,6 +159,7 @@ public class PasswordFragment extends BaseFragment implements TextWatcher {
 	private void onPasswordInvalid(DecryptionResult result) {
 		signInButton.setVisibility(VISIBLE);
 		telegramLoginButton.setEnabled(true);
+		forgottenPasswordButton.setEnabled(true);
 		progress.setVisibility(INVISIBLE);
 		if (result == KEY_STRENGTHENER_ERROR) {
 			createKeyStrengthenerErrorDialog(requireContext()).show();

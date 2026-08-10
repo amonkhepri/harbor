@@ -320,6 +320,7 @@ public class StartupViewModel extends AndroidViewModel
 
 	@UiThread
 	void deleteAccount() {
+		if (passwordValidationInProgress.get()) return;
 		telegramAuthExecutor.execute(() -> {
 			telegramAuthSession.close();
 			accountManager.deleteAccount();
