@@ -8,6 +8,7 @@ import org.briarproject.bramble.api.event.EventBus
 import org.briarproject.bramble.api.lifecycle.LifecycleManager
 import org.briarproject.bramble.api.lifecycle.LifecycleManager.LifecycleState
 import org.briarproject.bramble.test.ImmediateExecutor
+import org.briarproject.briar.android.login.StartupViewModel.State.SIGNED_IN
 import org.briarproject.briar.android.login.StartupViewModel.State.SIGNED_OUT
 import org.briarproject.briar.android.login.StartupViewModel.State.TELEGRAM_LOGIN
 import org.briarproject.briar.android.viewmodel.LiveDataTestUtil.getOrAwaitValue
@@ -17,6 +18,7 @@ import org.briarproject.briar.api.telegram.TelegramAuthSession.RecoverableErrorD
 import org.briarproject.briar.api.telegram.TelegramAuthSession.Snapshot
 import org.briarproject.briar.api.telegram.TelegramAuthState
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
@@ -110,6 +112,23 @@ class StartupViewModelTest {
 		assertEquals(0, telegramAuthSession.closeCalls)
 		executor.runNext()
 		assertEquals(TelegramAuthState.CLOSED, getOrAwaitValue(viewModel.telegramAuthSnapshot).authState)
+	}
+
+	@Test
+	fun testPasswordValidationBlocksTelegramLoginNavigation() {
+		val executor = QueuedExecutor()
+		viewModel = createViewModel(executor)
+
+		viewModel.validatePassword("test-password")
+
+		assertTrue(viewModel.isPasswordValidationInProgress)
+		viewModel.showTelegramLoginPlaceholder()
+		assertEquals(SIGNED_OUT, getOrAwaitValue(viewModel.state))
+		assertEquals(0, telegramAuthSession.startCalls)
+
+		executor.runNext()
+		assertFalse(viewModel.isPasswordValidationInProgress)
+		assertEquals(SIGNED_IN, getOrAwaitValue(viewModel.state))
 	}
 
 	@Test

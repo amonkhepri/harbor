@@ -89,6 +89,8 @@ public class PasswordFragment extends BaseFragment implements TextWatcher {
 		telegramLoginButton = v.findViewById(R.id.btn_telegram_login);
 		telegramLoginButton.setVisibility(
 				viewModel.shouldShowTelegramLogin() ? VISIBLE : GONE);
+		telegramLoginButton.setEnabled(
+				!viewModel.isPasswordValidationInProgress());
 		telegramLoginButton.setOnClickListener(
 				view -> onTelegramLoginClick());
 		signInButton.setOnClickListener(view -> onSignInButtonClicked());
@@ -133,6 +135,7 @@ public class PasswordFragment extends BaseFragment implements TextWatcher {
 	private void onSignInButtonClicked() {
 		hideSoftKeyboard(password);
 		signInButton.setVisibility(INVISIBLE);
+		telegramLoginButton.setEnabled(false);
 		progress.setVisibility(VISIBLE);
 		if (SDK_INT >= 33 &&
 				checkSelfPermission(requireContext(), POST_NOTIFICATIONS) !=
@@ -150,6 +153,7 @@ public class PasswordFragment extends BaseFragment implements TextWatcher {
 
 	private void onPasswordInvalid(DecryptionResult result) {
 		signInButton.setVisibility(VISIBLE);
+		telegramLoginButton.setEnabled(true);
 		progress.setVisibility(INVISIBLE);
 		if (result == KEY_STRENGTHENER_ERROR) {
 			createKeyStrengthenerErrorDialog(requireContext()).show();
