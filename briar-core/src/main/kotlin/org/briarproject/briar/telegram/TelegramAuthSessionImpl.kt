@@ -48,7 +48,9 @@ class TelegramAuthSessionImpl(
 	override fun close() = updateState(tdlibLoginClient::close)
 
 	private fun updateState(call: () -> TelegramAuthState) {
-		currentState = accessGate.run(TelegramAuthState.CLOSED, call)
+		accessGate.run(Unit) {
+			currentState = call()
+		}
 	}
 
 	override fun startService() = accessGate.start()
