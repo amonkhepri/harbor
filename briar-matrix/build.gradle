@@ -26,5 +26,7 @@ apply from: 'witness.gradle'
 // (see DisabledMatrixConnector).
 dependencies {
 	api project(':briar-api')
+	implementation project(':bramble-api')
+	implementation project(':briar-core')
 	implementation "org.jetbrains.kotlin:kotlin-stdlib:$kotlin_version"
 }

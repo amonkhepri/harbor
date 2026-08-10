@@ -1,0 +1,59 @@
+package org.briarproject.briar.matrix
+
+import org.briarproject.bramble.api.crypto.KeyStrengthener
+import org.briarproject.bramble.api.crypto.SecretKey
+import org.briarproject.bramble.api.db.DatabaseConfig
+import org.junit.Assert.assertArrayEquals
+import org.junit.Assert.assertEquals
+import org.junit.Rule
+import org.junit.Test
+import org.junit.rules.TemporaryFolder
+import java.io.File
+
+class MatrixStoreKeyProviderTest {
+
+	@get:Rule
+	val testFolder = TemporaryFolder()
+
+	@Test
+	fun testResetsUnmarkedStoreAndReusesStrengthenedKey() {
+		val keyDirectory = testFolder.newFolder("key")
+		val provider = ProtectedMatrixStoreKeyProvider(config(keyDirectory, FakeKeyStrengthener()))
+		val storeDirectory = testFolder.newFolder("matrix")
+		val staleState = File(storeDirectory, "store/stale").also {
+			it.parentFile?.mkdirs()
+			it.writeText("stale")
+		}
+
+		val firstKey = checkNotNull(provider.getStoreEncryptionKey(storeDirectory))
+		val retainedState = File(storeDirectory, "store/retained").also {
+			it.parentFile?.mkdirs()
+			it.writeText("retained")
+		}
+		val secondKey = checkNotNull(provider.getStoreEncryptionKey(storeDirectory))
+
+		assertEquals(false, staleState.exists())
+		assertEquals(true, retainedState.exists())
+		assertEquals(true, provider.isKeyStrengtheningAvailable())
+		assertEquals(SecretKey.LENGTH, firstKey.size)
+		assertArrayEquals(firstKey, secondKey)
+		assertEquals(true, File(keyDirectory, "matrix-sdk-store-key.seed").isFile)
+		assertEquals(true, File(keyDirectory, "matrix-sdk-store-key.marker").isFile)
+	}
+
+	private fun config(keyDirectory: File, strengthener: KeyStrengthener) = object : DatabaseConfig {
+		override fun getDatabaseDirectory(): File = testFolder.root
+		override fun getDatabaseKeyDirectory(): File = keyDirectory
+		override fun getKeyStrengthener(): KeyStrengthener = strengthener
+	}
+
+	private class FakeKeyStrengthener : KeyStrengthener {
+		override fun isInitialised(): Boolean = true
+
+		override fun strengthenKey(k: SecretKey): SecretKey = SecretKey(
+			k.bytes.mapIndexed { index, byte ->
+				(byte.toInt() xor index xor 0x5A).toByte()
+			}.toByteArray(),
+		)
+	}
+}
