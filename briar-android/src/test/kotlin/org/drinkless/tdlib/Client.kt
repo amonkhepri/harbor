@@ -104,7 +104,8 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 				resultHandler?.onResult(chatsById[request.chatId] ?: TdApi.Error())
 			}
 			is TdApi.GetChatHistory -> {
-				if (rejectGetChatHistory) {
+				getChatHistoryRequestCount++
+				if (rejectGetChatHistory || getChatHistoryRequestCount > rejectGetChatHistoryAfterPages) {
 					resultHandler?.onResult(TdApi.Error())
 					return
 				}
@@ -201,6 +202,8 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 		private var rejectSetTdlibParameters = false
 		private var rejectResendAuthenticationCode = false
 		private var rejectGetChatHistory = false
+		private var rejectGetChatHistoryAfterPages = Int.MAX_VALUE
+		private var getChatHistoryRequestCount = 0
 		private var qrAuthorizationLink = "test-qr-link"
 		private var activeInstance: Client? = null
 
@@ -240,6 +243,8 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 			rejectSetTdlibParameters = false
 			rejectResendAuthenticationCode = false
 			rejectGetChatHistory = false
+			rejectGetChatHistoryAfterPages = Int.MAX_VALUE
+			getChatHistoryRequestCount = 0
 			qrAuthorizationLink = "test-qr-link"
 			activeInstance = null
 		}
@@ -308,6 +313,10 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 
 		fun setRejectGetChatHistory(reject: Boolean) {
 			rejectGetChatHistory = reject
+		}
+
+		fun setRejectGetChatHistoryAfterPages(pagesBeforeReject: Int) {
+			rejectGetChatHistoryAfterPages = pagesBeforeReject
 		}
 
 		fun awaitSetTdlibParametersAccepted(timeoutMs: Long): Boolean =

@@ -297,6 +297,23 @@ class TelegramConnectorMessageTest {
 	}
 
 	@Test
+	fun testReflectiveClientReturnsAlreadyFetchedMessagesWhenLaterHistoryPageFails() {
+		val client = readyReflectiveMessageClient {
+			Client.setMaxHistoryPageSize(1)
+			Client.setMessages(
+				10L,
+				textMessage(10L, 40L, 1_700_000_004, isOutgoing = false, body = "latest"),
+				textMessage(10L, 30L, 1_700_000_003, isOutgoing = false, body = "middle"),
+			)
+			Client.setRejectGetChatHistoryAfterPages(1)
+		}
+
+		val result = client.getRecentMessageReadResult("10", 4)
+
+		assertEquals(listOf(40L), (result as? Success)?.messages?.map { it.sourceMessageOrder })
+	}
+
+	@Test
 	fun testReflectiveClientUsesDatabaseEncryptionKeyWhenSettingParameters() {
 		Client.resetTestState()
 		Client.setAuthorizationStateAfterTdlibParameters(TdApi.AuthorizationStateReady())

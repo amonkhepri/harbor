@@ -57,7 +57,7 @@ class ReflectiveTelegramTdlibMessageClient(
 					val historyPage = sendAndAwait(
 						client,
 						createGetChatHistoryRequest(chatId, fromMessageId, safeLimit),
-					) ?: return@withReadyClient LoadFailed
+					) ?: return@withReadyClient if (messages.isEmpty()) LoadFailed else Success(messages)
 					val rawMessages = getObjectArrayField(historyPage, "messages")
 					if (rawMessages.isEmpty()) break
 					var newRawMessage = false
