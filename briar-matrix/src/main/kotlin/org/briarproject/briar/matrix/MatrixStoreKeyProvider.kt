@@ -8,6 +8,35 @@ import java.security.SecureRandom
 
 interface MatrixStoreKeyProvider : ConnectorStoreKeyProvider
 
+interface MatrixStoreConfigurationProvider {
+	fun getStoreConfiguration(): MatrixStoreConfiguration?
+}
+
+class MatrixStoreConfiguration(
+	val directory: File,
+	val databaseName: String,
+	encryptionKey: ByteArray,
+) {
+	private val encryptionKey = encryptionKey.copyOf()
+
+	fun copyEncryptionKey(): ByteArray = encryptionKey.copyOf()
+}
+
+class ProtectedMatrixStoreConfigurationProvider(
+	private val databaseConfig: DatabaseConfig,
+	private val keyProvider: MatrixStoreKeyProvider = ProtectedMatrixStoreKeyProvider(databaseConfig),
+) : MatrixStoreConfigurationProvider {
+	override fun getStoreConfiguration(): MatrixStoreConfiguration? {
+		val directory = File(databaseConfig.databaseDirectory, STORE_NAME)
+		val key = keyProvider.getStoreEncryptionKey(directory) ?: return null
+		return MatrixStoreConfiguration(directory, STORE_NAME, key)
+	}
+
+	private companion object {
+		const val STORE_NAME = "matrix-sdk"
+	}
+}
+
 class ProtectedMatrixStoreKeyProvider(
 	databaseConfig: DatabaseConfig,
 	random: SecureRandom = SecureRandom(),

@@ -41,11 +41,56 @@ class MatrixStoreKeyProviderTest {
 		assertEquals(true, File(keyDirectory, "matrix-sdk-store-key.marker").isFile)
 	}
 
-	private fun config(keyDirectory: File, strengthener: KeyStrengthener) = object : DatabaseConfig {
-		override fun getDatabaseDirectory(): File = testFolder.root
+	@Test
+	fun testBuildsAccountScopedStoreConfigurationWithIsolatedKey() {
+		val databaseDirectory = testFolder.newFolder("database")
+		val expectedKey = ByteArray(SecretKey.LENGTH) { it.toByte() }
+		val sourceKey = expectedKey.copyOf()
+		var requestedStoreDirectory: File? = null
+		val provider = ProtectedMatrixStoreConfigurationProvider(
+			config(databaseDirectory = databaseDirectory),
+			keyProvider(sourceKey) { requestedStoreDirectory = it },
+		)
+
+		val configuration = checkNotNull(provider.getStoreConfiguration())
+		sourceKey[0] = (sourceKey[0].toInt() xor 0x7F).toByte()
+		val copiedKey = configuration.copyEncryptionKey()
+
+		assertEquals(File(databaseDirectory, "matrix-sdk"), configuration.directory)
+		assertEquals(configuration.directory, requestedStoreDirectory)
+		assertEquals("matrix-sdk", configuration.databaseName)
+		assertArrayEquals(expectedKey, copiedKey)
+		copiedKey[0] = (copiedKey[0].toInt() xor 0x7F).toByte()
+		assertArrayEquals(expectedKey, configuration.copyEncryptionKey())
+	}
+
+	@Test
+	fun testReturnsNoStoreConfigurationWhenProtectedKeyIsUnavailable() {
+		val provider = ProtectedMatrixStoreConfigurationProvider(
+			config(),
+			keyProvider(null),
+		)
+
+		assertEquals(null, provider.getStoreConfiguration())
+	}
+
+	private fun config(
+		keyDirectory: File = testFolder.root,
+		strengthener: KeyStrengthener = FakeKeyStrengthener(),
+		databaseDirectory: File = testFolder.root,
+	) = object : DatabaseConfig {
+		override fun getDatabaseDirectory(): File = databaseDirectory
 		override fun getDatabaseKeyDirectory(): File = keyDirectory
 		override fun getKeyStrengthener(): KeyStrengthener = strengthener
 	}
+
+	private fun keyProvider(key: ByteArray?, onStoreDirectory: (File) -> Unit = {}) =
+		object : MatrixStoreKeyProvider {
+			override fun getStoreEncryptionKey(storeDirectory: File): ByteArray? {
+				onStoreDirectory(storeDirectory)
+				return key
+			}
+		}
 
 	private class FakeKeyStrengthener : KeyStrengthener {
 		override fun isInitialised(): Boolean = true
