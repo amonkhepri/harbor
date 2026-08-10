@@ -5,6 +5,7 @@ import org.briarproject.bramble.api.crypto.SecretKey
 import org.briarproject.bramble.api.db.DatabaseConfig
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
@@ -39,6 +40,17 @@ class MatrixStoreKeyProviderTest {
 		assertArrayEquals(firstKey, secondKey)
 		assertEquals(true, File(keyDirectory, "matrix-sdk-store-key.seed").isFile)
 		assertEquals(true, File(keyDirectory, "matrix-sdk-store-key.marker").isFile)
+	}
+
+	@Test
+	fun testReturnsNoKeyWhenUnmarkedStoreCannotBeReset() {
+		val keyDirectory = testFolder.newFolder("failed-reset-key")
+		val provider = ProtectedMatrixStoreKeyProvider(config(keyDirectory, FakeKeyStrengthener()))
+		val storeDirectory = UndeletableDirectory(testFolder.newFolder("failed-reset-store"))
+		File(storeDirectory, "stale").writeText("stale")
+
+		assertNull(provider.getStoreEncryptionKey(storeDirectory))
+		assertEquals(false, File(keyDirectory, "matrix-sdk-store-key.marker").exists())
 	}
 
 	@Test
@@ -100,5 +112,9 @@ class MatrixStoreKeyProviderTest {
 				(byte.toInt() xor index xor 0x5A).toByte()
 			}.toByteArray(),
 		)
+	}
+
+	private class UndeletableDirectory(directory: File) : File(directory.path) {
+		override fun delete(): Boolean = false
 	}
 }

@@ -27,7 +27,7 @@ class ProtectedConnectorStoreKeyProvider(
 			if (!strengthener.isInitialised) return null
 			val seedFile = seedFile()
 			val markerFile = markerFile()
-			resetUnmarkedStore(storeDirectory, seedFile, markerFile)
+			if (!resetUnmarkedStore(storeDirectory, seedFile, markerFile)) return null
 			val seed = readOrCreateSeed(seedFile)
 			strengthener.strengthenKey(SecretKey(seed)).bytes.copyOf().also {
 				writeMarker(markerFile)
@@ -39,7 +39,7 @@ class ProtectedConnectorStoreKeyProvider(
 		}
 	}
 
-	private fun resetUnmarkedStore(storeDirectory: File, seedFile: File, markerFile: File) {
+	private fun resetUnmarkedStore(storeDirectory: File, seedFile: File, markerFile: File): Boolean {
 		if (storeDirectory.exists() &&
 			(
 				!seedFile.isFile ||
@@ -48,8 +48,9 @@ class ProtectedConnectorStoreKeyProvider(
 					markerFile.readText() != markerText()
 				)
 		) {
-			storeDirectory.deleteRecursively()
+			return storeDirectory.deleteRecursively()
 		}
+		return true
 	}
 
 	@Throws(IOException::class)
