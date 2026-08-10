@@ -391,18 +391,22 @@ class ReflectiveTelegramTdlibLoginClient(
 		activeClientGeneration = clientGeneration
 		return createReflectiveTdlibClient { update ->
 			val pendingAuthorizationUpdate = pendingAuthorizationUpdate
-			if (clientGeneration == activeClientGeneration) {
-				getQrAuthorizationLink(update)?.let { qrAuthorizationLink = it }
-				val className = getAuthorizationStateClassName(update)
-				if (qrAuthorizationDeadlineNanos != 0L && className.isNotEmpty()) {
-					lastAuthorizationStateClassName = className
+			val className = getAuthorizationStateClassName(update)
+			if (clientGeneration != activeClientGeneration) {
+				if (pendingAuthorizationUpdate?.acceptsOnly(className) == true) {
+					pendingAuthorizationUpdate.capture(className)
 				}
-				if (pendingAuthorizationUpdate == null) return@createReflectiveTdlibClient
-				getTelegramCodeDeliveryStatus(update)?.let {
-					log.info("Telegram auth code delivery: $it")
-				}
-				pendingAuthorizationUpdate.capture(className)
+				return@createReflectiveTdlibClient
 			}
+			getQrAuthorizationLink(update)?.let { qrAuthorizationLink = it }
+			if (qrAuthorizationDeadlineNanos != 0L && className.isNotEmpty()) {
+				lastAuthorizationStateClassName = className
+			}
+			if (pendingAuthorizationUpdate == null) return@createReflectiveTdlibClient
+			getTelegramCodeDeliveryStatus(update)?.let {
+				log.info("Telegram auth code delivery: $it")
+			}
+			pendingAuthorizationUpdate.capture(className)
 		}
 	}
 
@@ -504,6 +508,7 @@ class ReflectiveTelegramTdlibLoginClient(
 	}
 
 	private fun closeTdlibClient() {
+		activeClientGeneration = ++nextClientGeneration
 		lastAuthorizationStateClassName = ""
 		qrAuthorizationLink = null
 		qrAuthorizationDeadlineNanos = 0L

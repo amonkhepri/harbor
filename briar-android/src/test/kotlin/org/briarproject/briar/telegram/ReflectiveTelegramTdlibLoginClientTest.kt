@@ -573,4 +573,18 @@ class ReflectiveTelegramTdlibLoginClientTest {
 		assertEquals(null, client.getQrAuthorizationLink())
 		assertSentRequestsAndClose(client, SET_PARAMETERS, REQUEST_QR, CLOSE)
 	}
+
+	@Test
+	fun testLateQrAuthorizationUpdateAfterCloseDoesNotRestoreLink() {
+		val client = createClient()
+		client.start()
+		client.requestQrCodeAuthentication()
+
+		assertEquals(TelegramAuthState.CLOSED, client.close())
+		Client.emitAuthorizationStateForTest(
+			TdApi.AuthorizationStateWaitOtherDeviceConfirmation("late-test-qr-link"),
+		)
+
+		assertEquals(null, client.getQrAuthorizationLink())
+	}
 }
