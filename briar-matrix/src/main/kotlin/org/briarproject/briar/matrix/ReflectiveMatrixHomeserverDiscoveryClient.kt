@@ -2,6 +2,9 @@ package org.briarproject.briar.matrix
 
 import org.briarproject.briar.api.matrix.MatrixAuthSession.RecoverableErrorDetail
 import org.briarproject.briar.api.matrix.MatrixAuthSession.RecoverableErrorDetail.HOMESERVER_DISCOVERY_FAILED
+import org.briarproject.briar.api.matrix.MatrixAuthSession.RecoverableErrorDetail.INVALID_CREDENTIALS
+import org.briarproject.briar.api.matrix.MatrixAuthSession.RecoverableErrorDetail.LOGIN_FAILED
+import org.briarproject.briar.api.matrix.MatrixAuthSession.RecoverableErrorDetail.NONE
 import org.briarproject.briar.api.matrix.MatrixHomeserverDiscoveryClient
 import org.briarproject.briar.api.matrix.MatrixHomeserverDiscoveryClient.DiscoveryResult
 import java.lang.reflect.InvocationTargetException
@@ -15,7 +18,7 @@ import kotlin.coroutines.EmptyCoroutineContext
 import kotlin.coroutines.intrinsics.COROUTINE_SUSPENDED
 
 /**
- * Production [MatrixHomeserverDiscoveryClient] that invokes the pinned
+ * Production [MatrixHomeserverDiscoveryClient] and [MatrixLoginClient] that invoke the pinned
  * `org.matrix.rustcomponents:sdk-android` `ClientBuilder.serverName(...).build()`
  * discovery path entirely over reflection, so `:briar-matrix` keeps zero
  * compile-time dependency on the SDK (see this module's `build.gradle` and
@@ -23,12 +26,14 @@ import kotlin.coroutines.intrinsics.COROUTINE_SUSPENDED
  * `ReflectiveTelegramTdlibMessageClient`'s isolation approach for TDLib.
  * `build()` is a Kotlin suspend function; [buildClient] bridges its
  * `Continuation`-based bytecode signature to a blocking call so [discover]
- * itself stays synchronous per the interface contract. If the SDK classes
- * cannot be loaded (flag off / dependency absent) or discovery fails for any
- * reason, [discover] returns [DiscoveryResult.Failed] instead of throwing.
+ * itself stays synchronous per the interface contract. Discovery uses only a
+ * temporary client; login retains its client until logout or close.
  */
 class ReflectiveMatrixHomeserverDiscoveryClient(private val discoveryTimeoutMs: Long = 30_000L) :
-	MatrixHomeserverDiscoveryClient {
+	MatrixHomeserverDiscoveryClient,
+	MatrixLoginClient {
+
+	private var loginClient: Any? = null
 
 	override fun discover(serverName: String): DiscoveryResult {
 		// `serverName(...)` and `inMemoryStore()` each return their own
@@ -66,6 +71,71 @@ class ReflectiveMatrixHomeserverDiscoveryClient(private val discoveryTimeoutMs: 
 			closeQuietly(client)
 			for (i in builders.indices.reversed()) closeQuietly(builders[i])
 		}
+	}
+
+	@Synchronized
+	override fun login(
+		homeserverUrl: String,
+		username: String,
+		password: String,
+	): RecoverableErrorDetail {
+		val builders = ArrayList<Any>(3)
+		var client: Any? = null
+		return try {
+			val builderClass = Class.forName(CLIENT_BUILDER_CLASS_NAME)
+			var builder = track(builders, builderClass.getConstructor().newInstance())
+			builder = track(
+				builders,
+				builderClass.getMethod("homeserverUrl", String::class.java).invoke(builder, homeserverUrl),
+			)
+			builder = track(builders, builderClass.getMethod("inMemoryStore").invoke(builder))
+			client = buildClient(builder, builderClass)
+			invokeUnit(
+				client,
+				"login",
+				arrayOf(String::class.java, String::class.java, String::class.java, String::class.java),
+				arrayOf(username, password, DEVICE_NAME, null),
+			)
+			close()
+			loginClient = client
+			client = null
+			NONE
+		} catch (e: InvocationTargetException) {
+			mapLoginFailure(e.targetException ?: e)
+		} catch (e: InterruptedException) {
+			Thread.currentThread().interrupt()
+			LOGIN_FAILED
+		} catch (e: ReflectiveOperationException) {
+			LOGIN_FAILED
+		} catch (e: LinkageError) {
+			LOGIN_FAILED
+		} catch (e: Exception) {
+			mapLoginFailure(e)
+		} finally {
+			closeQuietly(client)
+			for (i in builders.indices.reversed()) closeQuietly(builders[i])
+		}
+	}
+
+	@Synchronized
+	override fun logout() {
+		val client = loginClient ?: return
+		loginClient = null
+		try {
+			invokeUnit(client, "logout", emptyArray(), emptyArray())
+		} catch (e: InterruptedException) {
+			Thread.currentThread().interrupt()
+		} catch (e: Exception) {
+		} catch (e: LinkageError) {
+		} finally {
+			closeQuietly(client)
+		}
+	}
+
+	@Synchronized
+	override fun close() {
+		closeQuietly(loginClient)
+		loginClient = null
 	}
 
 	/**
@@ -123,6 +193,45 @@ class ReflectiveMatrixHomeserverDiscoveryClient(private val discoveryTimeoutMs: 
 			throwable.javaClass.simpleName,
 		)
 
+	private fun mapLoginFailure(throwable: Throwable): RecoverableErrorDetail {
+		if (throwable.javaClass.simpleName != "MatrixApi") return LOGIN_FAILED
+		return try {
+			val kind = throwable.javaClass.getMethod("getKind").invoke(throwable)
+			if (kind.javaClass.simpleName in setOf("Forbidden", "Unauthorized")) {
+				INVALID_CREDENTIALS
+			} else {
+				LOGIN_FAILED
+			}
+		} catch (e: ReflectiveOperationException) {
+			LOGIN_FAILED
+		}
+	}
+
+	private fun invokeUnit(
+		target: Any,
+		methodName: String,
+		parameterTypes: Array<Class<*>>,
+		arguments: Array<Any?>,
+	) {
+		val method = target.javaClass.getMethod(
+			methodName,
+			*(parameterTypes + Continuation::class.java),
+		)
+		val outcome = AtomicReference<Result<Any?>>()
+		val latch = CountDownLatch(1)
+		val continuation = object : Continuation<Any?> {
+			override val context: CoroutineContext = EmptyCoroutineContext
+			override fun resumeWith(result: Result<Any?>) {
+				outcome.set(result)
+				latch.countDown()
+			}
+		}
+		val invokeResult = method.invoke(target, *(arguments + continuation))
+		if (invokeResult !== COROUTINE_SUSPENDED) return
+		if (!latch.await(discoveryTimeoutMs, TimeUnit.MILLISECONDS)) throw DiscoveryAdapterFailure()
+		(outcome.get() ?: throw DiscoveryAdapterFailure()).getOrThrow()
+	}
+
 	private fun readHomeserverUrl(client: Any): String =
 		(client.javaClass.getMethod("homeserver").invoke(client) as? String)
 			?.takeIf { it.isNotEmpty() }
@@ -147,5 +256,6 @@ class ReflectiveMatrixHomeserverDiscoveryClient(private val discoveryTimeoutMs: 
 
 	private companion object {
 		const val CLIENT_BUILDER_CLASS_NAME = "org.matrix.rustcomponents.sdk.ClientBuilder"
+		const val DEVICE_NAME = "Harbor"
 	}
 }

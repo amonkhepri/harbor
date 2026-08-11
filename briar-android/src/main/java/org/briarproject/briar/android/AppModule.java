@@ -64,6 +64,8 @@ import org.briarproject.briar.api.android.ScreenFilterMonitor;
 import org.briarproject.briar.api.matrix.MatrixAuthSession;
 import org.briarproject.briar.api.test.TestAvatarCreator;
 import org.briarproject.briar.matrix.DisabledMatrixAuthSession;
+import org.briarproject.briar.matrix.MatrixAuthSessionImpl;
+import org.briarproject.briar.matrix.ReflectiveMatrixHomeserverDiscoveryClient;
 import org.briarproject.nullsafety.NotNullByDefault;
 
 import java.io.File;
@@ -390,6 +392,11 @@ public class AppModule {
 	@Provides
 	@Singleton
 	MatrixAuthSession provideMatrixAuthSession() {
-		return new DisabledMatrixAuthSession();
+		if (!BuildConfig.MATRIX_CONNECTOR_ENABLED) {
+			return new DisabledMatrixAuthSession();
+		}
+		ReflectiveMatrixHomeserverDiscoveryClient client =
+				new ReflectiveMatrixHomeserverDiscoveryClient();
+		return new MatrixAuthSessionImpl(client, client);
 	}
 }

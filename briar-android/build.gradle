@@ -151,6 +151,7 @@ android {
 		buildConfigField "String", "TorVersion", "\"$tor_version\""
 		buildConfigField "boolean", "TELEGRAM_CONNECTOR_ENABLED",
 			"${telegramConnectorEnabled}"
+		buildConfigField "boolean", "MATRIX_CONNECTOR_ENABLED", "${matrixConnectorEnabled}"
 		buildConfigField "int", "TELEGRAM_API_ID", "${telegramApiId}"
 		buildConfigField "String", "TELEGRAM_API_HASH", telegramApiHashLiteral
 

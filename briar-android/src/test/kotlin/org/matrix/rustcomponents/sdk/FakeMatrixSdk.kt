@@ -20,6 +20,17 @@ sealed class ClientBuildException(message: String) : Exception(message) {
 
 class Client internal constructor(private val homeserverUrl: String?) {
 	fun homeserver(): String? = homeserverUrl
+	suspend fun login(
+		username: String,
+		password: String,
+		initialDeviceName: String?,
+		deviceId: String?,
+	) {
+		FakeMatrixSdkState.loginCallCount++
+	}
+	suspend fun logout() {
+		FakeMatrixSdkState.logoutCallCount++
+	}
 	fun close() {
 		FakeMatrixSdkState.clientCloseCount++
 	}
@@ -40,6 +51,11 @@ class ClientBuilder : AutoCloseable {
 
 	fun inMemoryStore(): ClientBuilder {
 		FakeMatrixSdkState.inMemoryStoreCalled = true
+		return ClientBuilder()
+	}
+
+	fun homeserverUrl(homeserverUrl: String): ClientBuilder {
+		FakeMatrixSdkState.lastHomeserverUrl = homeserverUrl
 		return ClientBuilder()
 	}
 
@@ -82,6 +98,9 @@ object FakeMatrixSdkState {
 	var buildCallCount = 0
 	var clientCloseCount = 0
 	var builderCloseCount = 0
+	var lastHomeserverUrl: String? = null
+	var loginCallCount = 0
+	var logoutCallCount = 0
 
 	fun reset() {
 		lastServerName = null
@@ -94,5 +113,8 @@ object FakeMatrixSdkState {
 		buildCallCount = 0
 		clientCloseCount = 0
 		builderCloseCount = 0
+		lastHomeserverUrl = null
+		loginCallCount = 0
+		logoutCallCount = 0
 	}
 }
