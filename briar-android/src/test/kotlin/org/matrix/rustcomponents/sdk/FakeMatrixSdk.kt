@@ -25,16 +25,26 @@ class Client internal constructor(private val homeserverUrl: String?) {
 	}
 }
 
-class ClientBuilder {
+/**
+ * Mirrors the pinned SDK's real shape: `ClientBuilder` is `AutoCloseable`, and
+ * [serverName] and [inMemoryStore] each return a distinct closeable wrapper
+ * rather than mutating the receiver, so a fix that only closes one instance
+ * still leaks the others.
+ */
+class ClientBuilder : AutoCloseable {
 
 	fun serverName(serverName: String): ClientBuilder {
 		FakeMatrixSdkState.lastServerName = serverName
-		return this
+		return ClientBuilder()
 	}
 
 	fun inMemoryStore(): ClientBuilder {
 		FakeMatrixSdkState.inMemoryStoreCalled = true
-		return this
+		return ClientBuilder()
+	}
+
+	override fun close() {
+		FakeMatrixSdkState.builderCloseCount++
 	}
 
 	suspend fun build(): Client {
@@ -71,6 +81,7 @@ object FakeMatrixSdkState {
 	var asyncDelayMs = 0L
 	var buildCallCount = 0
 	var clientCloseCount = 0
+	var builderCloseCount = 0
 
 	fun reset() {
 		lastServerName = null
@@ -82,5 +93,6 @@ object FakeMatrixSdkState {
 		asyncDelayMs = 0L
 		buildCallCount = 0
 		clientCloseCount = 0
+		builderCloseCount = 0
 	}
 }

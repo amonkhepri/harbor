@@ -7,6 +7,7 @@ import org.briarproject.briar.api.matrix.MatrixHomeserverDiscoveryClient.Discove
 import java.lang.reflect.InvocationTargetException
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.coroutines.Continuation
 import kotlin.coroutines.CoroutineContext
@@ -30,12 +31,20 @@ class ReflectiveMatrixHomeserverDiscoveryClient(private val discoveryTimeoutMs: 
 	MatrixHomeserverDiscoveryClient {
 
 	override fun discover(serverName: String): DiscoveryResult {
+		// `serverName(...)` and `inMemoryStore()` each return their own
+		// AutoCloseable-backed `ClientBuilder` wrapper on the pinned SDK rather
+		// than mutating the receiver in place, so every distinct wrapper the
+		// chain produces is tracked here and closed once discovery is done.
+		val builders = ArrayList<Any>(3)
 		var client: Any? = null
 		return try {
 			val builderClass = Class.forName(CLIENT_BUILDER_CLASS_NAME)
-			var builder = builderClass.getConstructor().newInstance()
-			builder = builderClass.getMethod("serverName", String::class.java).invoke(builder, serverName)
-			builder = builderClass.getMethod("inMemoryStore").invoke(builder)
+			var builder = track(builders, builderClass.getConstructor().newInstance())
+			builder = track(
+				builders,
+				builderClass.getMethod("serverName", String::class.java).invoke(builder, serverName),
+			)
+			builder = track(builders, builderClass.getMethod("inMemoryStore").invoke(builder))
 			client = buildClient(builder, builderClass)
 			DiscoveryResult.Resolved(readHomeserverUrl(client))
 		} catch (e: DiscoveryAdapterFailure) {
@@ -54,7 +63,8 @@ class ReflectiveMatrixHomeserverDiscoveryClient(private val discoveryTimeoutMs: 
 			// synchronously by build() or delivered via the async Continuation below.
 			DiscoveryResult.Failed(mapThrowable(e))
 		} finally {
-			closeClientQuietly(client)
+			closeQuietly(client)
+			for (i in builders.indices.reversed()) closeQuietly(builders[i])
 		}
 	}
 
@@ -65,21 +75,45 @@ class ReflectiveMatrixHomeserverDiscoveryClient(private val discoveryTimeoutMs: 
 	 * directly) or asynchronously (the invoked method returns [COROUTINE_SUSPENDED]
 	 * and later calls [Continuation.resumeWith] from another thread), so both paths
 	 * are handled explicitly rather than assumed.
+	 *
+	 * A build that completes after [discoveryTimeoutMs] races the timing-out
+	 * caller: [claimed] arbitrates which side owns the result so exactly one of
+	 * them either uses it or closes it, never both and never neither.
 	 */
 	private fun buildClient(builder: Any, builderClass: Class<*>): Any {
 		val buildMethod = builderClass.getMethod("build", Continuation::class.java)
 		val outcome = AtomicReference<Result<Any?>>()
 		val latch = CountDownLatch(1)
+		val claimed = AtomicBoolean(false)
 		val continuation = object : Continuation<Any?> {
 			override val context: CoroutineContext = EmptyCoroutineContext
 			override fun resumeWith(result: Result<Any?>) {
 				outcome.set(result)
 				latch.countDown()
+				// If the caller already timed out and claimed abandonment, this
+				// delivery has no owner left to close its client; do it here.
+				if (!claimed.compareAndSet(false, true)) closeQuietly(result.getOrNull())
 			}
 		}
 		val invokeResult = buildMethod.invoke(builder, continuation)
 		if (invokeResult !== COROUTINE_SUSPENDED) return invokeResult ?: throw DiscoveryAdapterFailure()
-		if (!latch.await(discoveryTimeoutMs, TimeUnit.MILLISECONDS)) throw DiscoveryAdapterFailure()
+		val completedInTime = try {
+			latch.await(discoveryTimeoutMs, TimeUnit.MILLISECONDS)
+		} catch (e: InterruptedException) {
+			// Abandoning on interrupt is the same race as abandoning on timeout: if
+			// resumeWith already delivered, we own its client and must close it
+			// before rethrowing; otherwise any later delivery closes itself.
+			if (!claimed.compareAndSet(false, true)) closeQuietly(outcome.get()?.getOrNull())
+			throw e
+		}
+		if (!completedInTime && claimed.compareAndSet(false, true)) {
+			// Won the race to claim abandonment before resumeWith could: no result
+			// is available yet, and any later delivery closes itself.
+			throw DiscoveryAdapterFailure()
+		}
+		// Either the latch reached zero before timing out, or resumeWith claimed
+		// the result concurrently with our timeout check; either way it is safe
+		// to consume the outcome now.
 		return (outcome.get() ?: throw DiscoveryAdapterFailure()).getOrThrow()
 			?: throw DiscoveryAdapterFailure()
 	}
@@ -94,10 +128,15 @@ class ReflectiveMatrixHomeserverDiscoveryClient(private val discoveryTimeoutMs: 
 			?.takeIf { it.isNotEmpty() }
 			?: throw DiscoveryAdapterFailure()
 
-	private fun closeClientQuietly(client: Any?) {
-		if (client == null) return
+	private fun track(builders: MutableList<Any>, candidate: Any): Any {
+		if (builders.none { it === candidate }) builders.add(candidate)
+		return candidate
+	}
+
+	private fun closeQuietly(target: Any?) {
+		if (target == null) return
 		try {
-			client.javaClass.getMethod("close").invoke(client)
+			target.javaClass.getMethod("close").invoke(target)
 		} catch (e: ReflectiveOperationException) {
 		} catch (e: LinkageError) {
 		}
