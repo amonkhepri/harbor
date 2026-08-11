@@ -61,7 +61,9 @@ import org.briarproject.briar.api.android.DozeWatchdog;
 import org.briarproject.briar.api.android.LockManager;
 import org.briarproject.briar.api.android.NetworkUsageMetrics;
 import org.briarproject.briar.api.android.ScreenFilterMonitor;
+import org.briarproject.briar.api.matrix.MatrixAuthSession;
 import org.briarproject.briar.api.test.TestAvatarCreator;
+import org.briarproject.briar.matrix.DisabledMatrixAuthSession;
 import org.briarproject.nullsafety.NotNullByDefault;
 
 import java.io.File;
@@ -383,5 +385,11 @@ public class AppModule {
 				return BuildConfig.TELEGRAM_API_HASH;
 			}
 		};
+	}
+
+	@Provides
+	@Singleton
+	MatrixAuthSession provideMatrixAuthSession() {
+		return new DisabledMatrixAuthSession();
 	}
 }
