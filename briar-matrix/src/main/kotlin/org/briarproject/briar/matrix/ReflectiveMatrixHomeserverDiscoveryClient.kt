@@ -13,10 +13,7 @@ import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.io.File
 import java.io.IOException
-import java.lang.reflect.InvocationHandler
 import java.lang.reflect.InvocationTargetException
-import java.lang.reflect.Method
-import java.lang.reflect.Proxy
 import java.security.GeneralSecurityException
 import java.security.SecureRandom
 import java.util.concurrent.CountDownLatch
@@ -54,14 +51,16 @@ import kotlin.coroutines.intrinsics.COROUTINE_SUSPENDED
  * store directory. [restore] decrypts that sidecar and feeds the `Session`
  * back through the explicit `Client.restoreSession(Session, Continuation)`
  * API on a freshly built client pointed at the same store. Both [login] and
- * [restore] also install a `ClientSessionDelegate` (via
- * `ClientBuilder.setSessionDelegate`) built with [Proxy], so a token refresh
+ * [restore] also install a direct `ClientSessionDelegate` (via
+ * `ClientBuilder.setSessionDelegate`), so a token refresh
  * the SDK performs internally after either call drives the delegate's
  * `saveSessionInKeychain` callback and rewrites the same encrypted sidecar,
  * keeping persisted tokens current instead of frozen at login/restore time.
  */
-class ReflectiveMatrixHomeserverDiscoveryClient(private val discoveryTimeoutMs: Long = 30_000L) :
-	MatrixHomeserverDiscoveryClient,
+class ReflectiveMatrixHomeserverDiscoveryClient(
+	private val discoveryTimeoutMs: Long = 30_000L,
+	private val sessionDelegateFactory: MatrixClientSessionDelegateFactory? = null,
+) : MatrixHomeserverDiscoveryClient,
 	MatrixLoginClient {
 
 	private var loginClient: Any? = null
@@ -248,7 +247,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(private val discoveryTimeoutMs: 
 	}
 
 	/**
-	 * Installs a [Proxy]-backed `ClientSessionDelegate` on [builder] via the pinned SDK's
+	 * Installs a direct `ClientSessionDelegate` on [builder] via the pinned SDK's
 	 * `ClientBuilder.setSessionDelegate(ClientSessionDelegate)` so a later internal token
 	 * refresh routes through `saveSessionInKeychain` and lands in the same encrypted sidecar
 	 * [login]/[restore] write, instead of only ever persisting the token captured at login time.
@@ -259,79 +258,29 @@ class ReflectiveMatrixHomeserverDiscoveryClient(private val discoveryTimeoutMs: 
 		storeConfiguration: MatrixStoreConfiguration,
 	): Any {
 		val delegateClass = Class.forName(SESSION_DELEGATE_CLASS_NAME)
-		val delegate = Proxy.newProxyInstance(
-			delegateClass.classLoader,
-			arrayOf(delegateClass),
-			SessionDelegateInvocationHandler(storeConfiguration),
+		val factory = sessionDelegateFactory ?: Class.forName(SESSION_DELEGATE_FACTORY_CLASS_NAME)
+			.getConstructor()
+			.newInstance() as MatrixClientSessionDelegateFactory
+		val delegate = factory.create(
+			saveSession = { session ->
+				writeSessionFile(sessionFile(storeConfiguration), session, storeConfiguration)
+			},
+			retrieveSession = { readSessionFileOrThrow(storeConfiguration) },
 		)
 		return builderClass.getMethod("setSessionDelegate", delegateClass).invoke(builder, delegate)
 	}
 
-	/**
-	 * Backs the reflective `ClientSessionDelegate` proxy: `saveSessionInKeychain` rewrites the
-	 * encrypted sidecar with the SDK's latest `Session` (e.g. after a refresh);
-	 * `retrieveSessionFromKeychain` round-trips it back and fails closed by throwing the pinned
-	 * SDK's `ClientException.Generic` on any missing/decrypt/format error, instead of the old
-	 * `null` return.
-	 *
-	 * This is the best a [Proxy]-based delegate can do here, not a full fix to the AAR's
-	 * documented `@NotNull Session`-or-`ClientException` contract: the pinned AAR's
-	 * `ClientSessionDelegate.retrieveSessionFromKeychain` bytecode declares no `throws` clause
-	 * (`javap -v` on the AAR shows no `Exceptions` attribute), so the JDK's generated `Proxy`
-	 * dispatcher wraps our checked `ClientException` throw into `UndeclaredThrowableException`
-	 * before it reaches the SDK's generated UniFFI callback trampoline. That trampoline only
-	 * special-cases an `instanceof ClientException` catch; an `UndeclaredThrowableException`
-	 * still falls through to its generic "unexpected exception" panic-status branch, same as the
-	 * old `null`-triggered `NullPointerException` did. The difference is diagnostic, not
-	 * contractual: the panic status now carries this method's own stack trace and a real
-	 * `ClientException` as its cause, instead of an opaque `Intrinsics.checkNotNullParameter`
-	 * NPE. Reaching the AAR's typed, non-panicking error path would require a delegate class
-	 * compiled directly against the real interface (outside a `Proxy`), which this module's
-	 * deliberate zero-compile-dependency isolation (see this class's docstring) does not allow.
-	 */
-	private inner class SessionDelegateInvocationHandler(
-		private val storeConfiguration: MatrixStoreConfiguration,
-	) : InvocationHandler {
-		override fun invoke(proxy: Any, method: Method, args: Array<out Any?>?): Any? =
-			when (method.name) {
-				"saveSessionInKeychain" -> {
-					val session = args?.getOrNull(0)
-					if (session !=
-						null
-					) {
-						writeSessionFile(sessionFile(storeConfiguration), session, storeConfiguration)
-					}
-					null
-				}
-				"retrieveSessionFromKeychain" -> readSessionFileOrThrow(storeConfiguration)
-				"equals" -> proxy === args?.getOrNull(0)
-				"hashCode" -> System.identityHashCode(proxy)
-				"toString" -> "MatrixClientSessionDelegate"
-				else -> null
-			}
-	}
-
 	private fun readSessionFileOrThrow(storeConfiguration: MatrixStoreConfiguration): Any {
 		val file = sessionFile(storeConfiguration)
-		if (!file.isFile) throw newClientException("no persisted Matrix session")
+		if (!file.isFile) throw IOException("no persisted Matrix session")
 		return try {
 			readSessionFile(file, Class.forName(SESSION_CLASS_NAME), storeConfiguration)
 		} catch (e: IOException) {
-			throw newClientException("persisted Matrix session sidecar could not be read")
+			throw IOException("persisted Matrix session sidecar could not be read", e)
 		} catch (e: ReflectiveOperationException) {
-			throw newClientException("persisted Matrix session sidecar could not be reconstructed")
+			throw IOException("persisted Matrix session sidecar could not be reconstructed", e)
 		}
 	}
-
-	/**
-	 * Reflectively builds the pinned SDK's `ClientException.Generic(msg, details)`. `ClientException`
-	 * itself is an abstract sealed base with no public constructor; `Generic` is the concrete
-	 * variant with a public `(String, String)` constructor.
-	 */
-	private fun newClientException(message: String): Throwable =
-		Class.forName(CLIENT_EXCEPTION_GENERIC_CLASS_NAME)
-			.getConstructor(String::class.java, String::class.java)
-			.newInstance(message, message) as Throwable
 
 	/**
 	 * Serializes an SDK `Session`'s fields via its public getters, AES-256-GCM-encrypts them
@@ -625,8 +574,8 @@ class ReflectiveMatrixHomeserverDiscoveryClient(private val discoveryTimeoutMs: 
 		const val SQLITE_STORE_BUILDER_CLASS_NAME = "org.matrix.rustcomponents.sdk.SqliteStoreBuilder"
 		const val SESSION_CLASS_NAME = "org.matrix.rustcomponents.sdk.Session"
 		const val SESSION_DELEGATE_CLASS_NAME = "org.matrix.rustcomponents.sdk.ClientSessionDelegate"
-		const val CLIENT_EXCEPTION_GENERIC_CLASS_NAME =
-			"org.matrix.rustcomponents.sdk.ClientException\$Generic"
+		const val SESSION_DELEGATE_FACTORY_CLASS_NAME =
+			"org.briarproject.briar.matrix.DirectMatrixClientSessionDelegateFactory"
 		const val DEVICE_NAME = "Harbor"
 		const val AEAD_TRANSFORMATION = "AES/GCM/NoPadding"
 		const val GCM_NONCE_LENGTH_BYTES = 12

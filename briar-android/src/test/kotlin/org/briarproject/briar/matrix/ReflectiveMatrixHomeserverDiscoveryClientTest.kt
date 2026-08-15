@@ -17,7 +17,6 @@ import org.matrix.rustcomponents.sdk.ClientBuildException
 import org.matrix.rustcomponents.sdk.ClientException
 import org.matrix.rustcomponents.sdk.FakeMatrixSdkState
 import java.io.File
-import java.lang.reflect.UndeclaredThrowableException
 import java.util.Collections
 import java.util.concurrent.TimeUnit
 
@@ -34,7 +33,7 @@ class ReflectiveMatrixHomeserverDiscoveryClientTest {
 	@Test
 	fun `login writes an encrypted atomic sidecar with no leftover temp file`() {
 		val storeConfiguration = fakeStoreConfiguration()
-		val client = ReflectiveMatrixHomeserverDiscoveryClient()
+		val client = newSessionClient()
 
 		val result = client.login("https://matrix.example.org", "alice", "swordfish", storeConfiguration)
 
@@ -60,7 +59,7 @@ class ReflectiveMatrixHomeserverDiscoveryClientTest {
 	@Test
 	fun `restore after a simulated refresh returns the refreshed token, not the login-time token`() {
 		val storeConfiguration = fakeStoreConfiguration()
-		val client = ReflectiveMatrixHomeserverDiscoveryClient()
+		val client = newSessionClient()
 		assertEquals(
 			NONE,
 			client.login("https://matrix.example.org", "alice", "swordfish", storeConfiguration),
@@ -70,7 +69,7 @@ class ReflectiveMatrixHomeserverDiscoveryClientTest {
 		loggedInClient.simulateTokenRefresh("refreshed-access-token")
 		assertEquals(1, FakeMatrixSdkState.tokenRefreshCallCount)
 
-		val freshClient = ReflectiveMatrixHomeserverDiscoveryClient()
+		val freshClient = newSessionClient()
 		val restoreResult = freshClient.restore(storeConfiguration)
 
 		assertEquals(RestoreResult.Restored("https://matrix.example.org"), restoreResult)
@@ -80,7 +79,7 @@ class ReflectiveMatrixHomeserverDiscoveryClientTest {
 	@Test
 	fun `restore rejects a sidecar tampered after encryption instead of trusting it`() {
 		val storeConfiguration = fakeStoreConfiguration()
-		val client = ReflectiveMatrixHomeserverDiscoveryClient()
+		val client = newSessionClient()
 		assertEquals(
 			NONE,
 			client.login("https://matrix.example.org", "alice", "swordfish", storeConfiguration),
@@ -90,7 +89,7 @@ class ReflectiveMatrixHomeserverDiscoveryClientTest {
 		tampered[tampered.size - 1] = (tampered[tampered.size - 1] + 1).toByte()
 		sessionFile.writeBytes(tampered)
 
-		val freshClient = ReflectiveMatrixHomeserverDiscoveryClient()
+		val freshClient = newSessionClient()
 		val restoreResult = freshClient.restore(storeConfiguration)
 
 		assertEquals(RestoreResult.NotFound, restoreResult)
@@ -99,7 +98,7 @@ class ReflectiveMatrixHomeserverDiscoveryClientTest {
 	@Test
 	fun `restore against the wrong store key rejects the sidecar instead of using a stale key`() {
 		val originalConfiguration = fakeStoreConfiguration()
-		val client = ReflectiveMatrixHomeserverDiscoveryClient()
+		val client = newSessionClient()
 		assertEquals(
 			NONE,
 			client.login("https://matrix.example.org", "alice", "swordfish", originalConfiguration),
@@ -110,23 +109,16 @@ class ReflectiveMatrixHomeserverDiscoveryClientTest {
 			ByteArray(32) { (it + 1).toByte() },
 		)
 
-		val freshClient = ReflectiveMatrixHomeserverDiscoveryClient()
+		val freshClient = newSessionClient()
 		val restoreResult = freshClient.restore(wrongKeyConfiguration)
 
 		assertEquals(RestoreResult.NotFound, restoreResult)
 	}
 
-	// The pinned AAR's `ClientSessionDelegate.retrieveSessionFromKeychain` bytecode declares no
-	// `throws` clause, so the JDK's `Proxy` dispatcher wraps our checked `ClientException` throw
-	// into `UndeclaredThrowableException` before it reaches the caller; these tests assert that
-	// real, observed shape (checked exception with a real `ClientException` cause) rather than a
-	// bare `ClientException`, which only the pre-fix fake's incorrect `@Throws` annotation made
-	// look reachable. See `SessionDelegateInvocationHandler`'s KDoc for the full explanation.
-
 	@Test
-	fun `session delegate retrieval fails closed instead of null for a missing sidecar`() {
+	fun `direct session delegate maps a missing sidecar to ClientException`() {
 		val storeConfiguration = fakeStoreConfiguration()
-		val client = ReflectiveMatrixHomeserverDiscoveryClient()
+		val client = newSessionClient()
 		assertEquals(
 			NONE,
 			client.login("https://matrix.example.org", "alice", "swordfish", storeConfiguration),
@@ -134,16 +126,15 @@ class ReflectiveMatrixHomeserverDiscoveryClientTest {
 		val delegate = FakeMatrixSdkState.lastSessionDelegate!!
 		assertTrue(File(storeConfiguration.directory, "session").delete())
 
-		val thrown = assertThrows(UndeclaredThrowableException::class.java) {
+		assertThrows(ClientException::class.java) {
 			delegate.retrieveSessionFromKeychain("@alice:matrix.example.org")
 		}
-		assertTrue(thrown.cause is ClientException)
 	}
 
 	@Test
-	fun `session delegate retrieval fails closed instead of null for a corrupt sidecar`() {
+	fun `direct session delegate maps a corrupt sidecar to ClientException`() {
 		val storeConfiguration = fakeStoreConfiguration()
-		val client = ReflectiveMatrixHomeserverDiscoveryClient()
+		val client = newSessionClient()
 		assertEquals(
 			NONE,
 			client.login("https://matrix.example.org", "alice", "swordfish", storeConfiguration),
@@ -154,10 +145,9 @@ class ReflectiveMatrixHomeserverDiscoveryClientTest {
 		tampered[tampered.size - 1] = (tampered[tampered.size - 1] + 1).toByte()
 		sessionFile.writeBytes(tampered)
 
-		val thrown = assertThrows(UndeclaredThrowableException::class.java) {
+		assertThrows(ClientException::class.java) {
 			delegate.retrieveSessionFromKeychain("@alice:matrix.example.org")
 		}
-		assertTrue(thrown.cause is ClientException)
 	}
 
 	@Test
@@ -185,6 +175,11 @@ class ReflectiveMatrixHomeserverDiscoveryClientTest {
 		"matrix-sdk",
 		ByteArray(32) { it.toByte() },
 	)
+
+	private fun newSessionClient(): ReflectiveMatrixHomeserverDiscoveryClient =
+		ReflectiveMatrixHomeserverDiscoveryClient(
+			sessionDelegateFactory = DirectMatrixClientSessionDelegateFactory(),
+		)
 
 	@Test
 	fun `synchronous success resolves the SDK homeserver url and closes the client and builders`() {

@@ -25,7 +25,7 @@ class MatrixAuthSessionImplTest {
 
 	@Test
 	fun `resolved homeserver login and logout drive state and close SDK client`() {
-		val client = ReflectiveMatrixHomeserverDiscoveryClient()
+		val client = newSessionClient()
 		val session = MatrixAuthSessionImpl(client, client)
 
 		session.start()
@@ -85,7 +85,7 @@ class MatrixAuthSessionImplTest {
 	fun `successful login persists so a fresh session instance restores without re-authenticating`() {
 		val storeConfiguration = fakeStoreConfiguration()
 		val provider = FakeStoreConfigurationProvider(storeConfiguration)
-		val client = ReflectiveMatrixHomeserverDiscoveryClient()
+		val client = newSessionClient()
 		val session = MatrixAuthSessionImpl(client, client, provider)
 
 		session.start()
@@ -95,7 +95,7 @@ class MatrixAuthSessionImplTest {
 		session.close()
 		assertEquals(MatrixAuthState.CLOSED, session.getSnapshot().authState)
 
-		val freshClient = ReflectiveMatrixHomeserverDiscoveryClient()
+		val freshClient = newSessionClient()
 		val freshSession = MatrixAuthSessionImpl(freshClient, freshClient, provider)
 		freshSession.start()
 
@@ -108,7 +108,7 @@ class MatrixAuthSessionImplTest {
 	fun `logout invalidates the persisted session for a fresh instance`() {
 		val storeConfiguration = fakeStoreConfiguration()
 		val provider = FakeStoreConfigurationProvider(storeConfiguration)
-		val client = ReflectiveMatrixHomeserverDiscoveryClient()
+		val client = newSessionClient()
 		val session = MatrixAuthSessionImpl(client, client, provider)
 		session.start()
 		session.submitHomeserver("matrix.invalid")
@@ -117,7 +117,7 @@ class MatrixAuthSessionImplTest {
 		session.logout()
 		assertEquals(MatrixAuthState.HOMESERVER_ENTRY, session.getSnapshot().authState)
 
-		val freshClient = ReflectiveMatrixHomeserverDiscoveryClient()
+		val freshClient = newSessionClient()
 		val freshSession = MatrixAuthSessionImpl(freshClient, freshClient, provider)
 		freshSession.start()
 
@@ -128,7 +128,7 @@ class MatrixAuthSessionImplTest {
 	fun `close never persists nor clears a session so a fresh instance stays at homeserver entry`() {
 		val storeConfiguration = fakeStoreConfiguration()
 		val provider = FakeStoreConfigurationProvider(storeConfiguration)
-		val client = ReflectiveMatrixHomeserverDiscoveryClient()
+		val client = newSessionClient()
 		val session = MatrixAuthSessionImpl(client, client, provider)
 
 		session.start()
@@ -145,6 +145,11 @@ class MatrixAuthSessionImplTest {
 		"matrix-sdk",
 		ByteArray(32) { it.toByte() },
 	)
+
+	private fun newSessionClient(): ReflectiveMatrixHomeserverDiscoveryClient =
+		ReflectiveMatrixHomeserverDiscoveryClient(
+			sessionDelegateFactory = DirectMatrixClientSessionDelegateFactory(),
+		)
 
 	private class FakeStoreConfigurationProvider(private val configuration: MatrixStoreConfiguration) :
 		MatrixStoreConfigurationProvider {

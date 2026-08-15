@@ -207,6 +207,12 @@ android {
 			}
 		}
 	}
+	if (matrixConnectorEnabled) {
+		sourceSets.main.java.srcDirs += ['src/matrix/kotlin']
+	} else {
+		// Compile the same direct bridge against the same-FQN SDK fake in default-off tests.
+		sourceSets.test.java.srcDirs += ['src/matrix/kotlin']
+	}
 
 	compileOptions {
 		sourceCompatibility JavaVersion.VERSION_17

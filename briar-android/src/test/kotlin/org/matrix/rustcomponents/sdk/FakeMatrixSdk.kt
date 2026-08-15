@@ -52,10 +52,8 @@ class Session(
  * Mirrors the pinned SDK's `ClientSessionDelegate`: the app-supplied keychain bridge the SDK
  * calls back into whenever it saves or looks up a `Session`, in particular after an internal
  * token refresh. `retrieveSessionFromKeychain` returns a `@NotNull Session` with no declared
- * `throws` clause in the pinned AAR's bytecode, so a `Proxy`-based delegate that throws
- * `ClientException` here has it wrapped into `UndeclaredThrowableException` by the JDK, not
- * delivered as `ClientException` itself; see `ReflectiveMatrixHomeserverDiscoveryClient`'s
- * `SessionDelegateInvocationHandler` docs for the resulting fail-closed behavior.
+ * `throws` clause in the pinned AAR's bytecode. Harbor's delegate implements this interface
+ * directly so a thrown [ClientException] reaches the SDK without a dynamic-proxy wrapper.
  */
 interface ClientSessionDelegate {
 	fun retrieveSessionFromKeychain(userId: String): Session
