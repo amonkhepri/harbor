@@ -29,7 +29,8 @@ import kotlin.coroutines.EmptyCoroutineContext
 import kotlin.coroutines.intrinsics.COROUTINE_SUSPENDED
 
 /**
- * Production [MatrixHomeserverDiscoveryClient] and [MatrixLoginClient] that invoke the pinned
+ * Production [MatrixHomeserverDiscoveryClient], [MatrixLoginClient], and
+ * [MatrixRoomSnapshotClient] that invoke the pinned
  * `org.matrix.rustcomponents:sdk-android` `ClientBuilder.serverName(...).build()`
  * discovery path entirely over reflection, so `:briar-matrix` keeps zero
  * compile-time dependency on the SDK (see this module's `build.gradle` and
@@ -61,7 +62,8 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 	private val discoveryTimeoutMs: Long = 30_000L,
 	private val sessionDelegateFactory: MatrixClientSessionDelegateFactory? = null,
 ) : MatrixHomeserverDiscoveryClient,
-	MatrixLoginClient {
+	MatrixLoginClient,
+	MatrixRoomSnapshotClient {
 
 	private var loginClient: Any? = null
 
@@ -431,6 +433,55 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 
 	private fun sessionFile(storeConfiguration: MatrixStoreConfiguration): File =
 		File(storeConfiguration.directory, "session")
+
+	/**
+	 * Reads the retained client's joined, non-space rooms via the pinned AAR's
+	 * synchronous `Client.rooms(): List<Room>`, filters to
+	 * `Membership.JOINED`, sorts by room id for deterministic ordering (no
+	 * timeline data is read at this slice), and closes every `Room` handle
+	 * `rooms()` returns regardless of whether [limit] keeps it. Never logs
+	 * room ids or names.
+	 */
+	@Synchronized
+	override fun getJoinedRooms(limit: Int): List<MatrixRoomSnapshot> {
+		val client = loginClient ?: return emptyList()
+		return try {
+			@Suppress("UNCHECKED_CAST")
+			val rooms = client.javaClass.getMethod("rooms").invoke(client) as List<Any>
+			rooms.mapNotNull(::toJoinedRoomSnapshot)
+				.sortedBy { it.roomId }
+				.take(limit.coerceAtLeast(0))
+		} catch (e: InvocationTargetException) {
+			emptyList()
+		} catch (e: ReflectiveOperationException) {
+			emptyList()
+		} catch (e: LinkageError) {
+			emptyList()
+		}
+	}
+
+	private fun toJoinedRoomSnapshot(room: Any): MatrixRoomSnapshot? = try {
+		val roomClass = room.javaClass
+		val isSpace = roomClass.getMethod("isSpace").invoke(room) as Boolean
+		val membership = roomClass.getMethod("membership").invoke(room)
+		val isJoined = (membership as? Enum<*>)?.name == "JOINED"
+		if (isSpace || !isJoined) {
+			null
+		} else {
+			val id = roomClass.getMethod("id").invoke(room) as String
+			val displayName = (roomClass.getMethod("displayName").invoke(room) as? String)
+				?.takeIf { it.isNotEmpty() } ?: id
+			MatrixRoomSnapshot(id, displayName)
+		}
+	} catch (e: InvocationTargetException) {
+		null
+	} catch (e: ReflectiveOperationException) {
+		null
+	} catch (e: LinkageError) {
+		null
+	} finally {
+		closeQuietly(room)
+	}
 
 	@Synchronized
 	override fun logout() {

@@ -16,6 +16,8 @@ import org.junit.rules.TemporaryFolder
 import org.matrix.rustcomponents.sdk.ClientBuildException
 import org.matrix.rustcomponents.sdk.ClientException
 import org.matrix.rustcomponents.sdk.FakeMatrixSdkState
+import org.matrix.rustcomponents.sdk.FakeRoomSpec
+import org.matrix.rustcomponents.sdk.Membership
 import java.io.File
 import java.util.Collections
 import java.util.concurrent.TimeUnit
@@ -268,6 +270,70 @@ class ReflectiveMatrixHomeserverDiscoveryClientTest {
 
 		awaitCondition(timeoutMs = 2_000L) { FakeMatrixSdkState.clientCloseCount == 1 }
 		assertEquals(1, FakeMatrixSdkState.clientCloseCount)
+	}
+
+	@Test
+	fun `getJoinedRooms returns nothing before a session is retained`() {
+		val client = newSessionClient()
+
+		val result = client.getJoinedRooms(10)
+
+		assertEquals(emptyList<Any>(), result)
+	}
+
+	@Test
+	fun `getJoinedRooms filters spaces and non-joined rooms, sorted by room id`() {
+		val client = newSessionClient()
+		client.login("https://matrix.example.org", "alice", "swordfish")
+		FakeMatrixSdkState.roomsToReturn = listOf(
+			FakeRoomSpec(roomId = "!zzz:example.org", displayName = "Zebra"),
+			FakeRoomSpec(roomId = "!aaa:example.org", displayName = "Alpha"),
+			FakeRoomSpec(roomId = "!space:example.org", displayName = "A Space", isSpace = true),
+			FakeRoomSpec(
+				roomId = "!left:example.org",
+				displayName = "Left Room",
+				membership = Membership.LEFT,
+			),
+			FakeRoomSpec(roomId = "!invited:example.org", membership = Membership.INVITED),
+		)
+
+		val result = client.getJoinedRooms(10)
+
+		assertEquals(
+			listOf("!aaa:example.org" to "Alpha", "!zzz:example.org" to "Zebra"),
+			result.map { it.roomId to it.displayName },
+		)
+		assertEquals(
+			"closes every room handle rooms() returns, not just the kept ones",
+			5,
+			FakeMatrixSdkState.roomCloseCount,
+		)
+	}
+
+	@Test
+	fun `getJoinedRooms bounds to the requested limit and rejects a negative limit`() {
+		val client = newSessionClient()
+		client.login("https://matrix.example.org", "alice", "swordfish")
+		FakeMatrixSdkState.roomsToReturn = listOf(
+			FakeRoomSpec(roomId = "!a:example.org"),
+			FakeRoomSpec(roomId = "!b:example.org"),
+			FakeRoomSpec(roomId = "!c:example.org"),
+		)
+
+		assertEquals(2, client.getJoinedRooms(2).size)
+		assertEquals(emptyList<Any>(), client.getJoinedRooms(-1))
+	}
+
+	@Test
+	fun `getJoinedRooms falls back to the room id when the SDK reports no display name`() {
+		val client = newSessionClient()
+		client.login("https://matrix.example.org", "alice", "swordfish")
+		FakeMatrixSdkState.roomsToReturn =
+			listOf(FakeRoomSpec(roomId = "!noname:example.org", displayName = null))
+
+		val result = client.getJoinedRooms(10)
+
+		assertEquals("!noname:example.org", result.single().displayName)
 	}
 
 	/** Polls until [condition] holds or [timeoutMs] elapses, for asserting on the fake's background completion thread. */

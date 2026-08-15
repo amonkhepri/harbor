@@ -38,6 +38,24 @@ sealed class ClientException(message: String) : Exception(message) {
 
 enum class SlidingSyncVersion { NONE, NATIVE }
 
+enum class Membership { INVITED, JOINED, LEFT, KNOCKED, BANNED }
+
+/** Mirrors the pinned AAR's real shape: synchronous `id()`/`displayName()`/`isSpace()`/`membership()`. */
+class Room(
+	private val roomId: String,
+	private val roomDisplayName: String?,
+	private val space: Boolean,
+	private val roomMembership: Membership,
+) {
+	fun id(): String = roomId
+	fun displayName(): String? = roomDisplayName
+	fun isSpace(): Boolean = space
+	fun membership(): Membership = roomMembership
+	fun close() {
+		FakeMatrixSdkState.roomCloseCount++
+	}
+}
+
 class Session(
 	val accessToken: String,
 	val refreshToken: String?,
@@ -70,6 +88,11 @@ class Client internal constructor(
 
 	/** Throws like the real SDK until a session exists from [login] or [restoreSession]. */
 	fun session(): Session = session ?: throw ClientException.Generic("no session", "no session")
+
+	/** Mirrors the pinned AAR's real shape: synchronous, returns a fresh `Room` handle per call. */
+	fun rooms(): List<Room> = FakeMatrixSdkState.roomsToReturn.map { fake ->
+		Room(fake.roomId, fake.displayName, fake.isSpace, fake.membership)
+	}
 
 	suspend fun login(
 		username: String,
@@ -213,6 +236,14 @@ class SqliteStoreBuilder(dataPath: String, cachePath: String) : AutoCloseable {
 	}
 }
 
+/** Spec for a fake `Room` [Client.rooms] returns; kept separate from [Room] so tests set up input plainly. */
+data class FakeRoomSpec(
+	val roomId: String,
+	val displayName: String? = null,
+	val isSpace: Boolean = false,
+	val membership: Membership = Membership.JOINED,
+)
+
 object FakeMatrixSdkState {
 	var lastServerName: String? = null
 	var inMemoryStoreCalled = false
@@ -236,6 +267,8 @@ object FakeMatrixSdkState {
 	var tokenRefreshCallCount = 0
 	var lastSessionDelegate: ClientSessionDelegate? = null
 	var lastBuiltClient: Client? = null
+	var roomsToReturn: List<FakeRoomSpec> = emptyList()
+	var roomCloseCount = 0
 
 	fun reset() {
 		lastServerName = null
@@ -260,5 +293,7 @@ object FakeMatrixSdkState {
 		tokenRefreshCallCount = 0
 		lastSessionDelegate = null
 		lastBuiltClient = null
+		roomsToReturn = emptyList()
+		roomCloseCount = 0
 	}
 }

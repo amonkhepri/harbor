@@ -6,6 +6,7 @@ import org.briarproject.bramble.api.FeatureFlags
 import org.briarproject.bramble.api.db.DatabaseConfig
 import org.briarproject.bramble.api.lifecycle.LifecycleManager
 import org.briarproject.briar.api.connector.ConnectorRegistry
+import org.briarproject.briar.api.matrix.MatrixConnector
 import org.briarproject.briar.api.telegram.TelegramAuthSession
 import org.briarproject.briar.api.telegram.TelegramConnector
 import java.io.File
@@ -51,10 +52,12 @@ class TelegramModule {
 
 	@Provides
 	@Singleton
-	fun provideConnectorRegistry(telegramConnector: TelegramConnector): ConnectorRegistry =
-		object : ConnectorRegistry {
-			override val connectors = listOf(telegramConnector)
-		}
+	fun provideConnectorRegistry(
+		telegramConnector: TelegramConnector,
+		matrixConnector: MatrixConnector,
+	): ConnectorRegistry = object : ConnectorRegistry {
+		override val connectors = listOf(telegramConnector, matrixConnector)
+	}
 
 	@Provides
 	@Singleton
