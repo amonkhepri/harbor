@@ -6,11 +6,18 @@ import org.briarproject.briar.api.matrix.MatrixAuthSession.Snapshot
 import org.briarproject.briar.api.matrix.MatrixAuthState
 import org.briarproject.briar.api.matrix.MatrixHomeserverDiscoveryClient
 import org.briarproject.briar.api.matrix.MatrixHomeserverDiscoveryClient.DiscoveryResult
+import org.briarproject.briar.matrix.MatrixLoginClient.RestoreResult
 
-/** In-memory Matrix password-auth state machine. Session persistence is intentionally deferred. */
+/**
+ * Matrix password-auth state machine. When [storeConfigurationProvider] supplies a
+ * [MatrixStoreConfiguration], a successful login persists to that store's directory so
+ * [start] on a fresh instance resumes without re-authenticating; logout invalidates it.
+ * `close()` is process/session teardown only and never touches the persisted store.
+ */
 class MatrixAuthSessionImpl(
 	private val discoveryClient: MatrixHomeserverDiscoveryClient,
 	private val loginClient: MatrixLoginClient,
+	private val storeConfigurationProvider: MatrixStoreConfigurationProvider? = null,
 ) : MatrixAuthSession {
 
 	private var snapshot = CLOSED_SNAPSHOT
@@ -20,7 +27,17 @@ class MatrixAuthSessionImpl(
 
 	@Synchronized
 	override fun start() {
-		if (snapshot.authState == MatrixAuthState.CLOSED) snapshot = HOMESERVER_SNAPSHOT
+		if (snapshot.authState != MatrixAuthState.CLOSED) return
+		val storeConfiguration = storeConfigurationProvider?.getStoreConfiguration()
+		snapshot = if (storeConfiguration == null) {
+			HOMESERVER_SNAPSHOT
+		} else {
+			when (val result = loginClient.restore(storeConfiguration)) {
+				is RestoreResult.Restored -> Snapshot(MatrixAuthState.READY, NONE, result.homeserverUrl)
+				is RestoreResult.NotFound -> HOMESERVER_SNAPSHOT
+				is RestoreResult.Failed -> Snapshot(MatrixAuthState.RECOVERABLE_ERROR, result.detail)
+			}
+		}
 	}
 
 	@Synchronized
@@ -46,7 +63,8 @@ class MatrixAuthSessionImpl(
 		) {
 			return
 		}
-		val result = loginClient.login(homeserverUrl, username, password)
+		val storeConfiguration = storeConfigurationProvider?.getStoreConfiguration()
+		val result = loginClient.login(homeserverUrl, username, password, storeConfiguration)
 		snapshot = if (result == NONE) {
 			Snapshot(MatrixAuthState.READY, NONE, homeserverUrl)
 		} else {
@@ -60,6 +78,7 @@ class MatrixAuthSessionImpl(
 			loginClient.logout()
 		} finally {
 			loginClient.close()
+			storeConfigurationProvider?.getStoreConfiguration()?.let { it.directory.deleteRecursively() }
 			snapshot = HOMESERVER_SNAPSHOT
 		}
 	}

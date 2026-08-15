@@ -10,10 +10,15 @@ import org.briarproject.briar.api.matrix.MatrixHomeserverDiscoveryClient.Discove
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.TemporaryFolder
 import org.matrix.rustcomponents.sdk.FakeMatrixSdkState
 
 class MatrixAuthSessionImplTest {
+
+	@get:Rule
+	val testFolder = TemporaryFolder()
 
 	@After
 	fun tearDown() = FakeMatrixSdkState.reset()
@@ -76,6 +81,76 @@ class MatrixAuthSessionImplTest {
 		assertEquals(1, loginClient.closeCount)
 	}
 
+	@Test
+	fun `successful login persists so a fresh session instance restores without re-authenticating`() {
+		val storeConfiguration = fakeStoreConfiguration()
+		val provider = FakeStoreConfigurationProvider(storeConfiguration)
+		val client = ReflectiveMatrixHomeserverDiscoveryClient()
+		val session = MatrixAuthSessionImpl(client, client, provider)
+
+		session.start()
+		session.submitHomeserver("matrix.invalid")
+		session.submitCredentials("alice", "swordfish")
+		assertEquals(MatrixAuthState.READY, session.getSnapshot().authState)
+		session.close()
+		assertEquals(MatrixAuthState.CLOSED, session.getSnapshot().authState)
+
+		val freshClient = ReflectiveMatrixHomeserverDiscoveryClient()
+		val freshSession = MatrixAuthSessionImpl(freshClient, freshClient, provider)
+		freshSession.start()
+
+		val snapshot = freshSession.getSnapshot()
+		assertEquals(MatrixAuthState.READY, snapshot.authState)
+		assertEquals("https://matrix.example.org", snapshot.homeserverUrl)
+	}
+
+	@Test
+	fun `logout invalidates the persisted session for a fresh instance`() {
+		val storeConfiguration = fakeStoreConfiguration()
+		val provider = FakeStoreConfigurationProvider(storeConfiguration)
+		val client = ReflectiveMatrixHomeserverDiscoveryClient()
+		val session = MatrixAuthSessionImpl(client, client, provider)
+		session.start()
+		session.submitHomeserver("matrix.invalid")
+		session.submitCredentials("alice", "swordfish")
+
+		session.logout()
+		assertEquals(MatrixAuthState.HOMESERVER_ENTRY, session.getSnapshot().authState)
+
+		val freshClient = ReflectiveMatrixHomeserverDiscoveryClient()
+		val freshSession = MatrixAuthSessionImpl(freshClient, freshClient, provider)
+		freshSession.start()
+
+		assertEquals(MatrixAuthState.HOMESERVER_ENTRY, freshSession.getSnapshot().authState)
+	}
+
+	@Test
+	fun `close never persists nor clears a session so a fresh instance stays at homeserver entry`() {
+		val storeConfiguration = fakeStoreConfiguration()
+		val provider = FakeStoreConfigurationProvider(storeConfiguration)
+		val client = ReflectiveMatrixHomeserverDiscoveryClient()
+		val session = MatrixAuthSessionImpl(client, client, provider)
+
+		session.start()
+		session.close()
+
+		val freshSession = MatrixAuthSessionImpl(client, client, provider)
+		freshSession.start()
+
+		assertEquals(MatrixAuthState.HOMESERVER_ENTRY, freshSession.getSnapshot().authState)
+	}
+
+	private fun fakeStoreConfiguration(): MatrixStoreConfiguration = MatrixStoreConfiguration(
+		testFolder.newFolder("matrix-sdk"),
+		"matrix-sdk",
+		ByteArray(32) { it.toByte() },
+	)
+
+	private class FakeStoreConfigurationProvider(private val configuration: MatrixStoreConfiguration) :
+		MatrixStoreConfigurationProvider {
+		override fun getStoreConfiguration(): MatrixStoreConfiguration = configuration
+	}
+
 	private class FakeDiscoveryClient(private val result: DiscoveryResult) :
 		MatrixHomeserverDiscoveryClient {
 		override fun discover(serverName: String): DiscoveryResult = result
@@ -84,8 +159,14 @@ class MatrixAuthSessionImplTest {
 	private class FakeLoginClient(private val result: RecoverableErrorDetail) : MatrixLoginClient {
 		var loginCount = 0
 		var closeCount = 0
-		override fun login(homeserverUrl: String, username: String, password: String) =
-			result.also { loginCount++ }
+		override fun login(
+			homeserverUrl: String,
+			username: String,
+			password: String,
+			storeConfiguration: MatrixStoreConfiguration?,
+		) = result.also { loginCount++ }
+		override fun restore(storeConfiguration: MatrixStoreConfiguration) =
+			MatrixLoginClient.RestoreResult.NotFound
 		override fun logout() = Unit
 		override fun close() {
 			closeCount++

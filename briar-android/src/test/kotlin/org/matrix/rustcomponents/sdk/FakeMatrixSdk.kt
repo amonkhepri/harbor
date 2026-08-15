@@ -18,8 +18,15 @@ sealed class ClientBuildException(message: String) : Exception(message) {
 	class Generic : ClientBuildException("generic failure")
 }
 
-class Client internal constructor(private val homeserverUrl: String?) {
+class Client internal constructor(
+	private val homeserverUrl: String?,
+	private val storePath: String? = null,
+) {
 	fun homeserver(): String? = homeserverUrl
+
+	/** Non-null once [login] has persisted to [storePath]; mirrors the real SDK's restore check. */
+	fun session(): Any? = storePath?.takeIf { FakeMatrixSdkState.isPersisted(it) }
+
 	suspend fun login(
 		username: String,
 		password: String,
@@ -27,9 +34,11 @@ class Client internal constructor(private val homeserverUrl: String?) {
 		deviceId: String?,
 	) {
 		FakeMatrixSdkState.loginCallCount++
+		storePath?.let { FakeMatrixSdkState.markPersisted(it) }
 	}
 	suspend fun logout() {
 		FakeMatrixSdkState.logoutCallCount++
+		storePath?.let { FakeMatrixSdkState.clearPersisted(it) }
 	}
 	fun close() {
 		FakeMatrixSdkState.clientCloseCount++
@@ -51,11 +60,23 @@ class ClientBuilder : AutoCloseable {
 
 	fun inMemoryStore(): ClientBuilder {
 		FakeMatrixSdkState.inMemoryStoreCalled = true
+		FakeMatrixSdkState.lastSqlitePath = null
 		return ClientBuilder()
 	}
 
 	fun homeserverUrl(homeserverUrl: String): ClientBuilder {
 		FakeMatrixSdkState.lastHomeserverUrl = homeserverUrl
+		return ClientBuilder()
+	}
+
+	fun sqlitePath(path: String): ClientBuilder {
+		FakeMatrixSdkState.lastSqlitePath = path
+		FakeMatrixSdkState.inMemoryStoreCalled = false
+		return ClientBuilder()
+	}
+
+	fun passphrase(passphrase: String): ClientBuilder {
+		FakeMatrixSdkState.lastPassphrase = passphrase
 		return ClientBuilder()
 	}
 
@@ -68,9 +89,15 @@ class ClientBuilder : AutoCloseable {
 		FakeMatrixSdkState.failureToThrow?.let { failure ->
 			if (!FakeMatrixSdkState.failAsynchronously) throw failure
 		}
+		// A build only carries a persistent store path when inMemoryStore() was not
+		// called, mirroring the reflective client's mutually exclusive builder calls.
+		val storePath = FakeMatrixSdkState.lastSqlitePath.takeUnless {
+			FakeMatrixSdkState.inMemoryStoreCalled
+		}
 		if (!FakeMatrixSdkState.suspendAsynchronously) {
 			return Client(
 				FakeMatrixSdkState.homeserverUrlToReturn,
+				storePath,
 			)
 		}
 		return suspendCoroutine { continuation ->
@@ -80,7 +107,7 @@ class ClientBuilder : AutoCloseable {
 				if (asyncFailure != null && FakeMatrixSdkState.failAsynchronously) {
 					continuation.resumeWithException(asyncFailure)
 				} else {
-					continuation.resume(Client(FakeMatrixSdkState.homeserverUrlToReturn))
+					continuation.resume(Client(FakeMatrixSdkState.homeserverUrlToReturn, storePath))
 				}
 			}.start()
 		}
@@ -99,8 +126,20 @@ object FakeMatrixSdkState {
 	var clientCloseCount = 0
 	var builderCloseCount = 0
 	var lastHomeserverUrl: String? = null
+	var lastSqlitePath: String? = null
+	var lastPassphrase: String? = null
 	var loginCallCount = 0
 	var logoutCallCount = 0
+
+	private val persistedStorePaths = mutableSetOf<String>()
+
+	fun isPersisted(storePath: String): Boolean = storePath in persistedStorePaths
+	fun markPersisted(storePath: String) {
+		persistedStorePaths.add(storePath)
+	}
+	fun clearPersisted(storePath: String) {
+		persistedStorePaths.remove(storePath)
+	}
 
 	fun reset() {
 		lastServerName = null
@@ -114,7 +153,10 @@ object FakeMatrixSdkState {
 		clientCloseCount = 0
 		builderCloseCount = 0
 		lastHomeserverUrl = null
+		lastSqlitePath = null
+		lastPassphrase = null
 		loginCallCount = 0
 		logoutCallCount = 0
+		persistedStorePaths.clear()
 	}
 }

@@ -78,8 +78,9 @@ class ReflectiveMatrixHomeserverDiscoveryClient(private val discoveryTimeoutMs: 
 		homeserverUrl: String,
 		username: String,
 		password: String,
+		storeConfiguration: MatrixStoreConfiguration?,
 	): RecoverableErrorDetail {
-		val builders = ArrayList<Any>(3)
+		val builders = ArrayList<Any>(4)
 		var client: Any? = null
 		return try {
 			val builderClass = Class.forName(CLIENT_BUILDER_CLASS_NAME)
@@ -88,7 +89,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(private val discoveryTimeoutMs: 
 				builders,
 				builderClass.getMethod("homeserverUrl", String::class.java).invoke(builder, homeserverUrl),
 			)
-			builder = track(builders, builderClass.getMethod("inMemoryStore").invoke(builder))
+			builder = track(builders, applyStore(builders, builder, builderClass, storeConfiguration))
 			client = buildClient(builder, builderClass)
 			invokeUnit(
 				client,
@@ -116,6 +117,71 @@ class ReflectiveMatrixHomeserverDiscoveryClient(private val discoveryTimeoutMs: 
 			for (i in builders.indices.reversed()) closeQuietly(builders[i])
 		}
 	}
+
+	/**
+	 * Builds against [storeConfiguration]'s persistent store and asks the SDK
+	 * whether that store already holds a session (`Client.session()` returns
+	 * non-null). An empty/fresh store yields [RestoreResult.NotFound], not a
+	 * failure.
+	 */
+	@Synchronized
+	override fun restore(
+		storeConfiguration: MatrixStoreConfiguration,
+	): MatrixLoginClient.RestoreResult {
+		val builders = ArrayList<Any>(3)
+		var client: Any? = null
+		return try {
+			val builderClass = Class.forName(CLIENT_BUILDER_CLASS_NAME)
+			var builder = track(builders, builderClass.getConstructor().newInstance())
+			builder = track(builders, applyStore(builders, builder, builderClass, storeConfiguration))
+			client = buildClient(builder, builderClass)
+			val session = client.javaClass.getMethod("session").invoke(client)
+			if (session == null) {
+				MatrixLoginClient.RestoreResult.NotFound
+			} else {
+				val restored = client
+				val homeserverUrl = readHomeserverUrl(restored)
+				loginClient = restored
+				client = null
+				MatrixLoginClient.RestoreResult.Restored(homeserverUrl)
+			}
+		} catch (e: DiscoveryAdapterFailure) {
+			MatrixLoginClient.RestoreResult.NotFound
+		} catch (e: InvocationTargetException) {
+			MatrixLoginClient.RestoreResult.Failed(mapThrowable(e.targetException ?: e))
+		} catch (e: ReflectiveOperationException) {
+			MatrixLoginClient.RestoreResult.NotFound
+		} catch (e: LinkageError) {
+			MatrixLoginClient.RestoreResult.NotFound
+		} catch (e: InterruptedException) {
+			Thread.currentThread().interrupt()
+			MatrixLoginClient.RestoreResult.NotFound
+		} finally {
+			closeQuietly(client)
+			for (i in builders.indices.reversed()) closeQuietly(builders[i])
+		}
+	}
+
+	/** Applies [storeConfiguration] to [builder], tracking every wrapper it returns. */
+	private fun applyStore(
+		builders: MutableList<Any>,
+		builder: Any,
+		builderClass: Class<*>,
+		storeConfiguration: MatrixStoreConfiguration?,
+	): Any {
+		if (storeConfiguration == null) {
+			return builderClass.getMethod("inMemoryStore").invoke(builder)
+		}
+		val withPath = track(
+			builders,
+			builderClass.getMethod("sqlitePath", String::class.java)
+				.invoke(builder, storeConfiguration.directory.absolutePath),
+		)
+		return builderClass.getMethod("passphrase", String::class.java)
+			.invoke(withPath, encodeHex(storeConfiguration.copyEncryptionKey()))
+	}
+
+	private fun encodeHex(bytes: ByteArray): String = bytes.joinToString("") { "%02x".format(it) }
 
 	@Synchronized
 	override fun logout() {
