@@ -7,17 +7,27 @@ import org.briarproject.briar.api.matrix.MatrixAuthSession.RecoverableErrorDetai
 import org.briarproject.briar.api.matrix.MatrixAuthSession.RecoverableErrorDetail.NONE
 import org.briarproject.briar.api.matrix.MatrixHomeserverDiscoveryClient
 import org.briarproject.briar.api.matrix.MatrixHomeserverDiscoveryClient.DiscoveryResult
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
 import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.io.File
-import java.io.FileInputStream
-import java.io.FileOutputStream
 import java.io.IOException
+import java.lang.reflect.InvocationHandler
 import java.lang.reflect.InvocationTargetException
+import java.lang.reflect.Method
+import java.lang.reflect.Proxy
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
+import java.security.GeneralSecurityException
+import java.security.SecureRandom
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
+import javax.crypto.Cipher
+import javax.crypto.spec.GCMParameterSpec
+import javax.crypto.spec.SecretKeySpec
 import kotlin.coroutines.Continuation
 import kotlin.coroutines.CoroutineContext
 import kotlin.coroutines.EmptyCoroutineContext
@@ -41,9 +51,16 @@ import kotlin.coroutines.intrinsics.COROUTINE_SUSPENDED
  * `Client.session()` is non-nullable and only meaningful right after a
  * successful `login()`, so a fresh instance cannot detect a prior login by
  * calling it; instead a successful [login] serializes the SDK's `Session`
- * fields into a sidecar file inside the store directory, and [restore] feeds
- * that `Session` back through the explicit `Client.restoreSession(Session,
- * Continuation)` API on a freshly built client pointed at the same store.
+ * fields, AES-256-GCM-encrypts them under the store's own encryption key, and
+ * writes them atomically (temp file + rename) into a sidecar file inside the
+ * store directory. [restore] decrypts that sidecar and feeds the `Session`
+ * back through the explicit `Client.restoreSession(Session, Continuation)`
+ * API on a freshly built client pointed at the same store. Both [login] and
+ * [restore] also install a `ClientSessionDelegate` (via
+ * `ClientBuilder.setSessionDelegate`) built with [Proxy], so a token refresh
+ * the SDK performs internally after either call drives the delegate's
+ * `saveSessionInKeychain` callback and rewrites the same encrypted sidecar,
+ * keeping persisted tokens current instead of frozen at login/restore time.
  */
 class ReflectiveMatrixHomeserverDiscoveryClient(private val discoveryTimeoutMs: Long = 30_000L) :
 	MatrixHomeserverDiscoveryClient,
@@ -106,6 +123,9 @@ class ReflectiveMatrixHomeserverDiscoveryClient(private val discoveryTimeoutMs: 
 				builderClass.getMethod("homeserverUrl", String::class.java).invoke(builder, homeserverUrl),
 			)
 			builder = track(builders, applyStore(builders, builder, builderClass, storeConfiguration))
+			if (storeConfiguration != null) {
+				builder = track(builders, installSessionDelegate(builder, builderClass, storeConfiguration))
+			}
 			client = buildClient(builder, builderClass)
 			invokeUnit(
 				client,
@@ -152,7 +172,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(private val discoveryTimeoutMs: 
 		var client: Any? = null
 		return try {
 			val sessionClass = Class.forName(SESSION_CLASS_NAME)
-			val session = readSessionFile(file, sessionClass)
+			val session = readSessionFile(file, sessionClass, storeConfiguration)
 			val builderClass = Class.forName(CLIENT_BUILDER_CLASS_NAME)
 			var builder = track(builders, builderClass.getConstructor().newInstance())
 			builder = track(
@@ -161,6 +181,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(private val discoveryTimeoutMs: 
 					.invoke(builder, sessionClass.getMethod("getHomeserverUrl").invoke(session)),
 			)
 			builder = track(builders, applyStore(builders, builder, builderClass, storeConfiguration))
+			builder = track(builders, installSessionDelegate(builder, builderClass, storeConfiguration))
 			client = buildClient(builder, builderClass)
 			invokeUnit(client, "restoreSession", arrayOf(sessionClass), arrayOf(session))
 			val homeserverUrl = readHomeserverUrl(client)
@@ -225,11 +246,82 @@ class ReflectiveMatrixHomeserverDiscoveryClient(private val discoveryTimeoutMs: 
 	/** Reads [client]'s post-login `Session` and persists it to [storeConfiguration]'s sidecar file. */
 	private fun persistSession(client: Any, storeConfiguration: MatrixStoreConfiguration) {
 		val session = client.javaClass.getMethod("session").invoke(client)
-		writeSessionFile(sessionFile(storeConfiguration), session)
+		writeSessionFile(sessionFile(storeConfiguration), session, storeConfiguration)
 	}
 
-	/** Serializes an SDK `Session`'s fields via its public getters; never logs their values. */
-	private fun writeSessionFile(file: File, session: Any) {
+	/**
+	 * Installs a [Proxy]-backed `ClientSessionDelegate` on [builder] via the pinned SDK's
+	 * `ClientBuilder.setSessionDelegate(ClientSessionDelegate)` so a later internal token
+	 * refresh routes through `saveSessionInKeychain` and lands in the same encrypted sidecar
+	 * [login]/[restore] write, instead of only ever persisting the token captured at login time.
+	 */
+	private fun installSessionDelegate(
+		builder: Any,
+		builderClass: Class<*>,
+		storeConfiguration: MatrixStoreConfiguration,
+	): Any {
+		val delegateClass = Class.forName(SESSION_DELEGATE_CLASS_NAME)
+		val delegate = Proxy.newProxyInstance(
+			delegateClass.classLoader,
+			arrayOf(delegateClass),
+			SessionDelegateInvocationHandler(storeConfiguration),
+		)
+		return builderClass.getMethod("setSessionDelegate", delegateClass).invoke(builder, delegate)
+	}
+
+	/**
+	 * Backs the reflective `ClientSessionDelegate` proxy: `saveSessionInKeychain` rewrites the
+	 * encrypted sidecar with the SDK's latest `Session` (e.g. after a refresh);
+	 * `retrieveSessionFromKeychain` best-effort round-trips it back, failing closed to `null` on
+	 * any decrypt/format error since the delegate crosses into native SDK code that this adapter
+	 * does not control.
+	 */
+	private inner class SessionDelegateInvocationHandler(
+		private val storeConfiguration: MatrixStoreConfiguration,
+	) : InvocationHandler {
+		override fun invoke(proxy: Any, method: Method, args: Array<out Any?>?): Any? =
+			when (method.name) {
+				"saveSessionInKeychain" -> {
+					val session = args?.getOrNull(0)
+					if (session !=
+						null
+					) {
+						writeSessionFile(sessionFile(storeConfiguration), session, storeConfiguration)
+					}
+					null
+				}
+				"retrieveSessionFromKeychain" -> readSessionFileOrNull(storeConfiguration)
+				"equals" -> proxy === args?.getOrNull(0)
+				"hashCode" -> System.identityHashCode(proxy)
+				"toString" -> "MatrixClientSessionDelegate"
+				else -> null
+			}
+	}
+
+	private fun readSessionFileOrNull(storeConfiguration: MatrixStoreConfiguration): Any? {
+		val file = sessionFile(storeConfiguration)
+		if (!file.isFile) return null
+		return try {
+			readSessionFile(file, Class.forName(SESSION_CLASS_NAME), storeConfiguration)
+		} catch (e: IOException) {
+			null
+		} catch (e: ReflectiveOperationException) {
+			null
+		}
+	}
+
+	/**
+	 * Serializes an SDK `Session`'s fields via its public getters, AES-256-GCM-encrypts them
+	 * under [storeConfiguration]'s own encryption key, and writes the result atomically (temp
+	 * file in the same directory + [Files.move] with `ATOMIC_MOVE`) so a crash or concurrent
+	 * `saveSessionInKeychain` callback can never observe a partially written or plaintext file.
+	 * Never logs field values.
+	 */
+	private fun writeSessionFile(
+		file: File,
+		session: Any,
+		storeConfiguration: MatrixStoreConfiguration,
+	) {
 		val sessionClass = session.javaClass
 		val accessToken = sessionClass.getMethod("getAccessToken").invoke(session) as String
 		val refreshToken = sessionClass.getMethod("getRefreshToken").invoke(session) as String?
@@ -240,20 +332,18 @@ class ReflectiveMatrixHomeserverDiscoveryClient(private val discoveryTimeoutMs: 
 		val slidingSyncVersion = sessionClass.getMethod("getSlidingSyncVersion").invoke(session)
 		val slidingSyncVersionName =
 			slidingSyncVersion.javaClass.getMethod("name").invoke(slidingSyncVersion) as String
-		file.parentFile?.mkdirs()
-		DataOutputStream(FileOutputStream(file)).use { out ->
-			out.writeUTF(accessToken)
-			writeNullableUtf(out, refreshToken)
-			out.writeUTF(userId)
-			out.writeUTF(deviceId)
-			out.writeUTF(homeserverUrl)
-			writeNullableUtf(out, oauthData)
-			out.writeUTF(slidingSyncVersionName)
-		}
-		file.setReadable(false, false)
-		file.setWritable(false, false)
-		file.setReadable(true, true)
-		file.setWritable(true, true)
+		val plaintext = ByteArrayOutputStream().also { buffer ->
+			DataOutputStream(buffer).use { out ->
+				out.writeUTF(accessToken)
+				writeNullableUtf(out, refreshToken)
+				out.writeUTF(userId)
+				out.writeUTF(deviceId)
+				out.writeUTF(homeserverUrl)
+				writeNullableUtf(out, oauthData)
+				out.writeUTF(slidingSyncVersionName)
+			}
+		}.toByteArray()
+		writeEncryptedAtomic(file, plaintext, storeConfiguration)
 	}
 
 	private fun writeNullableUtf(out: DataOutputStream, value: String?) {
@@ -261,9 +351,54 @@ class ReflectiveMatrixHomeserverDiscoveryClient(private val discoveryTimeoutMs: 
 		if (value != null) out.writeUTF(value)
 	}
 
+	private fun writeEncryptedAtomic(
+		file: File,
+		plaintext: ByteArray,
+		storeConfiguration: MatrixStoreConfiguration,
+	) {
+		val key = storeConfiguration.copyEncryptionKey()
+		try {
+			val nonce = ByteArray(GCM_NONCE_LENGTH_BYTES).also { SecureRandom().nextBytes(it) }
+			val cipher = Cipher.getInstance(AEAD_TRANSFORMATION)
+			cipher.init(
+				Cipher.ENCRYPT_MODE,
+				SecretKeySpec(key, "AES"),
+				GCMParameterSpec(GCM_TAG_LENGTH_BITS, nonce),
+			)
+			val ciphertext = cipher.doFinal(plaintext)
+			file.parentFile?.mkdirs()
+			val tempFile = File.createTempFile("session-", ".tmp", file.parentFile)
+			try {
+				tempFile.setReadable(false, false)
+				tempFile.setWritable(false, false)
+				tempFile.setReadable(true, true)
+				tempFile.setWritable(true, true)
+				tempFile.outputStream().use { out ->
+					out.write(nonce)
+					out.write(ciphertext)
+				}
+				Files.move(
+					tempFile.toPath(),
+					file.toPath(),
+					StandardCopyOption.ATOMIC_MOVE,
+					StandardCopyOption.REPLACE_EXISTING,
+				)
+			} finally {
+				tempFile.delete()
+			}
+		} finally {
+			key.fill(0)
+		}
+	}
+
 	/** Reconstructs an SDK `Session` reflectively from [file], matching [writeSessionFile]'s layout. */
-	private fun readSessionFile(file: File, sessionClass: Class<*>): Any =
-		DataInputStream(FileInputStream(file)).use { input ->
+	private fun readSessionFile(
+		file: File,
+		sessionClass: Class<*>,
+		storeConfiguration: MatrixStoreConfiguration,
+	): Any {
+		val plaintext = readDecrypted(file, storeConfiguration)
+		return DataInputStream(ByteArrayInputStream(plaintext)).use { input ->
 			val accessToken = input.readUTF()
 			val refreshToken = readNullableUtf(input)
 			val userId = input.readUTF()
@@ -292,6 +427,31 @@ class ReflectiveMatrixHomeserverDiscoveryClient(private val discoveryTimeoutMs: 
 				slidingSyncVersion,
 			)
 		}
+	}
+
+	private fun readDecrypted(file: File, storeConfiguration: MatrixStoreConfiguration): ByteArray {
+		val bytes = file.readBytes()
+		if (bytes.size <= GCM_NONCE_LENGTH_BYTES) throw IOException("session sidecar too short")
+		val nonce = bytes.copyOfRange(0, GCM_NONCE_LENGTH_BYTES)
+		val ciphertext = bytes.copyOfRange(GCM_NONCE_LENGTH_BYTES, bytes.size)
+		val key = storeConfiguration.copyEncryptionKey()
+		return try {
+			val cipher = Cipher.getInstance(AEAD_TRANSFORMATION)
+			cipher.init(
+				Cipher.DECRYPT_MODE,
+				SecretKeySpec(key, "AES"),
+				GCMParameterSpec(GCM_TAG_LENGTH_BITS, nonce),
+			)
+			cipher.doFinal(ciphertext)
+		} catch (e: GeneralSecurityException) {
+			// Wrong/rotated key, truncated ciphertext, or a tampered/corrupt sidecar all surface
+			// here (including AEADBadTagException); restore()/readSessionFileOrNull() only
+			// handle IOException, not the wider GeneralSecurityException hierarchy.
+			throw IOException("session sidecar failed to decrypt", e)
+		} finally {
+			key.fill(0)
+		}
+	}
 
 	private fun readNullableUtf(input: DataInputStream): String? =
 		if (input.readBoolean()) input.readUTF() else null
@@ -440,6 +600,10 @@ class ReflectiveMatrixHomeserverDiscoveryClient(private val discoveryTimeoutMs: 
 		const val CLIENT_BUILDER_CLASS_NAME = "org.matrix.rustcomponents.sdk.ClientBuilder"
 		const val SQLITE_STORE_BUILDER_CLASS_NAME = "org.matrix.rustcomponents.sdk.SqliteStoreBuilder"
 		const val SESSION_CLASS_NAME = "org.matrix.rustcomponents.sdk.Session"
+		const val SESSION_DELEGATE_CLASS_NAME = "org.matrix.rustcomponents.sdk.ClientSessionDelegate"
 		const val DEVICE_NAME = "Harbor"
+		const val AEAD_TRANSFORMATION = "AES/GCM/NoPadding"
+		const val GCM_NONCE_LENGTH_BYTES = 12
+		const val GCM_TAG_LENGTH_BITS = 128
 	}
 }

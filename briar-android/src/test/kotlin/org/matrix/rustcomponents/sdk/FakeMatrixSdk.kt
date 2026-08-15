@@ -38,7 +38,16 @@ class Session(
 	val slidingSyncVersion: SlidingSyncVersion,
 )
 
-class Client internal constructor(private val homeserverUrl: String?) {
+/** Mirrors the pinned SDK's `ClientSessionDelegate`: the app-supplied keychain bridge the SDK calls back into whenever it saves or looks up a `Session`, in particular after an internal token refresh. */
+interface ClientSessionDelegate {
+	fun retrieveSessionFromKeychain(userId: String): Session
+	fun saveSessionInKeychain(session: Session)
+}
+
+class Client internal constructor(
+	private val homeserverUrl: String?,
+	private val sessionDelegate: ClientSessionDelegate?,
+) {
 	private var session: Session? = null
 
 	fun homeserver(): String? = homeserverUrl
@@ -62,6 +71,7 @@ class Client internal constructor(private val homeserverUrl: String?) {
 			oauthData = null,
 			slidingSyncVersion = SlidingSyncVersion.NATIVE,
 		)
+		sessionDelegate?.saveSessionInKeychain(session!!)
 	}
 
 	suspend fun restoreSession(session: Session) {
@@ -76,6 +86,28 @@ class Client internal constructor(private val homeserverUrl: String?) {
 
 	fun close() {
 		FakeMatrixSdkState.clientCloseCount++
+	}
+
+	/**
+	 * Test-only stand-in for the SDK internally refreshing an expired access token: mirrors what
+	 * a real token refresh does by mutating [session] and driving [sessionDelegate]'s save
+	 * callback, so a production fix that never installs the delegate leaves this update
+	 * unpersisted.
+	 */
+	fun simulateTokenRefresh(newAccessToken: String) {
+		val current = session ?: return
+		val refreshed = Session(
+			accessToken = newAccessToken,
+			refreshToken = current.refreshToken,
+			userId = current.userId,
+			deviceId = current.deviceId,
+			homeserverUrl = current.homeserverUrl,
+			oauthData = current.oauthData,
+			slidingSyncVersion = current.slidingSyncVersion,
+		)
+		session = refreshed
+		FakeMatrixSdkState.tokenRefreshCallCount++
+		sessionDelegate?.saveSessionInKeychain(refreshed)
 	}
 }
 
@@ -109,6 +141,11 @@ class ClientBuilder : AutoCloseable {
 		return ClientBuilder()
 	}
 
+	fun setSessionDelegate(delegate: ClientSessionDelegate): ClientBuilder {
+		FakeMatrixSdkState.lastSessionDelegate = delegate
+		return ClientBuilder()
+	}
+
 	override fun close() {
 		FakeMatrixSdkState.builderCloseCount++
 	}
@@ -119,7 +156,7 @@ class ClientBuilder : AutoCloseable {
 			if (!FakeMatrixSdkState.failAsynchronously) throw failure
 		}
 		if (!FakeMatrixSdkState.suspendAsynchronously) {
-			return Client(FakeMatrixSdkState.homeserverUrlToReturn)
+			return newClient()
 		}
 		return suspendCoroutine { continuation ->
 			Thread {
@@ -128,11 +165,16 @@ class ClientBuilder : AutoCloseable {
 				if (asyncFailure != null && FakeMatrixSdkState.failAsynchronously) {
 					continuation.resumeWithException(asyncFailure)
 				} else {
-					continuation.resume(Client(FakeMatrixSdkState.homeserverUrlToReturn))
+					continuation.resume(newClient())
 				}
 			}.start()
 		}
 	}
+
+	private fun newClient(): Client =
+		Client(FakeMatrixSdkState.homeserverUrlToReturn, FakeMatrixSdkState.lastSessionDelegate).also {
+			FakeMatrixSdkState.lastBuiltClient = it
+		}
 }
 
 /** Mirrors the pinned SDK's `SqliteStoreBuilder`: also `AutoCloseable`, also wrapper-per-call. */
@@ -175,6 +217,9 @@ object FakeMatrixSdkState {
 	var loginCallCount = 0
 	var restoreSessionCallCount = 0
 	var logoutCallCount = 0
+	var tokenRefreshCallCount = 0
+	var lastSessionDelegate: ClientSessionDelegate? = null
+	var lastBuiltClient: Client? = null
 
 	fun reset() {
 		lastServerName = null
@@ -196,5 +241,8 @@ object FakeMatrixSdkState {
 		loginCallCount = 0
 		restoreSessionCallCount = 0
 		logoutCallCount = 0
+		tokenRefreshCallCount = 0
+		lastSessionDelegate = null
+		lastBuiltClient = null
 	}
 }

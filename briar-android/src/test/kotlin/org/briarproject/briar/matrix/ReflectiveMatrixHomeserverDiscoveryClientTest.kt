@@ -2,20 +2,122 @@ package org.briarproject.briar.matrix
 
 import org.briarproject.briar.api.matrix.MatrixAuthSession.RecoverableErrorDetail.HOMESERVER_DISCOVERY_FAILED
 import org.briarproject.briar.api.matrix.MatrixAuthSession.RecoverableErrorDetail.INVALID_HOMESERVER
+import org.briarproject.briar.api.matrix.MatrixAuthSession.RecoverableErrorDetail.NONE
 import org.briarproject.briar.api.matrix.MatrixHomeserverDiscoveryClient.DiscoveryResult
+import org.briarproject.briar.matrix.MatrixLoginClient.RestoreResult
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.TemporaryFolder
 import org.matrix.rustcomponents.sdk.ClientBuildException
 import org.matrix.rustcomponents.sdk.FakeMatrixSdkState
+import java.io.File
+import java.util.Collections
 import java.util.concurrent.TimeUnit
 
 class ReflectiveMatrixHomeserverDiscoveryClientTest {
+
+	@get:Rule
+	val testFolder = TemporaryFolder()
 
 	@After
 	fun tearDown() {
 		FakeMatrixSdkState.reset()
 	}
+
+	@Test
+	fun `login writes an encrypted atomic sidecar with no leftover temp file`() {
+		val storeConfiguration = fakeStoreConfiguration()
+		val client = ReflectiveMatrixHomeserverDiscoveryClient()
+
+		val result = client.login("https://matrix.example.org", "alice", "swordfish", storeConfiguration)
+
+		assertEquals(NONE, result)
+		val sessionFile = File(storeConfiguration.directory, "session")
+		assertTrue(sessionFile.isFile)
+		val siblingFiles = storeConfiguration.directory.listFiles().orEmpty().map { it.name }
+		assertFalse(
+			"no temp file should survive a completed atomic write",
+			siblingFiles.any {
+				it.startsWith("session-") &&
+					it != "session"
+			},
+		)
+		val sidecarBytes = sessionFile.readBytes().toList()
+		val plaintextNeedle = "fake-access-token".toByteArray().toList()
+		assertFalse(
+			"sidecar must not contain the plaintext access token",
+			Collections.indexOfSubList(sidecarBytes, plaintextNeedle) >= 0,
+		)
+	}
+
+	@Test
+	fun `restore after a simulated refresh returns the refreshed token, not the login-time token`() {
+		val storeConfiguration = fakeStoreConfiguration()
+		val client = ReflectiveMatrixHomeserverDiscoveryClient()
+		assertEquals(
+			NONE,
+			client.login("https://matrix.example.org", "alice", "swordfish", storeConfiguration),
+		)
+
+		val loggedInClient = FakeMatrixSdkState.lastBuiltClient!!
+		loggedInClient.simulateTokenRefresh("refreshed-access-token")
+		assertEquals(1, FakeMatrixSdkState.tokenRefreshCallCount)
+
+		val freshClient = ReflectiveMatrixHomeserverDiscoveryClient()
+		val restoreResult = freshClient.restore(storeConfiguration)
+
+		assertEquals(RestoreResult.Restored("https://matrix.example.org"), restoreResult)
+		assertEquals("refreshed-access-token", FakeMatrixSdkState.lastBuiltClient!!.session().accessToken)
+	}
+
+	@Test
+	fun `restore rejects a sidecar tampered after encryption instead of trusting it`() {
+		val storeConfiguration = fakeStoreConfiguration()
+		val client = ReflectiveMatrixHomeserverDiscoveryClient()
+		assertEquals(
+			NONE,
+			client.login("https://matrix.example.org", "alice", "swordfish", storeConfiguration),
+		)
+		val sessionFile = File(storeConfiguration.directory, "session")
+		val tampered = sessionFile.readBytes()
+		tampered[tampered.size - 1] = (tampered[tampered.size - 1] + 1).toByte()
+		sessionFile.writeBytes(tampered)
+
+		val freshClient = ReflectiveMatrixHomeserverDiscoveryClient()
+		val restoreResult = freshClient.restore(storeConfiguration)
+
+		assertEquals(RestoreResult.NotFound, restoreResult)
+	}
+
+	@Test
+	fun `restore against the wrong store key rejects the sidecar instead of using a stale key`() {
+		val originalConfiguration = fakeStoreConfiguration()
+		val client = ReflectiveMatrixHomeserverDiscoveryClient()
+		assertEquals(
+			NONE,
+			client.login("https://matrix.example.org", "alice", "swordfish", originalConfiguration),
+		)
+		val wrongKeyConfiguration = MatrixStoreConfiguration(
+			originalConfiguration.directory,
+			originalConfiguration.databaseName,
+			ByteArray(32) { (it + 1).toByte() },
+		)
+
+		val freshClient = ReflectiveMatrixHomeserverDiscoveryClient()
+		val restoreResult = freshClient.restore(wrongKeyConfiguration)
+
+		assertEquals(RestoreResult.NotFound, restoreResult)
+	}
+
+	private fun fakeStoreConfiguration(): MatrixStoreConfiguration = MatrixStoreConfiguration(
+		testFolder.newFolder("matrix-sdk"),
+		"matrix-sdk",
+		ByteArray(32) { it.toByte() },
+	)
 
 	@Test
 	fun `synchronous success resolves the SDK homeserver url and closes the client and builders`() {
