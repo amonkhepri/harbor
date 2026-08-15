@@ -86,12 +86,6 @@ public class PendingContactListActivity extends BriarActivity
 	}
 
 	@Override
-	protected void onTelegramLinkedIdentityAvailable(
-			@Nullable String linkedIdentity) {
-		showTelegramLinkedIdentitySubtitle(linkedIdentity);
-	}
-
-	@Override
 	protected void onStop() {
 		super.onStop();
 		list.stopPeriodicUpdate();

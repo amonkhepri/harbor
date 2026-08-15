@@ -59,7 +59,7 @@ class SettingsStore extends PreferenceDataStore {
 	@Override
 	public void putString(String key, @Nullable String value) {
 		if (LOG.isLoggable(INFO))
-			LOG.info("Store string setting: " + key + "=" + value);
+			LOG.info("Store string setting: " + key);
 		Settings s = new Settings();
 		s.put(key, value);
 		storeSettings(s);

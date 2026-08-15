@@ -18,4 +18,8 @@ public interface FeatureFlags {
 	boolean shouldEnableBlogsInCore();
 
 	boolean shouldEnableTelegramConnector();
+
+	int getTelegramApiId();
+
+	String getTelegramApiHash();
 }

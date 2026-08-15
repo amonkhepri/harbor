@@ -111,7 +111,7 @@ public class BriarRecyclerView extends FrameLayout {
 			@Override
 			public void onItemRangeInserted(int positionStart, int itemCount) {
 				super.onItemRangeInserted(positionStart, itemCount);
-				showData();
+				if (itemCount > 0) showData();
 			}
 
 			@Override
@@ -230,10 +230,16 @@ public class BriarRecyclerView extends FrameLayout {
 	}
 
 	public void startPeriodicUpdate(long interval) {
+		startPeriodicUpdate(interval, null);
+	}
+
+	public void startPeriodicUpdate(long interval, @Nullable Runnable action) {
 		if (recyclerView == null || recyclerView.getAdapter() == null) {
 			throw new IllegalStateException("Need to call setAdapter() first!");
 		}
+		stopPeriodicUpdate();
 		refresher = () -> {
+			if (action != null) action.run();
 			Adapter adapter = recyclerView.getAdapter();
 			adapter.notifyItemRangeChanged(0, adapter.getItemCount());
 			handler.postDelayed(refresher, interval);

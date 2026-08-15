@@ -1,6 +1,7 @@
 .metadata
 *.tmp
 *.swp
+/a.out
 
 # Windows thumbnail db
 Thumbs.db
@@ -15,6 +16,13 @@ Thumbs.db
 
 # Local configuration file (sdk path, etc)
 local.properties
+secrets.properties
+.env
+.env.*
+
+# Telegram/TDLib local runtime state
+harbor-telegram/
+**/harbor-telegram/
 
 # Android Studio
 .idea/*
@@ -27,3 +35,10 @@ build/
 captures
 *.iml
 projectFilesBackup/
+
+# Local third-party sources (must remain untracked)
+/third_party/td/
+/third_party/tdlib/
+
+# Local QR authorization notes
+/docs/guides/telegram_qr_connection.md

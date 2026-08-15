@@ -23,7 +23,6 @@ import javax.inject.Inject;
 import static java.util.Arrays.asList;
 import static java.util.logging.Level.INFO;
 import static org.briarproject.bramble.util.IoUtils.deleteFileOrDir;
-import static org.briarproject.bramble.util.LogUtils.logFileOrDir;
 
 class AndroidAccountManager extends AccountManagerImpl
 		implements AccountManager {
@@ -50,29 +49,11 @@ class AndroidAccountManager extends AccountManagerImpl
 	}
 
 	@Override
-	public boolean accountExists() {
-		boolean exists = super.accountExists();
-		if (!exists && LOG.isLoggable(INFO)) {
-			LOG.info("Account does not exist. Contents of account directory:");
-			logFileOrDir(LOG, INFO, getDataDir());
-		}
-		return exists;
-	}
-
-	@Override
 	public void deleteAccount() {
 		synchronized (stateChangeLock) {
-			if (LOG.isLoggable(INFO)) {
-				LOG.info("Contents of account directory before deleting:");
-				logFileOrDir(LOG, INFO, getDataDir());
-			}
 			super.deleteAccount();
 			SharedPreferences defaultPrefs = getDefaultSharedPreferences();
 			deleteAppData(prefs, defaultPrefs);
-			if (LOG.isLoggable(INFO)) {
-				LOG.info("Contents of account directory after deleting:");
-				logFileOrDir(LOG, INFO, getDataDir());
-			}
 		}
 	}
 

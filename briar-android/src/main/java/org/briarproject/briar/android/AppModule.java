@@ -372,6 +372,16 @@ public class AppModule {
 			public boolean shouldEnableTelegramConnector() {
 				return BuildConfig.TELEGRAM_CONNECTOR_ENABLED;
 			}
+
+			@Override
+			public int getTelegramApiId() {
+				return BuildConfig.TELEGRAM_API_ID;
+			}
+
+			@Override
+			public String getTelegramApiHash() {
+				return BuildConfig.TELEGRAM_API_HASH;
+			}
 		};
 	}
 }

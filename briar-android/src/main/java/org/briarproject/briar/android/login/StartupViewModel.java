@@ -2,9 +2,9 @@ package org.briarproject.briar.android.login;
 
 import android.app.Application;
 
+import org.briarproject.bramble.PoliteExecutor;
 import org.briarproject.bramble.api.FeatureFlags;
 import org.briarproject.bramble.api.account.AccountManager;
-import org.briarproject.bramble.api.db.DbException;
 import org.briarproject.bramble.api.crypto.DecryptionException;
 import org.briarproject.bramble.api.crypto.DecryptionResult;
 import org.briarproject.bramble.api.event.Event;
@@ -14,18 +14,17 @@ import org.briarproject.bramble.api.lifecycle.IoExecutor;
 import org.briarproject.bramble.api.lifecycle.LifecycleManager;
 import org.briarproject.bramble.api.lifecycle.LifecycleManager.LifecycleState;
 import org.briarproject.bramble.api.lifecycle.event.LifecycleEvent;
-import org.briarproject.bramble.api.settings.Settings;
-import org.briarproject.bramble.api.settings.SettingsManager;
 import org.briarproject.briar.android.viewmodel.LiveEvent;
 import org.briarproject.briar.android.viewmodel.MutableLiveEvent;
 import org.briarproject.briar.api.android.AndroidNotificationManager;
 import org.briarproject.briar.api.telegram.TelegramAuthSession;
 import org.briarproject.briar.api.telegram.TelegramAuthSession.RecoverableErrorDetail;
+import org.briarproject.briar.api.telegram.TelegramAuthSession.Snapshot;
 import org.briarproject.briar.api.telegram.TelegramAuthState;
 import org.briarproject.nullsafety.NotNullByDefault;
 
 import java.util.concurrent.Executor;
-import java.util.logging.Logger;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import javax.inject.Inject;
 
@@ -38,7 +37,6 @@ import static org.briarproject.bramble.api.crypto.DecryptionResult.SUCCESS;
 import static org.briarproject.bramble.api.lifecycle.LifecycleManager.LifecycleState.COMPACTING_DATABASE;
 import static org.briarproject.bramble.api.lifecycle.LifecycleManager.LifecycleState.MIGRATING_DATABASE;
 import static org.briarproject.bramble.api.lifecycle.LifecycleManager.LifecycleState.STARTING_SERVICES;
-import static org.briarproject.bramble.util.LogUtils.logException;
 import static org.briarproject.briar.android.login.StartupViewModel.State.COMPACTING;
 import static org.briarproject.briar.android.login.StartupViewModel.State.MIGRATING;
 import static org.briarproject.briar.android.login.StartupViewModel.State.SIGNED_IN;
@@ -46,9 +44,6 @@ import static org.briarproject.briar.android.login.StartupViewModel.State.SIGNED
 import static org.briarproject.briar.android.login.StartupViewModel.State.STARTED;
 import static org.briarproject.briar.android.login.StartupViewModel.State.STARTING;
 import static org.briarproject.briar.android.login.StartupViewModel.State.TELEGRAM_LOGIN;
-import static org.briarproject.briar.android.settings.SettingsFragment.SETTINGS_NAMESPACE;
-import static java.util.logging.Level.WARNING;
-import static java.util.logging.Logger.getLogger;
 
 @NotNullByDefault
 public class StartupViewModel extends AndroidViewModel
@@ -56,32 +51,27 @@ public class StartupViewModel extends AndroidViewModel
 
 	enum State {SIGNED_OUT, TELEGRAM_LOGIN, SIGNED_IN, STARTING, MIGRATING, COMPACTING, STARTED}
 
-	private static final Logger LOG =
-			getLogger(StartupViewModel.class.getName());
-
 	private final AccountManager accountManager;
 	private final AndroidNotificationManager notificationManager;
 	private final EventBus eventBus;
 	private final FeatureFlags featureFlags;
-	private final SettingsManager settingsManager;
 	private final TelegramAuthSession telegramAuthSession;
 	@IoExecutor
 	private final Executor ioExecutor;
+	private final Executor telegramAuthExecutor;
+	private final AtomicInteger telegramAuthGeneration = new AtomicInteger();
 
 	private final MutableLiveEvent<DecryptionResult> passwordValidated =
 			new MutableLiveEvent<>();
 	private final MutableLiveEvent<Boolean> accountDeleted =
 			new MutableLiveEvent<>();
-	private final MutableLiveEvent<String> telegramLinkedIdentityStaged =
-			new MutableLiveEvent<>();
 	private final MutableLiveData<State> state = new MutableLiveData<>();
-	private final MutableLiveData<TelegramAuthState> telegramAuthState =
-			new MutableLiveData<>(TelegramAuthState.CLOSED);
+	private final MutableLiveData<Snapshot> telegramAuthSnapshot =
+			new MutableLiveData<>(new Snapshot(
+					TelegramAuthState.CLOSED, RecoverableErrorDetail.NONE));
 	private String telegramLoginIdentifier = "";
 	private String telegramLoginCode = "";
 	private String telegramLoginPassword = "";
-	private volatile String pendingTelegramLinkedIdentity = "";
-	private volatile String lastTelegramLinkedIdentityStaged = "";
 
 	@Inject
 	StartupViewModel(Application app,
@@ -90,7 +80,6 @@ public class StartupViewModel extends AndroidViewModel
 			AndroidNotificationManager notificationManager,
 			EventBus eventBus,
 			@IoExecutor Executor ioExecutor,
-			SettingsManager settingsManager,
 			FeatureFlags featureFlags,
 			TelegramAuthSession telegramAuthSession) {
 		super(app);
@@ -98,18 +87,30 @@ public class StartupViewModel extends AndroidViewModel
 		this.notificationManager = notificationManager;
 		this.eventBus = eventBus;
 		this.ioExecutor = ioExecutor;
-		this.settingsManager = settingsManager;
+		telegramAuthExecutor = new PoliteExecutor("TelegramAuth", ioExecutor, 1);
 		this.featureFlags = featureFlags;
 		this.telegramAuthSession = telegramAuthSession;
 
 		updateState(lifecycleManager.getLifecycleState());
+		Snapshot activeTelegramAuth = telegramAuthSession.getSnapshot();
+		if (isResumableQrSession(activeTelegramAuth)) {
+			telegramAuthSnapshot.setValue(activeTelegramAuth);
+			state.setValue(TELEGRAM_LOGIN);
+		}
 		eventBus.addListener(this);
 	}
 
 	@Override
 	protected void onCleared() {
-		telegramAuthSession.close();
 		eventBus.removeListener(this);
+		telegramAuthGeneration.incrementAndGet();
+		if (isResumableQrSession(telegramAuthSession.getSnapshot())) return;
+		telegramAuthExecutor.execute(telegramAuthSession::close);
+	}
+
+	private static boolean isResumableQrSession(Snapshot snapshot) {
+		return snapshot.getAuthState() == TelegramAuthState.QR_WAITING ||
+				snapshot.getQrAuthorizationLink() != null;
 	}
 
 	@Override
@@ -145,7 +146,6 @@ public class StartupViewModel extends AndroidViewModel
 		ioExecutor.execute(() -> {
 			try {
 				accountManager.signIn(password);
-				storePendingTelegramLinkedIdentity();
 				passwordValidated.postEvent(SUCCESS);
 				state.postValue(SIGNED_IN);
 			} catch (DecryptionException e) {
@@ -162,23 +162,17 @@ public class StartupViewModel extends AndroidViewModel
 		return accountDeleted;
 	}
 
-	LiveEvent<String> getTelegramLinkedIdentityStaged() {
-		return telegramLinkedIdentityStaged;
-	}
-
-	String getLastTelegramLinkedIdentityStaged() {
-		return lastTelegramLinkedIdentityStaged;
-	}
-
 	LiveData<State> getState() {
 		return state;
 	}
 
 	void showTelegramLoginPlaceholder() {
-		pendingTelegramLinkedIdentity = telegramLoginCode = telegramLoginPassword = "";
-		telegramAuthSession.start();
-		telegramAuthState.setValue(telegramAuthSession.getCurrentState());
+		telegramAuthGeneration.incrementAndGet();
+		telegramLoginCode = telegramLoginPassword = "";
 		state.setValue(TELEGRAM_LOGIN);
+		telegramAuthSnapshot.setValue(new Snapshot(
+				TelegramAuthState.CLOSED, RecoverableErrorDetail.NONE));
+		runTelegramAuthAction(telegramAuthSession::start);
 	}
 
 	String getTelegramLoginIdentifier() {
@@ -205,80 +199,108 @@ public class StartupViewModel extends AndroidViewModel
 		telegramLoginPassword = password;
 	}
 
-	LiveData<TelegramAuthState> getTelegramAuthState() {
-		return telegramAuthState;
-	}
-
-	RecoverableErrorDetail getTelegramRecoverableErrorDetail() {
-		return telegramAuthSession.getRecoverableErrorDetail();
+	LiveData<Snapshot> getTelegramAuthSnapshot() {
+		return telegramAuthSnapshot;
 	}
 
 	void submitTelegramLoginIdentifier() {
 		telegramLoginCode = telegramLoginPassword = "";
-		telegramAuthSession.submitIdentifier(telegramLoginIdentifier.trim());
-		telegramAuthState.setValue(telegramAuthSession.getCurrentState());
+		String identifier = telegramLoginIdentifier.trim();
+		runTelegramAuthAction(() -> telegramAuthSession.submitIdentifier(identifier));
+	}
+
+	void requestTelegramQrAuthorization() {
+		telegramLoginCode = telegramLoginPassword = "";
+		runTelegramAuthAction(telegramAuthSession::requestQrCodeAuthentication);
+	}
+
+	void awaitTelegramQrAuthorization() {
+		int generation = telegramAuthGeneration.get();
+		telegramAuthExecutor.execute(() -> {
+			if (generation != telegramAuthGeneration.get()) return;
+			while (generation == telegramAuthGeneration.get()) {
+				telegramAuthSession.awaitQrAuthorizationUpdate();
+				if (generation != telegramAuthGeneration.get()) return;
+				Snapshot snapshot = telegramAuthSession.getSnapshot();
+				telegramAuthSnapshot.postValue(snapshot);
+				if (snapshot.getAuthState() != TelegramAuthState.QR_WAITING) return;
+			}
+		});
 	}
 
 	void submitTelegramLoginCode() {
-		telegramAuthSession.submitCode(telegramLoginCode.trim());
-		telegramAuthState.setValue(telegramAuthSession.getCurrentState());
-		if (telegramAuthState.getValue() != TelegramAuthState.RECOVERABLE_ERROR ||
-				getTelegramRecoverableErrorDetail() != RecoverableErrorDetail.INVALID_CODE) {
-			telegramLoginCode = "";
-		}
+		String code = telegramLoginCode.trim();
+		runTelegramAuthAction(() -> {
+			telegramAuthSession.submitCode(code);
+			Snapshot snapshot = telegramAuthSession.getSnapshot();
+			if (snapshot.getAuthState() != TelegramAuthState.RECOVERABLE_ERROR ||
+					snapshot.getErrorDetail() != RecoverableErrorDetail.INVALID_CODE) {
+				telegramLoginCode = "";
+			}
+		});
+	}
+
+	void resendTelegramLoginCode() {
+		telegramLoginCode = "";
+		runTelegramAuthAction(telegramAuthSession::resendCode);
 	}
 
 	void submitTelegramLoginPassword() {
-		telegramAuthSession.submitPassword(telegramLoginPassword);
-		telegramAuthState.setValue(telegramAuthSession.getCurrentState());
-		if (telegramAuthState.getValue() != TelegramAuthState.RECOVERABLE_ERROR ||
-				getTelegramRecoverableErrorDetail() != RecoverableErrorDetail.INVALID_PASSWORD) {
-			telegramLoginPassword = "";
-		}
+		String password = telegramLoginPassword;
+		runTelegramAuthAction(() -> {
+			telegramAuthSession.submitPassword(password);
+			Snapshot snapshot = telegramAuthSession.getSnapshot();
+			if (snapshot.getAuthState() != TelegramAuthState.RECOVERABLE_ERROR ||
+					snapshot.getErrorDetail() != RecoverableErrorDetail.INVALID_PASSWORD) {
+				telegramLoginPassword = "";
+			}
+		});
 	}
 
 	void completeTelegramLoginConfirmation() {
-		pendingTelegramLinkedIdentity = telegramLoginIdentifier.trim();
 		showPasswordFragment();
 	}
 
 	void showTelegramLoginIdentifierStep() {
+		telegramAuthGeneration.incrementAndGet();
 		telegramLoginCode = telegramLoginPassword = "";
-		telegramAuthSession.close();
-		telegramAuthSession.start();
-		telegramAuthState.setValue(telegramAuthSession.getCurrentState());
+		telegramAuthSnapshot.setValue(new Snapshot(
+				TelegramAuthState.CLOSED, RecoverableErrorDetail.NONE));
+		runTelegramAuthAction(() -> {
+			telegramAuthSession.close();
+			telegramAuthSession.start();
+		});
 	}
 
 	boolean isShowingTelegramLoginConfirmation() {
-		TelegramAuthState authState = telegramAuthState.getValue();
+		Snapshot snapshot = telegramAuthSnapshot.getValue();
+		TelegramAuthState authState = snapshot.getAuthState();
 		return authState == TelegramAuthState.CODE_ENTRY ||
 				authState == TelegramAuthState.PASSWORD_ENTRY ||
+				authState == TelegramAuthState.QR_WAITING ||
 				authState == TelegramAuthState.READY ||
 				authState == TelegramAuthState.RECOVERABLE_ERROR &&
-						(getTelegramRecoverableErrorDetail() == RecoverableErrorDetail.INVALID_CODE ||
-								getTelegramRecoverableErrorDetail() == RecoverableErrorDetail.INVALID_PASSWORD);
+						(snapshot.getErrorDetail() == RecoverableErrorDetail.INVALID_CODE ||
+								snapshot.getErrorDetail() == RecoverableErrorDetail.CODE_RESEND_FAILED ||
+								snapshot.getErrorDetail() == RecoverableErrorDetail.INVALID_PASSWORD);
 	}
 
 	void showPasswordFragment() {
+		telegramAuthGeneration.incrementAndGet();
 		telegramLoginIdentifier = telegramLoginCode = telegramLoginPassword = "";
-		telegramAuthSession.close();
-		telegramAuthState.setValue(telegramAuthSession.getCurrentState());
 		state.setValue(SIGNED_OUT);
+		runTelegramAuthAction(telegramAuthSession::close);
 	}
 
-	private void storePendingTelegramLinkedIdentity() {
-		if (pendingTelegramLinkedIdentity.isEmpty()) return;
-		try {
-			Settings settings = new Settings();
-			settings.put("pref_key_telegram_linked_identity",
-					pendingTelegramLinkedIdentity);
-			settingsManager.mergeSettings(settings, SETTINGS_NAMESPACE);
-			lastTelegramLinkedIdentityStaged = pendingTelegramLinkedIdentity;
-			telegramLinkedIdentityStaged.postEvent(lastTelegramLinkedIdentityStaged);
-			pendingTelegramLinkedIdentity = "";
-		} catch (DbException e) {
-			logException(LOG, WARNING, e);
-		}
+	private void runTelegramAuthAction(Runnable action) {
+		int generation = telegramAuthGeneration.get();
+		telegramAuthExecutor.execute(() -> {
+			if (generation != telegramAuthGeneration.get()) return;
+			action.run();
+			if (generation != telegramAuthGeneration.get()) return;
+			Snapshot snapshot = telegramAuthSession.getSnapshot();
+			telegramAuthSnapshot.postValue(snapshot);
+		});
 	}
 
 	boolean shouldShowTelegramLogin() {
@@ -287,8 +309,11 @@ public class StartupViewModel extends AndroidViewModel
 
 	@UiThread
 	void deleteAccount() {
-		accountManager.deleteAccount();
-		accountDeleted.setEvent(true);
+		telegramAuthExecutor.execute(() -> {
+			telegramAuthSession.close();
+			accountManager.deleteAccount();
+			accountDeleted.postEvent(true);
+		});
 	}
 
 }

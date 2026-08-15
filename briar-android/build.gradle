@@ -18,9 +18,74 @@ def getStdout = { command, defaultValue ->
 	}
 }
 
+def tdlibDir = rootProject.file('third_party/tdlib')
+def tdlibJavaDir = new File(tdlibDir, 'java')
+def tdlibJniLibsDir = new File(tdlibDir, 'libs')
+def telegramLocalConfig = new Properties()
+[rootProject.file('local.properties'), rootProject.file('secrets.properties'),
+		rootProject.file('.env')].each { configFile ->
+	if (configFile.isFile()) {
+		configFile.withInputStream { telegramLocalConfig.load(it) }
+	}
+}
+def normalizeLocalConfigValue = { value ->
+	if (value == null) return null
+	def normalized = value.toString().trim()
+	if (normalized.length() >= 2 &&
+			((normalized.startsWith('"') && normalized.endsWith('"')) ||
+					(normalized.startsWith("'") && normalized.endsWith("'")))) {
+		normalized = normalized.substring(1, normalized.length() - 1)
+	}
+	return normalized
+}
+def telegramConfigValue = { propertyNames, environmentNames, defaultValue ->
+	for (name in propertyNames) {
+		if (project.hasProperty(name)) {
+			def value = normalizeLocalConfigValue(project.findProperty(name))
+			return value ?: ''
+		}
+	}
+	for (name in environmentNames) {
+		if (System.getenv().containsKey(name)) {
+			def value = normalizeLocalConfigValue(System.getenv(name))
+			return value ?: ''
+		}
+	}
+	for (name in propertyNames + environmentNames) {
+		def value = normalizeLocalConfigValue(telegramLocalConfig.getProperty(name))
+		if (value != null && !value.isEmpty()) return value
+	}
+	return defaultValue
+}
 def telegramConnectorEnabled =
 		(project.findProperty('harbor.telegramConnector.enabled') ?: 'false')
 				.toString().toBoolean()
+def configuredTelegramApiId =
+		telegramConfigValue(
+				['harbor.telegram.apiId'],
+				['HARBOR_TELEGRAM_API_ID', 'TELEGRAM_API_ID'],
+				'0'
+		)
+if (telegramConnectorEnabled && !(configuredTelegramApiId ==~ /[0-9]+/)) {
+	throw new GradleException('harbor.telegram.apiId must be a non-negative integer')
+}
+if (telegramConnectorEnabled &&
+		(!new File(tdlibJavaDir, 'org/drinkless/tdlib/Client.java').isFile() ||
+				!new File(tdlibJavaDir, 'org/drinkless/tdlib/TdApi.java').isFile() ||
+				fileTree(tdlibJniLibsDir).matching { include '**/libtdjni.so' }.isEmpty())) {
+	throw new GradleException(
+			'Telegram connector requires generated TDLib Java and JNI artifacts')
+}
+def configuredTelegramApiHash =
+		telegramConfigValue(
+				['harbor.telegram.apiHash'],
+				['HARBOR_TELEGRAM_API_HASH', 'TELEGRAM_API_HASH'],
+				''
+		)
+def telegramApiId = telegramConnectorEnabled ? configuredTelegramApiId : '0'
+def telegramApiHash = telegramConnectorEnabled ? configuredTelegramApiHash : ''
+def telegramApiHashLiteral =
+		"\"" + telegramApiHash.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
 def kotlinMetadataBuildTypeConfigs = [
 		'apiDependenciesMetadata',
@@ -63,6 +128,8 @@ android {
 		buildConfigField "String", "TorVersion", "\"$tor_version\""
 		buildConfigField "boolean", "TELEGRAM_CONNECTOR_ENABLED",
 			"${telegramConnectorEnabled}"
+		buildConfigField "int", "TELEGRAM_API_ID", "${telegramApiId}"
+		buildConfigField "String", "TELEGRAM_API_HASH", telegramApiHashLiteral
 
 		vectorDrawables.useSupportLibrary = true
 		buildConfigField "String", "GitHash",
@@ -107,6 +174,16 @@ android {
 			setIgnore(true)
 		}
 	}
+	if (telegramConnectorEnabled) {
+		sourceSets {
+			main {
+				// Consume official TDLib Android build output when present.
+				java.srcDirs += [tdlibJavaDir]
+				jniLibs.srcDirs += [tdlibJniLibsDir]
+			}
+		}
+	}
+
 	compileOptions {
 		sourceCompatibility JavaVersion.VERSION_17
 		targetCompatibility JavaVersion.VERSION_17

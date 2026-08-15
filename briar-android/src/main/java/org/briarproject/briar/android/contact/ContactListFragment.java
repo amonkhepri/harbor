@@ -3,6 +3,9 @@ package org.briarproject.briar.android.contact;
 import android.content.Intent;
 import android.os.Bundle;
 import android.view.LayoutInflater;
+import android.view.Menu;
+import android.view.MenuInflater;
+import android.view.MenuItem;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.TextView;
@@ -18,10 +21,14 @@ import org.briarproject.briar.android.contact.add.remote.AddContactActivity;
 import org.briarproject.briar.android.contact.add.remote.PendingContactListActivity;
 import org.briarproject.briar.android.conversation.ConversationActivity;
 import org.briarproject.briar.android.fragment.BaseFragment;
+import org.briarproject.briar.android.telegram.TelegramConversationActivity;
 import org.briarproject.briar.android.util.BriarSnackbarBuilder;
 import org.briarproject.briar.android.view.BriarRecyclerView;
+import org.briarproject.briar.api.connector.ConnectorSources;
 import org.briarproject.nullsafety.MethodsNotNullByDefault;
 import org.briarproject.nullsafety.ParametersNotNullByDefault;
+
+import java.util.List;
 
 import javax.annotation.Nullable;
 import javax.inject.Inject;
@@ -33,23 +40,29 @@ import io.github.kobakei.materialfabspeeddial.FabSpeedDial;
 import io.github.kobakei.materialfabspeeddial.FabSpeedDial.OnMenuItemClickListener;
 
 import static com.google.android.material.snackbar.BaseTransientBottomBar.LENGTH_INDEFINITE;
+import static java.util.Collections.emptyList;
 import static org.briarproject.briar.android.conversation.ConversationActivity.CONTACT_ID;
 
 @MethodsNotNullByDefault
 @ParametersNotNullByDefault
 public class ContactListFragment extends BaseFragment
 		implements OnMenuItemClickListener,
-		OnContactClickListener<ContactListItem> {
+		OnInboxThreadClickListener {
 
 	public static final String TAG = ContactListFragment.class.getName();
+	private static final long TELEGRAM_REFRESH_INTERVAL_MS = 15_000;
 
 	@Inject
 	ViewModelProvider.Factory viewModelFactory;
 
 	private ContactListViewModel viewModel;
-	private final ContactListAdapter adapter = new ContactListAdapter(this);
+	private final InboxThreadAdapter adapter = new InboxThreadAdapter(this);
 	private BriarRecyclerView list;
 	private FabSpeedDial speedDial;
+	private List<ContactListItem> briarItems = emptyList();
+	private List<TelegramInboxThreadItem> telegramItems = emptyList();
+	private TelegramInboxAvailabilityState telegramAvailabilityState =
+			TelegramInboxAvailabilityState.NONE;
 
 	/**
 	 * The Snackbar is non-null when shown and null otherwise.
@@ -100,8 +113,20 @@ public class ContactListFragment extends BaseFragment
 		viewModel.getContactListItems()
 				.observe(getViewLifecycleOwner(), result -> {
 					result.onError(this::handleException).onSuccess(items -> {
-						adapter.submitList(items);
+						briarItems = items;
+						submitInboxItems();
 					});
+				});
+		viewModel.getTelegramThreadItems()
+				.observe(getViewLifecycleOwner(), items -> {
+					telegramItems = items;
+					submitInboxItems();
+				});
+		viewModel.getTelegramAvailabilityState()
+				.observe(getViewLifecycleOwner(), state -> {
+					telegramAvailabilityState = state;
+					updateEmptyState();
+					requireActivity().invalidateOptionsMenu();
 				});
 		viewModel.getHasPendingContacts()
 				.observe(getViewLifecycleOwner(), hasPending -> {
@@ -113,11 +138,47 @@ public class ContactListFragment extends BaseFragment
 	}
 
 	@Override
-	public void onItemClick(View view, ContactListItem item) {
+	public void onBriarItemClick(View view, ContactListItem item) {
 		Intent i = new Intent(getActivity(), ConversationActivity.class);
 		ContactId contactId = item.getContact().getId();
 		i.putExtra(CONTACT_ID, contactId.getInt());
 		startActivity(i);
+	}
+
+	@Override
+	public void onConnectorItemClick(View view, ConnectorInboxThreadItem item) {
+		if (!item.getConnectorSource().equals(ConnectorSources.TELEGRAM)) return;
+		Intent i = new Intent(getActivity(), TelegramConversationActivity.class);
+		i.putExtra(TelegramConversationActivity.CHAT_ID,
+				Long.parseLong(item.getConnectorThreadId()));
+		i.putExtra(TelegramConversationActivity.CHAT_TITLE, item.getTitle());
+		startActivity(i);
+	}
+
+	@Override
+	public void onCreateOptionsMenu(Menu menu, MenuInflater inflater) {
+		inflater.inflate(R.menu.telegram_inbox_actions, menu);
+		super.onCreateOptionsMenu(menu, inflater);
+	}
+
+	@Override
+	public void onPrepareOptionsMenu(Menu menu) {
+		super.onPrepareOptionsMenu(menu);
+		MenuItem refresh = menu.findItem(R.id.action_refresh_telegram_threads);
+		if (refresh != null) {
+			refresh.setVisible(shouldShowManualRefreshAction(
+					viewModel.isTelegramConnectorEnabled(),
+					telegramAvailabilityState));
+		}
+	}
+
+	@Override
+	public boolean onOptionsItemSelected(MenuItem item) {
+		if (isManualRefreshAction(item.getItemId())) {
+			viewModel.loadTelegramThreads();
+			return true;
+		}
+		return super.onOptionsItemSelected(item);
 	}
 
 	@Override
@@ -138,8 +199,10 @@ public class ContactListFragment extends BaseFragment
 		viewModel.clearAllContactNotifications();
 		viewModel.clearAllContactAddedNotifications();
 		viewModel.loadContacts();
+		viewModel.loadTelegramThreads();
 		viewModel.checkForPendingContacts();
-		list.startPeriodicUpdate();
+		list.startPeriodicUpdate(TELEGRAM_REFRESH_INTERVAL_MS,
+				viewModel::loadTelegramThreads);
 	}
 
 	@Override
@@ -172,5 +235,47 @@ public class ContactListFragment extends BaseFragment
 	private void showPendingContactList() {
 		Intent i = new Intent(getContext(), PendingContactListActivity.class);
 		startActivity(i);
+	}
+
+	private void submitInboxItems() {
+		updateEmptyState();
+		adapter.submitList(InboxThreadMerger.merge(briarItems, telegramItems), list::showData);
+	}
+
+	private void updateEmptyState() {
+		list.setEmptyText(emptyTextForState(telegramAvailabilityState));
+		int actionRes = emptyActionTextForState(telegramAvailabilityState);
+		if (actionRes == 0) list.setEmptyAction("");
+		else list.setEmptyAction(actionRes);
+	}
+
+	static boolean isManualRefreshAction(int itemId) {
+		return itemId == R.id.action_refresh_telegram_threads;
+	}
+
+	static boolean shouldShowManualRefreshAction(boolean connectorEnabled,
+			TelegramInboxAvailabilityState state) {
+		return connectorEnabled &&
+				state != TelegramInboxAvailabilityState.LOADING;
+	}
+
+	static int emptyTextForState(TelegramInboxAvailabilityState state) {
+		switch (state) {
+			case LOADING:
+				return R.string.telegram_inbox_loading;
+			case ACCOUNT_UNAVAILABLE:
+				return R.string.telegram_inbox_account_unavailable;
+			case EMPTY:
+				return R.string.telegram_inbox_empty;
+			case LOAD_FAILED:
+				return R.string.telegram_inbox_load_failed;
+			default:
+				return R.string.no_contacts;
+		}
+	}
+
+	static int emptyActionTextForState(TelegramInboxAvailabilityState state) {
+		return state == TelegramInboxAvailabilityState.NONE ?
+				R.string.no_contacts_action : 0;
 	}
 }

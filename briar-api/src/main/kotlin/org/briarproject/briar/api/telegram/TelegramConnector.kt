@@ -1,5 +1,8 @@
 package org.briarproject.briar.api.telegram
 
-interface TelegramConnector {
-	fun isEnabled(): Boolean
+import org.briarproject.briar.api.connector.ReadOnlyConnector
+
+interface TelegramConnector : ReadOnlyConnector {
+	override fun isEnabled(): Boolean
+	override fun isAuthorized(): Boolean
 }
