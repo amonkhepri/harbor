@@ -24,7 +24,17 @@ sealed class ClientBuildException(message: String) : Exception(message) {
 	class Generic : ClientBuildException("generic failure")
 }
 
-class ClientException(message: String) : Exception(message)
+/**
+ * Mirrors the pinned AAR's real shape: `ClientException` is an abstract sealed base with no
+ * public constructor, and `ClientException.Generic(msg, details)` is the concrete variant this
+ * fake exercises. Its interface method's compiled bytecode carries no `Exceptions` attribute
+ * (`javap -v` on the pinned AAR confirms no `throws` clause), so this stays a plain checked
+ * [Exception], not `@Throws`-annotated here — annotating it would make the fake claim a
+ * declared-throws contract the real interface does not have.
+ */
+sealed class ClientException(message: String) : Exception(message) {
+	class Generic(val msg: String, val details: String) : ClientException(msg)
+}
 
 enum class SlidingSyncVersion { NONE, NATIVE }
 
@@ -38,7 +48,15 @@ class Session(
 	val slidingSyncVersion: SlidingSyncVersion,
 )
 
-/** Mirrors the pinned SDK's `ClientSessionDelegate`: the app-supplied keychain bridge the SDK calls back into whenever it saves or looks up a `Session`, in particular after an internal token refresh. */
+/**
+ * Mirrors the pinned SDK's `ClientSessionDelegate`: the app-supplied keychain bridge the SDK
+ * calls back into whenever it saves or looks up a `Session`, in particular after an internal
+ * token refresh. `retrieveSessionFromKeychain` returns a `@NotNull Session` with no declared
+ * `throws` clause in the pinned AAR's bytecode, so a `Proxy`-based delegate that throws
+ * `ClientException` here has it wrapped into `UndeclaredThrowableException` by the JDK, not
+ * delivered as `ClientException` itself; see `ReflectiveMatrixHomeserverDiscoveryClient`'s
+ * `SessionDelegateInvocationHandler` docs for the resulting fail-closed behavior.
+ */
 interface ClientSessionDelegate {
 	fun retrieveSessionFromKeychain(userId: String): Session
 	fun saveSessionInKeychain(session: Session)
@@ -53,7 +71,7 @@ class Client internal constructor(
 	fun homeserver(): String? = homeserverUrl
 
 	/** Throws like the real SDK until a session exists from [login] or [restoreSession]. */
-	fun session(): Session = session ?: throw ClientException("no session")
+	fun session(): Session = session ?: throw ClientException.Generic("no session", "no session")
 
 	suspend fun login(
 		username: String,

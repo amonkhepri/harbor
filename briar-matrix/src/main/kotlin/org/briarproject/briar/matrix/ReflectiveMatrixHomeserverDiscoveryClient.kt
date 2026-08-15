@@ -17,8 +17,6 @@ import java.lang.reflect.InvocationHandler
 import java.lang.reflect.InvocationTargetException
 import java.lang.reflect.Method
 import java.lang.reflect.Proxy
-import java.nio.file.Files
-import java.nio.file.StandardCopyOption
 import java.security.GeneralSecurityException
 import java.security.SecureRandom
 import java.util.concurrent.CountDownLatch
@@ -272,9 +270,24 @@ class ReflectiveMatrixHomeserverDiscoveryClient(private val discoveryTimeoutMs: 
 	/**
 	 * Backs the reflective `ClientSessionDelegate` proxy: `saveSessionInKeychain` rewrites the
 	 * encrypted sidecar with the SDK's latest `Session` (e.g. after a refresh);
-	 * `retrieveSessionFromKeychain` best-effort round-trips it back, failing closed to `null` on
-	 * any decrypt/format error since the delegate crosses into native SDK code that this adapter
-	 * does not control.
+	 * `retrieveSessionFromKeychain` round-trips it back and fails closed by throwing the pinned
+	 * SDK's `ClientException.Generic` on any missing/decrypt/format error, instead of the old
+	 * `null` return.
+	 *
+	 * This is the best a [Proxy]-based delegate can do here, not a full fix to the AAR's
+	 * documented `@NotNull Session`-or-`ClientException` contract: the pinned AAR's
+	 * `ClientSessionDelegate.retrieveSessionFromKeychain` bytecode declares no `throws` clause
+	 * (`javap -v` on the AAR shows no `Exceptions` attribute), so the JDK's generated `Proxy`
+	 * dispatcher wraps our checked `ClientException` throw into `UndeclaredThrowableException`
+	 * before it reaches the SDK's generated UniFFI callback trampoline. That trampoline only
+	 * special-cases an `instanceof ClientException` catch; an `UndeclaredThrowableException`
+	 * still falls through to its generic "unexpected exception" panic-status branch, same as the
+	 * old `null`-triggered `NullPointerException` did. The difference is diagnostic, not
+	 * contractual: the panic status now carries this method's own stack trace and a real
+	 * `ClientException` as its cause, instead of an opaque `Intrinsics.checkNotNullParameter`
+	 * NPE. Reaching the AAR's typed, non-panicking error path would require a delegate class
+	 * compiled directly against the real interface (outside a `Proxy`), which this module's
+	 * deliberate zero-compile-dependency isolation (see this class's docstring) does not allow.
 	 */
 	private inner class SessionDelegateInvocationHandler(
 		private val storeConfiguration: MatrixStoreConfiguration,
@@ -290,7 +303,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(private val discoveryTimeoutMs: 
 					}
 					null
 				}
-				"retrieveSessionFromKeychain" -> readSessionFileOrNull(storeConfiguration)
+				"retrieveSessionFromKeychain" -> readSessionFileOrThrow(storeConfiguration)
 				"equals" -> proxy === args?.getOrNull(0)
 				"hashCode" -> System.identityHashCode(proxy)
 				"toString" -> "MatrixClientSessionDelegate"
@@ -298,22 +311,32 @@ class ReflectiveMatrixHomeserverDiscoveryClient(private val discoveryTimeoutMs: 
 			}
 	}
 
-	private fun readSessionFileOrNull(storeConfiguration: MatrixStoreConfiguration): Any? {
+	private fun readSessionFileOrThrow(storeConfiguration: MatrixStoreConfiguration): Any {
 		val file = sessionFile(storeConfiguration)
-		if (!file.isFile) return null
+		if (!file.isFile) throw newClientException("no persisted Matrix session")
 		return try {
 			readSessionFile(file, Class.forName(SESSION_CLASS_NAME), storeConfiguration)
 		} catch (e: IOException) {
-			null
+			throw newClientException("persisted Matrix session sidecar could not be read")
 		} catch (e: ReflectiveOperationException) {
-			null
+			throw newClientException("persisted Matrix session sidecar could not be reconstructed")
 		}
 	}
 
 	/**
+	 * Reflectively builds the pinned SDK's `ClientException.Generic(msg, details)`. `ClientException`
+	 * itself is an abstract sealed base with no public constructor; `Generic` is the concrete
+	 * variant with a public `(String, String)` constructor.
+	 */
+	private fun newClientException(message: String): Throwable =
+		Class.forName(CLIENT_EXCEPTION_GENERIC_CLASS_NAME)
+			.getConstructor(String::class.java, String::class.java)
+			.newInstance(message, message) as Throwable
+
+	/**
 	 * Serializes an SDK `Session`'s fields via its public getters, AES-256-GCM-encrypts them
 	 * under [storeConfiguration]'s own encryption key, and writes the result atomically (temp
-	 * file in the same directory + [Files.move] with `ATOMIC_MOVE`) so a crash or concurrent
+	 * file in the same directory + [File.renameTo]) so a crash or concurrent
 	 * `saveSessionInKeychain` callback can never observe a partially written or plaintext file.
 	 * Never logs field values.
 	 */
@@ -377,12 +400,13 @@ class ReflectiveMatrixHomeserverDiscoveryClient(private val discoveryTimeoutMs: 
 					out.write(nonce)
 					out.write(ciphertext)
 				}
-				Files.move(
-					tempFile.toPath(),
-					file.toPath(),
-					StandardCopyOption.ATOMIC_MOVE,
-					StandardCopyOption.REPLACE_EXISTING,
-				)
+				// File.renameTo (POSIX rename(2) on Android/Linux) atomically replaces an
+				// existing same-directory target, unlike java.nio.file.Files.move/ATOMIC_MOVE,
+				// which the Android SDK marks available only since API 26; Harbor's minSdk is
+				// 21 and briar-android's coreLibraryDesugaring has no dependencies to backport it.
+				if (!tempFile.renameTo(file)) {
+					throw IOException("failed to atomically replace session sidecar")
+				}
 			} finally {
 				tempFile.delete()
 			}
@@ -445,7 +469,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(private val discoveryTimeoutMs: 
 			cipher.doFinal(ciphertext)
 		} catch (e: GeneralSecurityException) {
 			// Wrong/rotated key, truncated ciphertext, or a tampered/corrupt sidecar all surface
-			// here (including AEADBadTagException); restore()/readSessionFileOrNull() only
+			// here (including AEADBadTagException); restore()/readSessionFileOrThrow() only
 			// handle IOException, not the wider GeneralSecurityException hierarchy.
 			throw IOException("session sidecar failed to decrypt", e)
 		} finally {
@@ -601,6 +625,8 @@ class ReflectiveMatrixHomeserverDiscoveryClient(private val discoveryTimeoutMs: 
 		const val SQLITE_STORE_BUILDER_CLASS_NAME = "org.matrix.rustcomponents.sdk.SqliteStoreBuilder"
 		const val SESSION_CLASS_NAME = "org.matrix.rustcomponents.sdk.Session"
 		const val SESSION_DELEGATE_CLASS_NAME = "org.matrix.rustcomponents.sdk.ClientSessionDelegate"
+		const val CLIENT_EXCEPTION_GENERIC_CLASS_NAME =
+			"org.matrix.rustcomponents.sdk.ClientException\$Generic"
 		const val DEVICE_NAME = "Harbor"
 		const val AEAD_TRANSFORMATION = "AES/GCM/NoPadding"
 		const val GCM_NONCE_LENGTH_BYTES = 12

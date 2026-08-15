@@ -8,13 +8,16 @@ import org.briarproject.briar.matrix.MatrixLoginClient.RestoreResult
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import org.matrix.rustcomponents.sdk.ClientBuildException
+import org.matrix.rustcomponents.sdk.ClientException
 import org.matrix.rustcomponents.sdk.FakeMatrixSdkState
 import java.io.File
+import java.lang.reflect.UndeclaredThrowableException
 import java.util.Collections
 import java.util.concurrent.TimeUnit
 
@@ -111,6 +114,70 @@ class ReflectiveMatrixHomeserverDiscoveryClientTest {
 		val restoreResult = freshClient.restore(wrongKeyConfiguration)
 
 		assertEquals(RestoreResult.NotFound, restoreResult)
+	}
+
+	// The pinned AAR's `ClientSessionDelegate.retrieveSessionFromKeychain` bytecode declares no
+	// `throws` clause, so the JDK's `Proxy` dispatcher wraps our checked `ClientException` throw
+	// into `UndeclaredThrowableException` before it reaches the caller; these tests assert that
+	// real, observed shape (checked exception with a real `ClientException` cause) rather than a
+	// bare `ClientException`, which only the pre-fix fake's incorrect `@Throws` annotation made
+	// look reachable. See `SessionDelegateInvocationHandler`'s KDoc for the full explanation.
+
+	@Test
+	fun `session delegate retrieval fails closed instead of null for a missing sidecar`() {
+		val storeConfiguration = fakeStoreConfiguration()
+		val client = ReflectiveMatrixHomeserverDiscoveryClient()
+		assertEquals(
+			NONE,
+			client.login("https://matrix.example.org", "alice", "swordfish", storeConfiguration),
+		)
+		val delegate = FakeMatrixSdkState.lastSessionDelegate!!
+		assertTrue(File(storeConfiguration.directory, "session").delete())
+
+		val thrown = assertThrows(UndeclaredThrowableException::class.java) {
+			delegate.retrieveSessionFromKeychain("@alice:matrix.example.org")
+		}
+		assertTrue(thrown.cause is ClientException)
+	}
+
+	@Test
+	fun `session delegate retrieval fails closed instead of null for a corrupt sidecar`() {
+		val storeConfiguration = fakeStoreConfiguration()
+		val client = ReflectiveMatrixHomeserverDiscoveryClient()
+		assertEquals(
+			NONE,
+			client.login("https://matrix.example.org", "alice", "swordfish", storeConfiguration),
+		)
+		val delegate = FakeMatrixSdkState.lastSessionDelegate!!
+		val sessionFile = File(storeConfiguration.directory, "session")
+		val tampered = sessionFile.readBytes()
+		tampered[tampered.size - 1] = (tampered[tampered.size - 1] + 1).toByte()
+		sessionFile.writeBytes(tampered)
+
+		val thrown = assertThrows(UndeclaredThrowableException::class.java) {
+			delegate.retrieveSessionFromKeychain("@alice:matrix.example.org")
+		}
+		assertTrue(thrown.cause is ClientException)
+	}
+
+	@Test
+	fun `compiled client never references java-nio API 26-only Files or Path types`() {
+		val classBytes = ReflectiveMatrixHomeserverDiscoveryClient::class.java
+			.getResourceAsStream("ReflectiveMatrixHomeserverDiscoveryClient.class")!!
+			.use { it.readBytes() }
+		// Constant-pool UTF8 entries for referenced class names appear as contiguous ASCII
+		// bytes, so a raw substring search over the class file's ISO-8859-1 text is enough to
+		// catch a `java.nio.file.Files`/`Path` reference reappearing without needing a class
+		// file parser; Harbor's minSdk is 21 and those types are Android API 26+.
+		val text = String(classBytes, Charsets.ISO_8859_1)
+		assertFalse(
+			"must not reference java/nio/file/Files (Android API 26+) on minSdk 21",
+			text.contains("java/nio/file/Files"),
+		)
+		assertFalse(
+			"must not reference java/nio/file/Path (Android API 26+) on minSdk 21",
+			text.contains("java/nio/file/Path"),
+		)
 	}
 
 	private fun fakeStoreConfiguration(): MatrixStoreConfiguration = MatrixStoreConfiguration(
