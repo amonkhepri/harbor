@@ -7,6 +7,12 @@ import org.briarproject.briar.api.matrix.MatrixAuthSession.RecoverableErrorDetai
 import org.briarproject.briar.api.matrix.MatrixAuthSession.RecoverableErrorDetail.NONE
 import org.briarproject.briar.api.matrix.MatrixHomeserverDiscoveryClient
 import org.briarproject.briar.api.matrix.MatrixHomeserverDiscoveryClient.DiscoveryResult
+import java.io.DataInputStream
+import java.io.DataOutputStream
+import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
+import java.io.IOException
 import java.lang.reflect.InvocationTargetException
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -28,6 +34,16 @@ import kotlin.coroutines.intrinsics.COROUTINE_SUSPENDED
  * `Continuation`-based bytecode signature to a blocking call so [discover]
  * itself stays synchronous per the interface contract. Discovery uses only a
  * temporary client; login retains its client until logout or close.
+ *
+ * Persistent login uses the pinned AAR's real shape:
+ * `ClientBuilder.sqliteStore(SqliteStoreBuilder(dataPath, cachePath).passphrase(...))`,
+ * not the nonexistent `ClientBuilder.sqlitePath`/`ClientBuilder.passphrase`.
+ * `Client.session()` is non-nullable and only meaningful right after a
+ * successful `login()`, so a fresh instance cannot detect a prior login by
+ * calling it; instead a successful [login] serializes the SDK's `Session`
+ * fields into a sidecar file inside the store directory, and [restore] feeds
+ * that `Session` back through the explicit `Client.restoreSession(Session,
+ * Continuation)` API on a freshly built client pointed at the same store.
  */
 class ReflectiveMatrixHomeserverDiscoveryClient(private val discoveryTimeoutMs: Long = 30_000L) :
 	MatrixHomeserverDiscoveryClient,
@@ -97,6 +113,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(private val discoveryTimeoutMs: 
 				arrayOf(String::class.java, String::class.java, String::class.java, String::class.java),
 				arrayOf(username, password, DEVICE_NAME, null),
 			)
+			if (storeConfiguration != null) persistSession(client, storeConfiguration)
 			close()
 			loginClient = client
 			client = null
@@ -119,32 +136,37 @@ class ReflectiveMatrixHomeserverDiscoveryClient(private val discoveryTimeoutMs: 
 	}
 
 	/**
-	 * Builds against [storeConfiguration]'s persistent store and asks the SDK
-	 * whether that store already holds a session (`Client.session()` returns
-	 * non-null). An empty/fresh store yields [RestoreResult.NotFound], not a
-	 * failure.
+	 * Reads the `Session` persisted by a prior [login] into [storeConfiguration]'s
+	 * sidecar file and feeds it back through `Client.restoreSession(Session,
+	 * Continuation)` on a client freshly built against the same store. A missing
+	 * sidecar file yields [MatrixLoginClient.RestoreResult.NotFound], not a
+	 * failure; the store itself is not opened in that case.
 	 */
 	@Synchronized
 	override fun restore(
 		storeConfiguration: MatrixStoreConfiguration,
 	): MatrixLoginClient.RestoreResult {
-		val builders = ArrayList<Any>(3)
+		val file = sessionFile(storeConfiguration)
+		if (!file.isFile) return MatrixLoginClient.RestoreResult.NotFound
+		val builders = ArrayList<Any>(4)
 		var client: Any? = null
 		return try {
+			val sessionClass = Class.forName(SESSION_CLASS_NAME)
+			val session = readSessionFile(file, sessionClass)
 			val builderClass = Class.forName(CLIENT_BUILDER_CLASS_NAME)
 			var builder = track(builders, builderClass.getConstructor().newInstance())
+			builder = track(
+				builders,
+				builderClass.getMethod("homeserverUrl", String::class.java)
+					.invoke(builder, sessionClass.getMethod("getHomeserverUrl").invoke(session)),
+			)
 			builder = track(builders, applyStore(builders, builder, builderClass, storeConfiguration))
 			client = buildClient(builder, builderClass)
-			val session = client.javaClass.getMethod("session").invoke(client)
-			if (session == null) {
-				MatrixLoginClient.RestoreResult.NotFound
-			} else {
-				val restored = client
-				val homeserverUrl = readHomeserverUrl(restored)
-				loginClient = restored
-				client = null
-				MatrixLoginClient.RestoreResult.Restored(homeserverUrl)
-			}
+			invokeUnit(client, "restoreSession", arrayOf(sessionClass), arrayOf(session))
+			val homeserverUrl = readHomeserverUrl(client)
+			loginClient = client
+			client = null
+			MatrixLoginClient.RestoreResult.Restored(homeserverUrl)
 		} catch (e: DiscoveryAdapterFailure) {
 			MatrixLoginClient.RestoreResult.NotFound
 		} catch (e: InvocationTargetException) {
@@ -156,13 +178,19 @@ class ReflectiveMatrixHomeserverDiscoveryClient(private val discoveryTimeoutMs: 
 		} catch (e: InterruptedException) {
 			Thread.currentThread().interrupt()
 			MatrixLoginClient.RestoreResult.NotFound
+		} catch (e: IOException) {
+			MatrixLoginClient.RestoreResult.NotFound
 		} finally {
 			closeQuietly(client)
 			for (i in builders.indices.reversed()) closeQuietly(builders[i])
 		}
 	}
 
-	/** Applies [storeConfiguration] to [builder], tracking every wrapper it returns. */
+	/**
+	 * Applies [storeConfiguration] to [builder] via the real
+	 * `ClientBuilder.sqliteStore(SqliteStoreBuilder)` API, tracking every closeable
+	 * wrapper the chain returns.
+	 */
 	private fun applyStore(
 		builders: MutableList<Any>,
 		builder: Any,
@@ -172,16 +200,104 @@ class ReflectiveMatrixHomeserverDiscoveryClient(private val discoveryTimeoutMs: 
 		if (storeConfiguration == null) {
 			return builderClass.getMethod("inMemoryStore").invoke(builder)
 		}
-		val withPath = track(
+		val storeBuilderClass = Class.forName(SQLITE_STORE_BUILDER_CLASS_NAME)
+		var storeBuilder = track(
 			builders,
-			builderClass.getMethod("sqlitePath", String::class.java)
-				.invoke(builder, storeConfiguration.directory.absolutePath),
+			storeBuilderClass.getConstructor(String::class.java, String::class.java)
+				.newInstance(sqliteDataPath(storeConfiguration), sqliteCachePath(storeConfiguration)),
 		)
-		return builderClass.getMethod("passphrase", String::class.java)
-			.invoke(withPath, encodeHex(storeConfiguration.copyEncryptionKey()))
+		storeBuilder = track(
+			builders,
+			storeBuilderClass.getMethod("passphrase", String::class.java)
+				.invoke(storeBuilder, encodeHex(storeConfiguration.copyEncryptionKey())),
+		)
+		return builderClass.getMethod("sqliteStore", storeBuilderClass).invoke(builder, storeBuilder)
 	}
 
+	private fun sqliteDataPath(storeConfiguration: MatrixStoreConfiguration): String =
+		File(storeConfiguration.directory, "data").apply { mkdirs() }.absolutePath
+
+	private fun sqliteCachePath(storeConfiguration: MatrixStoreConfiguration): String =
+		File(storeConfiguration.directory, "cache").apply { mkdirs() }.absolutePath
+
 	private fun encodeHex(bytes: ByteArray): String = bytes.joinToString("") { "%02x".format(it) }
+
+	/** Reads [client]'s post-login `Session` and persists it to [storeConfiguration]'s sidecar file. */
+	private fun persistSession(client: Any, storeConfiguration: MatrixStoreConfiguration) {
+		val session = client.javaClass.getMethod("session").invoke(client)
+		writeSessionFile(sessionFile(storeConfiguration), session)
+	}
+
+	/** Serializes an SDK `Session`'s fields via its public getters; never logs their values. */
+	private fun writeSessionFile(file: File, session: Any) {
+		val sessionClass = session.javaClass
+		val accessToken = sessionClass.getMethod("getAccessToken").invoke(session) as String
+		val refreshToken = sessionClass.getMethod("getRefreshToken").invoke(session) as String?
+		val userId = sessionClass.getMethod("getUserId").invoke(session) as String
+		val deviceId = sessionClass.getMethod("getDeviceId").invoke(session) as String
+		val homeserverUrl = sessionClass.getMethod("getHomeserverUrl").invoke(session) as String
+		val oauthData = sessionClass.getMethod("getOauthData").invoke(session) as String?
+		val slidingSyncVersion = sessionClass.getMethod("getSlidingSyncVersion").invoke(session)
+		val slidingSyncVersionName =
+			slidingSyncVersion.javaClass.getMethod("name").invoke(slidingSyncVersion) as String
+		file.parentFile?.mkdirs()
+		DataOutputStream(FileOutputStream(file)).use { out ->
+			out.writeUTF(accessToken)
+			writeNullableUtf(out, refreshToken)
+			out.writeUTF(userId)
+			out.writeUTF(deviceId)
+			out.writeUTF(homeserverUrl)
+			writeNullableUtf(out, oauthData)
+			out.writeUTF(slidingSyncVersionName)
+		}
+		file.setReadable(false, false)
+		file.setWritable(false, false)
+		file.setReadable(true, true)
+		file.setWritable(true, true)
+	}
+
+	private fun writeNullableUtf(out: DataOutputStream, value: String?) {
+		out.writeBoolean(value != null)
+		if (value != null) out.writeUTF(value)
+	}
+
+	/** Reconstructs an SDK `Session` reflectively from [file], matching [writeSessionFile]'s layout. */
+	private fun readSessionFile(file: File, sessionClass: Class<*>): Any =
+		DataInputStream(FileInputStream(file)).use { input ->
+			val accessToken = input.readUTF()
+			val refreshToken = readNullableUtf(input)
+			val userId = input.readUTF()
+			val deviceId = input.readUTF()
+			val homeserverUrl = input.readUTF()
+			val oauthData = readNullableUtf(input)
+			val slidingSyncVersionName = input.readUTF()
+			val slidingSyncVersionClass = sessionClass.getMethod("getSlidingSyncVersion").returnType
+			val slidingSyncVersion = slidingSyncVersionClass.getMethod("valueOf", String::class.java)
+				.invoke(null, slidingSyncVersionName)
+			sessionClass.getConstructor(
+				String::class.java,
+				String::class.java,
+				String::class.java,
+				String::class.java,
+				String::class.java,
+				String::class.java,
+				slidingSyncVersionClass,
+			).newInstance(
+				accessToken,
+				refreshToken,
+				userId,
+				deviceId,
+				homeserverUrl,
+				oauthData,
+				slidingSyncVersion,
+			)
+		}
+
+	private fun readNullableUtf(input: DataInputStream): String? =
+		if (input.readBoolean()) input.readUTF() else null
+
+	private fun sessionFile(storeConfiguration: MatrixStoreConfiguration): File =
+		File(storeConfiguration.directory, "session")
 
 	@Synchronized
 	override fun logout() {
@@ -322,6 +438,8 @@ class ReflectiveMatrixHomeserverDiscoveryClient(private val discoveryTimeoutMs: 
 
 	private companion object {
 		const val CLIENT_BUILDER_CLASS_NAME = "org.matrix.rustcomponents.sdk.ClientBuilder"
+		const val SQLITE_STORE_BUILDER_CLASS_NAME = "org.matrix.rustcomponents.sdk.SqliteStoreBuilder"
+		const val SESSION_CLASS_NAME = "org.matrix.rustcomponents.sdk.Session"
 		const val DEVICE_NAME = "Harbor"
 	}
 }

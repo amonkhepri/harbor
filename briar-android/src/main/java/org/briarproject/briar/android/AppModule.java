@@ -65,6 +65,8 @@ import org.briarproject.briar.api.matrix.MatrixAuthSession;
 import org.briarproject.briar.api.test.TestAvatarCreator;
 import org.briarproject.briar.matrix.DisabledMatrixAuthSession;
 import org.briarproject.briar.matrix.MatrixAuthSessionImpl;
+import org.briarproject.briar.matrix.MatrixStoreConfigurationProvider;
+import org.briarproject.briar.matrix.ProtectedMatrixStoreConfigurationProvider;
 import org.briarproject.briar.matrix.ReflectiveMatrixHomeserverDiscoveryClient;
 import org.briarproject.nullsafety.NotNullByDefault;
 
@@ -391,12 +393,14 @@ public class AppModule {
 
 	@Provides
 	@Singleton
-	MatrixAuthSession provideMatrixAuthSession() {
+	MatrixAuthSession provideMatrixAuthSession(DatabaseConfig databaseConfig) {
 		if (!BuildConfig.MATRIX_CONNECTOR_ENABLED) {
 			return new DisabledMatrixAuthSession();
 		}
 		ReflectiveMatrixHomeserverDiscoveryClient client =
 				new ReflectiveMatrixHomeserverDiscoveryClient();
-		return new MatrixAuthSessionImpl(client, client);
+		MatrixStoreConfigurationProvider storeConfigurationProvider =
+				new ProtectedMatrixStoreConfigurationProvider(databaseConfig);
+		return new MatrixAuthSessionImpl(client, client, storeConfigurationProvider);
 	}
 }

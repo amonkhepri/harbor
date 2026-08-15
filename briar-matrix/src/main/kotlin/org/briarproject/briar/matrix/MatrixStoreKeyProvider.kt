@@ -22,7 +22,7 @@ class MatrixStoreConfiguration(
 	fun copyEncryptionKey(): ByteArray = encryptionKey.copyOf()
 }
 
-class ProtectedMatrixStoreConfigurationProvider(
+class ProtectedMatrixStoreConfigurationProvider @JvmOverloads constructor(
 	private val databaseConfig: DatabaseConfig,
 	private val keyProvider: MatrixStoreKeyProvider = ProtectedMatrixStoreKeyProvider(databaseConfig),
 ) : MatrixStoreConfigurationProvider {

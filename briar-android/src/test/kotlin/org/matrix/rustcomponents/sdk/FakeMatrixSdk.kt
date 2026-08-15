@@ -11,6 +11,12 @@ import kotlin.coroutines.suspendCoroutine
  * test double for TDLib: only compiled into `:briar-android`'s test source set, so
  * it does not collide with the real AAR, which is only pulled onto any classpath
  * when `harbor.matrixConnector.enabled=true` (default test runs leave it off).
+ *
+ * The shapes below match the pinned `sdk-android:26.08.05` AAR's decompiled public
+ * surface: `ClientBuilder.sqliteStore(SqliteStoreBuilder)`, not a `sqlitePath`/
+ * `passphrase` pair on `ClientBuilder` itself; `SqliteStoreBuilder(dataPath,
+ * cachePath).passphrase(String)`; `Client.session()` throwing [ClientException]
+ * until a session exists; and `Client.restoreSession(Session, Continuation)`.
  */
 sealed class ClientBuildException(message: String) : Exception(message) {
 	class InvalidServerName : ClientBuildException("invalid server name")
@@ -18,14 +24,27 @@ sealed class ClientBuildException(message: String) : Exception(message) {
 	class Generic : ClientBuildException("generic failure")
 }
 
-class Client internal constructor(
-	private val homeserverUrl: String?,
-	private val storePath: String? = null,
-) {
+class ClientException(message: String) : Exception(message)
+
+enum class SlidingSyncVersion { NONE, NATIVE }
+
+class Session(
+	val accessToken: String,
+	val refreshToken: String?,
+	val userId: String,
+	val deviceId: String,
+	val homeserverUrl: String,
+	val oauthData: String?,
+	val slidingSyncVersion: SlidingSyncVersion,
+)
+
+class Client internal constructor(private val homeserverUrl: String?) {
+	private var session: Session? = null
+
 	fun homeserver(): String? = homeserverUrl
 
-	/** Non-null once [login] has persisted to [storePath]; mirrors the real SDK's restore check. */
-	fun session(): Any? = storePath?.takeIf { FakeMatrixSdkState.isPersisted(it) }
+	/** Throws like the real SDK until a session exists from [login] or [restoreSession]. */
+	fun session(): Session = session ?: throw ClientException("no session")
 
 	suspend fun login(
 		username: String,
@@ -34,12 +53,27 @@ class Client internal constructor(
 		deviceId: String?,
 	) {
 		FakeMatrixSdkState.loginCallCount++
-		storePath?.let { FakeMatrixSdkState.markPersisted(it) }
+		session = Session(
+			accessToken = "fake-access-token",
+			refreshToken = null,
+			userId = "@$username:matrix.example.org",
+			deviceId = "FAKEDEVICE",
+			homeserverUrl = homeserverUrl.orEmpty(),
+			oauthData = null,
+			slidingSyncVersion = SlidingSyncVersion.NATIVE,
+		)
 	}
+
+	suspend fun restoreSession(session: Session) {
+		FakeMatrixSdkState.restoreSessionCallCount++
+		this.session = session
+	}
+
 	suspend fun logout() {
 		FakeMatrixSdkState.logoutCallCount++
-		storePath?.let { FakeMatrixSdkState.clearPersisted(it) }
+		session = null
 	}
+
 	fun close() {
 		FakeMatrixSdkState.clientCloseCount++
 	}
@@ -47,9 +81,9 @@ class Client internal constructor(
 
 /**
  * Mirrors the pinned SDK's real shape: `ClientBuilder` is `AutoCloseable`, and
- * [serverName] and [inMemoryStore] each return a distinct closeable wrapper
- * rather than mutating the receiver, so a fix that only closes one instance
- * still leaks the others.
+ * [serverName], [inMemoryStore], and [sqliteStore] each return a distinct
+ * closeable wrapper rather than mutating the receiver, so a fix that only closes
+ * one instance still leaks the others.
  */
 class ClientBuilder : AutoCloseable {
 
@@ -60,7 +94,7 @@ class ClientBuilder : AutoCloseable {
 
 	fun inMemoryStore(): ClientBuilder {
 		FakeMatrixSdkState.inMemoryStoreCalled = true
-		FakeMatrixSdkState.lastSqlitePath = null
+		FakeMatrixSdkState.sqliteStoreCalled = false
 		return ClientBuilder()
 	}
 
@@ -69,14 +103,9 @@ class ClientBuilder : AutoCloseable {
 		return ClientBuilder()
 	}
 
-	fun sqlitePath(path: String): ClientBuilder {
-		FakeMatrixSdkState.lastSqlitePath = path
+	fun sqliteStore(storeBuilder: SqliteStoreBuilder): ClientBuilder {
+		FakeMatrixSdkState.sqliteStoreCalled = true
 		FakeMatrixSdkState.inMemoryStoreCalled = false
-		return ClientBuilder()
-	}
-
-	fun passphrase(passphrase: String): ClientBuilder {
-		FakeMatrixSdkState.lastPassphrase = passphrase
 		return ClientBuilder()
 	}
 
@@ -89,16 +118,8 @@ class ClientBuilder : AutoCloseable {
 		FakeMatrixSdkState.failureToThrow?.let { failure ->
 			if (!FakeMatrixSdkState.failAsynchronously) throw failure
 		}
-		// A build only carries a persistent store path when inMemoryStore() was not
-		// called, mirroring the reflective client's mutually exclusive builder calls.
-		val storePath = FakeMatrixSdkState.lastSqlitePath.takeUnless {
-			FakeMatrixSdkState.inMemoryStoreCalled
-		}
 		if (!FakeMatrixSdkState.suspendAsynchronously) {
-			return Client(
-				FakeMatrixSdkState.homeserverUrlToReturn,
-				storePath,
-			)
+			return Client(FakeMatrixSdkState.homeserverUrlToReturn)
 		}
 		return suspendCoroutine { continuation ->
 			Thread {
@@ -107,16 +128,37 @@ class ClientBuilder : AutoCloseable {
 				if (asyncFailure != null && FakeMatrixSdkState.failAsynchronously) {
 					continuation.resumeWithException(asyncFailure)
 				} else {
-					continuation.resume(Client(FakeMatrixSdkState.homeserverUrlToReturn, storePath))
+					continuation.resume(Client(FakeMatrixSdkState.homeserverUrlToReturn))
 				}
 			}.start()
 		}
 	}
 }
 
+/** Mirrors the pinned SDK's `SqliteStoreBuilder`: also `AutoCloseable`, also wrapper-per-call. */
+class SqliteStoreBuilder(dataPath: String, cachePath: String) : AutoCloseable {
+	init {
+		FakeMatrixSdkState.lastSqliteDataPath = dataPath
+		FakeMatrixSdkState.lastSqliteCachePath = cachePath
+	}
+
+	fun passphrase(passphrase: String): SqliteStoreBuilder {
+		FakeMatrixSdkState.lastPassphrase = passphrase
+		return SqliteStoreBuilder(
+			FakeMatrixSdkState.lastSqliteDataPath.orEmpty(),
+			FakeMatrixSdkState.lastSqliteCachePath.orEmpty(),
+		)
+	}
+
+	override fun close() {
+		FakeMatrixSdkState.storeBuilderCloseCount++
+	}
+}
+
 object FakeMatrixSdkState {
 	var lastServerName: String? = null
 	var inMemoryStoreCalled = false
+	var sqliteStoreCalled = false
 	var homeserverUrlToReturn: String? = "https://matrix.example.org"
 	var failureToThrow: ClientBuildException? = null
 	var failAsynchronously = false
@@ -125,25 +167,19 @@ object FakeMatrixSdkState {
 	var buildCallCount = 0
 	var clientCloseCount = 0
 	var builderCloseCount = 0
+	var storeBuilderCloseCount = 0
 	var lastHomeserverUrl: String? = null
-	var lastSqlitePath: String? = null
+	var lastSqliteDataPath: String? = null
+	var lastSqliteCachePath: String? = null
 	var lastPassphrase: String? = null
 	var loginCallCount = 0
+	var restoreSessionCallCount = 0
 	var logoutCallCount = 0
-
-	private val persistedStorePaths = mutableSetOf<String>()
-
-	fun isPersisted(storePath: String): Boolean = storePath in persistedStorePaths
-	fun markPersisted(storePath: String) {
-		persistedStorePaths.add(storePath)
-	}
-	fun clearPersisted(storePath: String) {
-		persistedStorePaths.remove(storePath)
-	}
 
 	fun reset() {
 		lastServerName = null
 		inMemoryStoreCalled = false
+		sqliteStoreCalled = false
 		homeserverUrlToReturn = "https://matrix.example.org"
 		failureToThrow = null
 		failAsynchronously = false
@@ -152,11 +188,13 @@ object FakeMatrixSdkState {
 		buildCallCount = 0
 		clientCloseCount = 0
 		builderCloseCount = 0
+		storeBuilderCloseCount = 0
 		lastHomeserverUrl = null
-		lastSqlitePath = null
+		lastSqliteDataPath = null
+		lastSqliteCachePath = null
 		lastPassphrase = null
 		loginCallCount = 0
+		restoreSessionCallCount = 0
 		logoutCallCount = 0
-		persistedStorePaths.clear()
 	}
 }
