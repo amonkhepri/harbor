@@ -29,12 +29,13 @@ class MatrixRoomConnectorTest {
 	}
 
 	@Test
-	fun `getRecentThreads maps snapshots to connector-neutral threads with no known latest message`() {
+	fun `getRecentThreads reports no known latest message when the message client returns null`() {
 		val roomSnapshotClient = FakeRoomSnapshotClient(
 			listOf(MatrixRoomSnapshot("!a:example.org", "Alpha")),
 		)
 		val connector = connector(
 			roomSnapshotClient = roomSnapshotClient,
+			messageSnapshotClient = FakeMessageSnapshotClient(null),
 			authSession = FakeMatrixAuthSession(MatrixAuthState.READY),
 		)
 
@@ -45,18 +46,71 @@ class MatrixRoomConnectorTest {
 		assertEquals(ConnectorSources.MATRIX, thread.source)
 		assertEquals("!a:example.org", thread.threadId)
 		assertEquals("Alpha", thread.title)
+		assertEquals(0, thread.latestActivityDateSeconds)
 		assertEquals("", thread.latestMessageText)
 		assertFalse(thread.isLatestMessageOutgoing)
 		assertEquals(10, roomSnapshotClient.lastRequestedLimit)
 	}
 
 	@Test
-	fun `getRecentThreads fails closed without querying rooms when not authorized`() {
+	fun `getRecentThreads reports no known latest message when the room has no messages`() {
 		val roomSnapshotClient = FakeRoomSnapshotClient(
 			listOf(MatrixRoomSnapshot("!a:example.org", "Alpha")),
 		)
 		val connector = connector(
 			roomSnapshotClient = roomSnapshotClient,
+			messageSnapshotClient = FakeMessageSnapshotClient(emptyList()),
+			authSession = FakeMatrixAuthSession(MatrixAuthState.READY),
+		)
+
+		val thread = connector.getRecentThreads(10).single()
+
+		assertEquals(0, thread.latestActivityDateSeconds)
+		assertEquals("", thread.latestMessageText)
+		assertFalse(thread.isLatestMessageOutgoing)
+	}
+
+	@Test
+	fun `getRecentThreads wires the latest message preview per room`() {
+		val roomSnapshotClient = FakeRoomSnapshotClient(
+			listOf(MatrixRoomSnapshot("!a:example.org", "Alpha")),
+		)
+		val messageSnapshotClient = FakeMessageSnapshotClient(
+			listOf(
+				MatrixMessageSnapshot(
+					eventId = "\$a:example.org",
+					senderId = "@alice:example.org",
+					bodyText = "hello",
+					originServerTimestampSeconds = 42L,
+					isOutgoing = true,
+				),
+			),
+		)
+		val connector = connector(
+			roomSnapshotClient = roomSnapshotClient,
+			messageSnapshotClient = messageSnapshotClient,
+			authSession = FakeMatrixAuthSession(MatrixAuthState.READY),
+		)
+
+		val thread = connector.getRecentThreads(10).single()
+
+		assertEquals(42, thread.latestActivityDateSeconds)
+		assertEquals("hello", thread.latestMessageText)
+		assertTrue(thread.isLatestMessageOutgoing)
+		assertEquals(ConnectorMessageType.TEXT, thread.latestMessageType)
+		assertEquals("!a:example.org", messageSnapshotClient.lastRequestedRoomId)
+		assertEquals(1, messageSnapshotClient.lastRequestedLimit)
+	}
+
+	@Test
+	fun `getRecentThreads fails closed without querying rooms or messages when not authorized`() {
+		val roomSnapshotClient = FakeRoomSnapshotClient(
+			listOf(MatrixRoomSnapshot("!a:example.org", "Alpha")),
+		)
+		val messageSnapshotClient = FakeMessageSnapshotClient(emptyList())
+		val connector = connector(
+			roomSnapshotClient = roomSnapshotClient,
+			messageSnapshotClient = messageSnapshotClient,
 			authSession = FakeMatrixAuthSession(MatrixAuthState.HOMESERVER_ENTRY),
 		)
 
@@ -64,6 +118,7 @@ class MatrixRoomConnectorTest {
 
 		assertEquals(emptyList<Any>(), threads)
 		assertEquals(null, roomSnapshotClient.lastRequestedLimit)
+		assertEquals(null, messageSnapshotClient.lastRequestedRoomId)
 	}
 
 	@Test

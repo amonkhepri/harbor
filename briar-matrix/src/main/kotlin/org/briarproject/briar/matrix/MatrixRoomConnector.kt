@@ -21,8 +21,11 @@ import org.briarproject.briar.api.matrix.MatrixConnector
  * for one room (MX-007 sub-slice 4): a `null` result (no session, room not
  * found, or timeline load failure) maps to [ConnectorMessageReadResult
  * .LoadFailed], and a list — including an empty one — maps to
- * [ConnectorMessageReadResult.Success]. Threads still report no known latest
- * message; wiring that read is a later, separately reviewed slice.
+ * [ConnectorMessageReadResult.Success]. [getRecentThreads] wires each row's
+ * latest-message preview from the same [messageSnapshotClient] (MX-007 M3
+ * item 3 follow-up): a load failure or empty result leaves the row at its
+ * prior no-known-latest-message defaults, so one room's message-read failure
+ * cannot drop the room from the inbox or crash listing.
  */
 class MatrixRoomConnector(
 	private val roomSnapshotClient: MatrixRoomSnapshotClient,
@@ -38,13 +41,16 @@ class MatrixRoomConnector(
 	override fun getRecentThreads(limit: Int): List<ConnectorThread> {
 		if (!isAuthorized()) return emptyList()
 		return roomSnapshotClient.getJoinedRooms(limit).map { snapshot ->
+			val latest = messageSnapshotClient.getRecentMessages(snapshot.roomId, 1)?.lastOrNull()
 			ConnectorThread(
 				source = source,
 				threadId = snapshot.roomId,
 				title = snapshot.displayName,
-				latestActivityDateSeconds = 0,
-				latestMessageText = "",
-				isLatestMessageOutgoing = false,
+				latestActivityDateSeconds = latest?.originServerTimestampSeconds
+					?.coerceIn(Int.MIN_VALUE.toLong(), Int.MAX_VALUE.toLong())
+					?.toInt() ?: 0,
+				latestMessageText = latest?.bodyText ?: "",
+				isLatestMessageOutgoing = latest?.isOutgoing ?: false,
 				latestMessageType = ConnectorMessageType.TEXT,
 			)
 		}
