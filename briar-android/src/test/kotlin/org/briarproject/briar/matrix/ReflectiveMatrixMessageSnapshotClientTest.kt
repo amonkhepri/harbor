@@ -25,13 +25,14 @@ class ReflectiveMatrixMessageSnapshotClientTest {
 	fun `getRecentMessages distinguishes missing session and room from an empty snapshot`() {
 		val client = ReflectiveMatrixHomeserverDiscoveryClient()
 
+		assertEquals(emptyList<Any>(), client.getRecentMessages("!missing:example.org", 0))
 		assertNull(client.getRecentMessages("!missing:example.org", 20))
 		assertEquals(NONE, client.login("https://matrix.example.org", "alice", "swordfish"))
 		assertNull(client.getRecentMessages("!missing:example.org", 20))
 		FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec("!room:example.org"))
 		assertEquals(emptyList<Any>(), client.getRecentMessages("!room:example.org", 0))
 		assertEquals(0, FakeMatrixSdkState.timelineCallCount)
-		assertEquals(1, FakeMatrixSdkState.roomCloseCount)
+		assertEquals(0, FakeMatrixSdkState.roomCloseCount)
 	}
 
 	@Test
@@ -62,6 +63,8 @@ class ReflectiveMatrixMessageSnapshotClientTest {
 		)
 		assertEquals(1, FakeMatrixSdkState.timelineCallCount)
 		assertEquals(1, FakeMatrixSdkState.listenerAddCount)
+		assertEquals(0, FakeMatrixSdkState.paginationCallCount)
+		assertEquals(listOf("listener"), FakeMatrixSdkState.timelineOperationOrder)
 		assertEquals(1, FakeMatrixSdkState.roomCloseCount)
 		assertEquals(1, FakeMatrixSdkState.timelineCloseCount)
 		assertEquals(1, FakeMatrixSdkState.taskCancelCount)
@@ -71,6 +74,94 @@ class ReflectiveMatrixMessageSnapshotClientTest {
 		assertEquals(4, FakeMatrixSdkState.eventTimelineItemDestroyCount)
 		assertEquals(3, FakeMatrixSdkState.messageContentDestroyCount)
 		assertEquals(1, FakeMatrixSdkState.otherContentDestroyCount)
+	}
+
+	@Test
+	fun `getRecentMessages paginates once then maps a fresh full snapshot`() {
+		val client = loggedInClient()
+		FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec("!room:example.org"))
+		FakeMatrixSdkState.timelineDiffsToReturn = listOf(
+			TimelineDiff.Reset(listOf(remoteEvent("\$newer:example.org", "newer", 2_000uL))),
+		)
+		FakeMatrixSdkState.timelineDiffsAfterPagination = listOf(
+			TimelineDiff.Reset(
+				listOf(
+					remoteEvent("\$older:example.org", "older", 1_000uL),
+					remoteEvent("\$newer:example.org", "newer", 2_000uL),
+				),
+			),
+		)
+
+		val result = client.getRecentMessages("!room:example.org", 2)
+
+		assertEquals(
+			listOf(
+				MatrixMessageSnapshot("\$older:example.org", "@alice:example.org", "older", 1L, false),
+				MatrixMessageSnapshot("\$newer:example.org", "@alice:example.org", "newer", 2L, false),
+			),
+			result,
+		)
+		assertEquals(1, FakeMatrixSdkState.paginationCallCount)
+		assertEquals(listOf(1), FakeMatrixSdkState.paginationRequestedEventCounts)
+		assertEquals(
+			listOf("listener", "paginateBackwards", "listener"),
+			FakeMatrixSdkState.timelineOperationOrder,
+		)
+		assertEquals(2, FakeMatrixSdkState.listenerAddCount)
+		assertEquals(2, FakeMatrixSdkState.taskCancelCount)
+		assertEquals(2, FakeMatrixSdkState.taskCloseCount)
+		assertEquals(1, FakeMatrixSdkState.timelineCloseCount)
+		assertEquals(1, FakeMatrixSdkState.roomCloseCount)
+		assertEquals(2, FakeMatrixSdkState.timelineDiffDestroyCount)
+		assertEquals(3, FakeMatrixSdkState.timelineItemCloseCount)
+		assertEquals(3, FakeMatrixSdkState.eventTimelineItemDestroyCount)
+		assertEquals(3, FakeMatrixSdkState.messageContentDestroyCount)
+	}
+
+	@Test
+	fun `getRecentMessages clamps one pagination request to unsigned short range`() {
+		val client = loggedInClient()
+		FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec("!room:example.org"))
+		FakeMatrixSdkState.timelineDiffsToReturn = listOf(TimelineDiff.Reset(emptyList()))
+		FakeMatrixSdkState.timelineDiffsAfterPagination = listOf(TimelineDiff.Reset(emptyList()))
+
+		assertEquals(emptyList<Any>(), client.getRecentMessages("!room:example.org", Int.MAX_VALUE))
+		assertEquals(1, FakeMatrixSdkState.paginationCallCount)
+		assertEquals(listOf(UShort.MAX_VALUE.toInt()), FakeMatrixSdkState.paginationRequestedEventCounts)
+	}
+
+	@Test
+	fun `getRecentMessages maps pagination and second snapshot failures to null`() {
+		val client = loggedInClient()
+		FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec("!room:example.org"))
+		FakeMatrixSdkState.timelineDiffsToReturn = listOf(
+			TimelineDiff.Reset(listOf(remoteEvent("\$newer:example.org", "newer", 2_000uL))),
+		)
+		FakeMatrixSdkState.paginationFailureToThrow = IllegalStateException("pagination failed")
+
+		assertNull(client.getRecentMessages("!room:example.org", 2))
+		assertEquals(1, FakeMatrixSdkState.paginationCallCount)
+		assertEquals(1, FakeMatrixSdkState.listenerAddCount)
+		assertEquals(1, FakeMatrixSdkState.taskCancelCount)
+		assertEquals(1, FakeMatrixSdkState.taskCloseCount)
+		assertEquals(1, FakeMatrixSdkState.timelineCloseCount)
+		assertEquals(1, FakeMatrixSdkState.roomCloseCount)
+
+		FakeMatrixSdkState.reset()
+		val secondClient = loggedInClient()
+		FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec("!room:example.org"))
+		FakeMatrixSdkState.timelineDiffsToReturn = listOf(
+			TimelineDiff.Reset(listOf(remoteEvent("\$newer:example.org", "newer", 2_000uL))),
+		)
+		FakeMatrixSdkState.timelineDiffsAfterPagination = listOf(TimelineDiff.PopBack)
+
+		assertNull(secondClient.getRecentMessages("!room:example.org", 2))
+		assertEquals(1, FakeMatrixSdkState.paginationCallCount)
+		assertEquals(2, FakeMatrixSdkState.listenerAddCount)
+		assertEquals(2, FakeMatrixSdkState.taskCancelCount)
+		assertEquals(2, FakeMatrixSdkState.taskCloseCount)
+		assertEquals(1, FakeMatrixSdkState.timelineCloseCount)
+		assertEquals(1, FakeMatrixSdkState.roomCloseCount)
 	}
 
 	@Test

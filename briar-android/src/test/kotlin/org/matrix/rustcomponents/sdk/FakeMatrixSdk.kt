@@ -79,6 +79,7 @@ interface TimelineListener {
 class Timeline {
 	suspend fun addListener(listener: TimelineListener): TaskHandle {
 		FakeMatrixSdkState.listenerAddCount++
+		FakeMatrixSdkState.timelineOperationOrder.add("listener")
 		val task = TaskHandle()
 		if (!FakeMatrixSdkState.listenerRegistrationSuspendAsynchronously) {
 			deliverTimelineUpdate(listener)
@@ -95,19 +96,33 @@ class Timeline {
 		}
 	}
 
+	suspend fun paginateBackwards(numEvents: UShort): Boolean {
+		FakeMatrixSdkState.paginationCallCount++
+		FakeMatrixSdkState.paginationRequestedEventCounts.add(numEvents.toInt())
+		FakeMatrixSdkState.timelineOperationOrder.add("paginateBackwards")
+		FakeMatrixSdkState.paginationFailureToThrow?.let { throw it }
+		return FakeMatrixSdkState.paginationHitTimelineStart
+	}
+
 	fun close() {
 		FakeMatrixSdkState.timelineCloseCount++
 	}
 
 	private fun deliverTimelineUpdate(listener: TimelineListener) {
 		val delayMs = FakeMatrixSdkState.timelineUpdateDelayMs
+		val diffs = if (FakeMatrixSdkState.listenerAddCount > 1) {
+			FakeMatrixSdkState.timelineDiffsAfterPagination
+				?: FakeMatrixSdkState.timelineDiffsToReturn
+		} else {
+			FakeMatrixSdkState.timelineDiffsToReturn
+		}
 		if (delayMs <= 0) {
-			listener.onUpdate(FakeMatrixSdkState.timelineDiffsToReturn)
+			listener.onUpdate(diffs)
 			return
 		}
 		Thread {
 			Thread.sleep(delayMs)
-			listener.onUpdate(FakeMatrixSdkState.timelineDiffsToReturn)
+			listener.onUpdate(diffs)
 		}.start()
 	}
 }
@@ -501,6 +516,12 @@ object FakeMatrixSdkState {
 	var listenerRegistrationDelayMs = 0L
 	var timelineUpdateDelayMs = 0L
 	var timelineDiffsToReturn: List<TimelineDiff> = emptyList()
+	var timelineDiffsAfterPagination: List<TimelineDiff>? = null
+	var paginationCallCount = 0
+	val paginationRequestedEventCounts = mutableListOf<Int>()
+	val timelineOperationOrder = mutableListOf<String>()
+	var paginationHitTimelineStart = false
+	var paginationFailureToThrow: Exception? = null
 	var timelineCloseCount = 0
 	var taskCancelCount = 0
 	var taskCloseCount = 0
@@ -544,6 +565,12 @@ object FakeMatrixSdkState {
 		listenerRegistrationDelayMs = 0L
 		timelineUpdateDelayMs = 0L
 		timelineDiffsToReturn = emptyList()
+		timelineDiffsAfterPagination = null
+		paginationCallCount = 0
+		paginationRequestedEventCounts.clear()
+		timelineOperationOrder.clear()
+		paginationHitTimelineStart = false
+		paginationFailureToThrow = null
 		timelineCloseCount = 0
 		taskCancelCount = 0
 		taskCloseCount = 0

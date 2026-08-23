@@ -489,45 +489,34 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 	}
 
 	/**
-	 * Reads one bounded timeline snapshot from the retained client. Timeline listeners own the
+	 * Reads a bounded timeline snapshot from the retained client, requesting at most one backward
+	 * page when the initial mapped snapshot is shorter than [limit]. Timeline listeners own the
 	 * delivered diffs, so each callback maps all plain fields before destroying its diffs; the
 	 * retained SDK client is never closed here.
 	 */
 	@Synchronized
 	override fun getRecentMessages(roomId: String, limit: Int): List<MatrixMessageSnapshot>? {
+		if (limit <= 0) return emptyList()
 		val client = loginClient ?: return null
 		var room: Any? = null
 		var timeline: Any? = null
-		var listenerTask: Any? = null
 		return try {
 			room = client.javaClass.getMethod("getRoom", String::class.java).invoke(client, roomId)
 				?: throw SnapshotAdapterFailure()
-			if (limit <= 0) return emptyList()
 			val loadedTimeline =
 				invokeCloseableValue(room, "timeline", emptyArray(), emptyArray(), ::closeQuietly)
 			timeline = loadedTimeline
-			val update = TimelineSnapshotUpdate()
 			val listenerClass = Class.forName(TIMELINE_LISTENER_CLASS_NAME)
-			val listener = Proxy.newProxyInstance(
-				listenerClass.classLoader,
-				arrayOf(listenerClass),
-			) { proxy, method, arguments ->
-				when (method.name) {
-					"onUpdate" -> update.onUpdate(arguments?.firstOrNull())
-					"equals" -> proxy === arguments?.firstOrNull()
-					"hashCode" -> System.identityHashCode(proxy)
-					"toString" -> "MatrixTimelineListener"
-					else -> null
-				}
-			}
-			listenerTask = invokeCloseableValue(
+			val initialSnapshot = readTimelineSnapshot(loadedTimeline, listenerClass)
+			if (initialSnapshot.size >= limit) return initialSnapshot.takeLast(limit)
+			val remaining = (limit - initialSnapshot.size).coerceAtMost(MAX_UNSIGNED_SHORT)
+			invokeUnit(
 				loadedTimeline,
-				"addListener",
-				arrayOf(listenerClass),
-				arrayOf(listener),
-				::cancelAndCloseQuietly,
+				PAGINATE_BACKWARDS_METHOD_NAME,
+				arrayOf(Short::class.javaPrimitiveType ?: throw SnapshotAdapterFailure()),
+				arrayOf(remaining.toShort()),
 			)
-			update.await(discoveryTimeoutMs).takeLast(limit)
+			readTimelineSnapshot(loadedTimeline, listenerClass).takeLast(limit)
 		} catch (e: InterruptedException) {
 			Thread.currentThread().interrupt()
 			null
@@ -536,9 +525,40 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		} catch (e: LinkageError) {
 			null
 		} finally {
-			cancelAndCloseQuietly(listenerTask)
 			closeQuietly(timeline)
 			closeQuietly(room)
+		}
+	}
+
+	private fun readTimelineSnapshot(
+		timeline: Any,
+		listenerClass: Class<*>,
+	): List<MatrixMessageSnapshot> {
+		val update = TimelineSnapshotUpdate()
+		val listener = Proxy.newProxyInstance(
+			listenerClass.classLoader,
+			arrayOf(listenerClass),
+		) { proxy, method, arguments ->
+			when (method.name) {
+				"onUpdate" -> update.onUpdate(arguments?.firstOrNull())
+				"equals" -> proxy === arguments?.firstOrNull()
+				"hashCode" -> System.identityHashCode(proxy)
+				"toString" -> "MatrixTimelineListener"
+				else -> null
+			}
+		}
+		var listenerTask: Any? = null
+		return try {
+			listenerTask = invokeCloseableValue(
+				timeline,
+				"addListener",
+				arrayOf(listenerClass),
+				arrayOf(listener),
+				::cancelAndCloseQuietly,
+			)
+			update.await(discoveryTimeoutMs)
+		} finally {
+			cancelAndCloseQuietly(listenerTask)
 		}
 	}
 
@@ -881,7 +901,9 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		const val SESSION_DELEGATE_FACTORY_CLASS_NAME =
 			"org.briarproject.briar.matrix.DirectMatrixClientSessionDelegateFactory"
 		const val TIMELINE_LISTENER_CLASS_NAME = "org.matrix.rustcomponents.sdk.TimelineListener"
+		const val PAGINATE_BACKWARDS_METHOD_NAME = "paginateBackwards-vckuEUM"
 		const val TIMESTAMP_GETTER_NAME = "getTimestamp-s-VKNKU"
+		const val MAX_UNSIGNED_SHORT = 0xFFFF
 		const val DEVICE_NAME = "Harbor"
 		const val AEAD_TRANSFORMATION = "AES/GCM/NoPadding"
 		const val GCM_NONCE_LENGTH_BYTES = 12

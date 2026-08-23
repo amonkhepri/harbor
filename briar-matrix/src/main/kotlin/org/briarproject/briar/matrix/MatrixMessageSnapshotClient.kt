@@ -13,15 +13,16 @@ package org.briarproject.briar.matrix
  * `onUpdate(List<TimelineDiff>)` delivers the initial snapshot asynchronously. The reflective
  * implementation bridges that the same way
  * `ReflectiveMatrixHomeserverDiscoveryClient` already bridges `Client.login`'s suspend
- * `Continuation` to a blocking call. `MatrixRoomConnector` does not yet consume this interface;
- * wiring it in without a real implementation would trade its current honest "no known latest
- * message" stub for a misleading one.
+ * `Continuation` to a blocking call. `MatrixRoomConnector` consumes this interface for bounded
+ * message reads; the reflective implementation may request one backward page before taking the
+ * latest [limit] mapped messages.
  */
 interface MatrixMessageSnapshotClient {
 	/**
 	 * Returns the most recent messages in [roomId], oldest-first, bounded to [limit]. Returns
 	 * null, never throws, when no session is retained, [roomId] cannot be found, or timeline
-	 * loading fails, so callers can distinguish "load failed" from "loaded, zero messages".
+	 * loading or backward pagination fails, so callers can distinguish "load failed" from
+	 * "loaded, zero messages". A non-positive [limit] returns an empty list immediately.
 	 */
 	fun getRecentMessages(roomId: String, limit: Int): List<MatrixMessageSnapshot>?
 }
