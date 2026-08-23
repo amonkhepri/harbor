@@ -688,10 +688,10 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 				bodyText = message.javaClass.getMethod("getBody").invoke(message) as String,
 				originServerTimestampSeconds = (timestampMillis.toULong() / 1_000uL).toLong(),
 				isOutgoing = eventClass.getMethod("isOwn").invoke(event) as Boolean,
-				type = if (messageType.javaClass.simpleName == "Image") {
-					ConnectorMessageType.PHOTO
-				} else {
-					ConnectorMessageType.TEXT
+				type = when (messageType.javaClass.simpleName) {
+					"Image" -> ConnectorMessageType.PHOTO
+					"Video", "Audio", "File", "Gallery" -> ConnectorMessageType.FILE
+					else -> ConnectorMessageType.TEXT
 				},
 			)
 		} finally {

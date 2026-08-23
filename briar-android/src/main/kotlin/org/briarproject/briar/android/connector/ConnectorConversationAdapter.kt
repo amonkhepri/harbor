@@ -39,10 +39,10 @@ internal class ConnectorConversationAdapter :
 			itemView.findViewById(R.id.connectorMessageDate)
 
 		fun bind(item: ConnectorConversationMessageItem) {
-			text.text = if (item.type == ConnectorMessageType.PHOTO) {
-				text.resources.getString(R.string.connector_message_photo)
-			} else {
-				item.text
+			text.text = when (item.type) {
+				ConnectorMessageType.PHOTO -> text.resources.getString(R.string.connector_message_photo)
+				ConnectorMessageType.FILE -> text.resources.getString(R.string.connector_message_file)
+				else -> item.text
 			}
 			direction.setText(
 				if (item.isOutgoing) {

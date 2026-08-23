@@ -14,4 +14,5 @@ data class ConnectorMessage(
 enum class ConnectorMessageType {
 	TEXT,
 	PHOTO,
+	FILE,
 }

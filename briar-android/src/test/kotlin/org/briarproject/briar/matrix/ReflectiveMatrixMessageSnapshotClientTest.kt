@@ -62,6 +62,43 @@ class ReflectiveMatrixMessageSnapshotClientTest {
 	}
 
 	@Test
+	fun `getRecentMessages maps Matrix video, audio, and file to connector file placeholders`() {
+		val client = loggedInClient()
+		FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec("!room:example.org"))
+		FakeMatrixSdkState.timelineDiffsToReturn = listOf(
+			TimelineDiff.Reset(
+				listOf(
+					remoteEvent(
+						"\$video:example.org",
+						"private video body",
+						2_000uL,
+						messageType = MessageType.Video,
+					),
+					remoteEvent(
+						"\$audio:example.org",
+						"private audio body",
+						3_000uL,
+						messageType = MessageType.Audio,
+					),
+					remoteEvent(
+						"\$file:example.org",
+						"private file body",
+						4_000uL,
+						messageType = MessageType.File,
+					),
+				),
+			),
+		)
+
+		val result = client.getRecentMessages("!room:example.org", 3)
+
+		assertEquals(
+			listOf(ConnectorMessageType.FILE, ConnectorMessageType.FILE, ConnectorMessageType.FILE),
+			result?.map { it.type },
+		)
+	}
+
+	@Test
 	fun `getRecentMessages applies every diff and maps bounded remote text events`() {
 		val client = loggedInClient()
 		FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec("!room:example.org"))

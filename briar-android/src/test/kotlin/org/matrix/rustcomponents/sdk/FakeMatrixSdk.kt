@@ -214,6 +214,9 @@ sealed class MsgLikeKind {
 sealed class MessageType {
 	object Text : MessageType()
 	object Image : MessageType()
+	object Video : MessageType()
+	object Audio : MessageType()
+	object File : MessageType()
 }
 
 class MessageContent(val msgType: MessageType, val body: String) {

@@ -27,7 +27,11 @@ data class ConnectorConversationMessageItem(
 
 		fun fromMessages(messages: List<ConnectorMessage>): List<ConnectorConversationMessageItem> =
 			messages.sortedWith(byDateAscending)
-				.filter { it.type == ConnectorMessageType.PHOTO || it.text.trim().isNotEmpty() }
+				.filter {
+					it.type == ConnectorMessageType.PHOTO ||
+						it.type == ConnectorMessageType.FILE ||
+						it.text.trim().isNotEmpty()
+				}
 				.map { from(it) }
 
 		fun from(message: ConnectorMessage): ConnectorConversationMessageItem =

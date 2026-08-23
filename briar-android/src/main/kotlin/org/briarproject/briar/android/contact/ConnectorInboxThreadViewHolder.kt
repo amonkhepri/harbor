@@ -37,6 +37,8 @@ class ConnectorInboxThreadViewHolder(view: View) : RecyclerView.ViewHolder(view)
 				preview.resources.getString(R.string.connector_thread_preview_loading)
 			item.previewType == ConnectorMessageType.PHOTO ->
 				previewText(preview.resources, item, R.string.connector_message_photo)
+			item.previewType == ConnectorMessageType.FILE ->
+				previewText(preview.resources, item, R.string.connector_message_file)
 			item.hasPreviewText() -> previewText(preview.resources, item)
 			else -> preview.resources.getString(R.string.connector_thread_preview_empty)
 		}
