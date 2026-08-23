@@ -139,6 +139,7 @@ public class BriarControllerImpl implements BriarController {
 	@Override
 	public void signOut(ResultHandler<Void> handler, boolean deleteAccount) {
 		wakeLockManager.executeWakefully(() -> {
+			boolean interrupted = false;
 			try {
 				// Wait for the service to finish starting up
 				IBinder binder = serviceConnection.waitForBinder();
@@ -148,11 +149,21 @@ public class BriarControllerImpl implements BriarController {
 				// Shut down the service and wait for it to shut down
 				LOG.info("Shutting down service");
 				service.shutdown(true);
-				service.waitForShutdown();
+				while (true) {
+					try {
+						service.waitForShutdown();
+						break;
+					} catch (InterruptedException e) {
+						interrupted = true;
+						LOG.warning("Interrupted while waiting for service shutdown");
+					}
+				}
 			} catch (InterruptedException e) {
+				interrupted = true;
 				LOG.warning("Interrupted while waiting for service");
 			} finally {
 				if (deleteAccount) accountManager.deleteAccount();
+				if (interrupted) Thread.currentThread().interrupt();
 			}
 			handler.onResult(null);
 		}, "SignOut");
