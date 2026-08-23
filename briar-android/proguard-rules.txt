@@ -53,5 +53,12 @@
     *;
 }
 
+# P345-001: ReflectiveMatrixHomeserverDiscoveryClient/ReflectiveMatrixMessageSnapshotClient
+# resolve most SDK types (ClientBuilder, Client, Room, HomeserverLoginDetails, etc.) purely
+# by Class.forName()/getMethod() string lookups, never by a static type reference, so R8
+# shrinking removes them with no keep rule. No-op when the flag is off and the dependency is
+# not resolved, matching the existing org.drinkless.tdlib.** keep rule's pattern.
+-keep,includedescriptorclasses class org.matrix.rustcomponents.sdk.** { *; }
+
 # H2 database: keep H2 MVStore classes
 -keep class org.h2.mvstore.db.MVTableEngine
