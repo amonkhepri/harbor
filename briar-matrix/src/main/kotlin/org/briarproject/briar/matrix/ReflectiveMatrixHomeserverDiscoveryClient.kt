@@ -445,18 +445,23 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 	@Synchronized
 	override fun getJoinedRooms(limit: Int): List<MatrixRoomSnapshot> {
 		val client = loginClient ?: return emptyList()
+		var rooms = emptyList<Any>()
 		return try {
 			@Suppress("UNCHECKED_CAST")
-			val rooms = client.javaClass.getMethod("rooms").invoke(client) as List<Any>
+			rooms = client.javaClass.getMethod("rooms").invoke(client) as List<Any>
 			rooms.mapNotNull(::toJoinedRoomSnapshot)
 				.sortedBy { it.roomId }
 				.take(limit.coerceAtLeast(0))
+		} catch (e: ClassCastException) {
+			emptyList()
 		} catch (e: InvocationTargetException) {
 			emptyList()
 		} catch (e: ReflectiveOperationException) {
 			emptyList()
 		} catch (e: LinkageError) {
 			emptyList()
+		} finally {
+			rooms.forEach(::closeQuietly)
 		}
 	}
 
@@ -479,8 +484,6 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		null
 	} catch (e: LinkageError) {
 		null
-	} finally {
-		closeQuietly(room)
 	}
 
 	@Synchronized

@@ -53,6 +53,7 @@ class Room(
 	fun membership(): Membership = roomMembership
 	fun close() {
 		FakeMatrixSdkState.roomCloseCount++
+		FakeMatrixSdkState.closedRoomHandles.add(roomId)
 	}
 }
 
@@ -90,9 +91,14 @@ class Client internal constructor(
 	fun session(): Session = session ?: throw ClientException.Generic("no session", "no session")
 
 	/** Mirrors the pinned AAR's real shape: synchronous, returns a fresh `Room` handle per call. */
+	@Suppress("UNCHECKED_CAST")
 	fun rooms(): List<Room> = FakeMatrixSdkState.roomsToReturn.map { fake ->
-		Room(fake.roomId, fake.displayName, fake.isSpace, fake.membership)
-	}
+		if (fake.malformedRoomId) {
+			MalformedRoom(fake.roomId, fake.displayName, fake.isSpace, fake.membership)
+		} else {
+			Room(fake.roomId, fake.displayName, fake.isSpace, fake.membership)
+		}
+	} as List<Room>
 
 	suspend fun login(
 		username: String,
@@ -242,7 +248,25 @@ data class FakeRoomSpec(
 	val displayName: String? = null,
 	val isSpace: Boolean = false,
 	val membership: Membership = Membership.JOINED,
+	val malformedRoomId: Boolean = false,
 )
+
+/** Test-only malformed runtime handle returned through `Client.rooms()`'s erased list type. */
+class MalformedRoom(
+	private val closeTrackingId: String,
+	private val roomDisplayName: String?,
+	private val space: Boolean,
+	private val roomMembership: Membership,
+) {
+	fun id(): Int = 1
+	fun displayName(): String? = roomDisplayName
+	fun isSpace(): Boolean = space
+	fun membership(): Membership = roomMembership
+	fun close() {
+		FakeMatrixSdkState.roomCloseCount++
+		FakeMatrixSdkState.closedRoomHandles.add(closeTrackingId)
+	}
+}
 
 object FakeMatrixSdkState {
 	var lastServerName: String? = null
@@ -269,6 +293,7 @@ object FakeMatrixSdkState {
 	var lastBuiltClient: Client? = null
 	var roomsToReturn: List<FakeRoomSpec> = emptyList()
 	var roomCloseCount = 0
+	val closedRoomHandles = mutableListOf<String>()
 
 	fun reset() {
 		lastServerName = null
@@ -295,5 +320,6 @@ object FakeMatrixSdkState {
 		lastBuiltClient = null
 		roomsToReturn = emptyList()
 		roomCloseCount = 0
+		closedRoomHandles.clear()
 	}
 }

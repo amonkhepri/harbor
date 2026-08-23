@@ -311,6 +311,26 @@ class ReflectiveMatrixHomeserverDiscoveryClientTest {
 	}
 
 	@Test
+	fun `getJoinedRooms fails closed and closes every room after a runtime mapping mismatch`() {
+		val client = newSessionClient()
+		client.login("https://matrix.example.org", "alice", "swordfish")
+		FakeMatrixSdkState.roomsToReturn = listOf(
+			FakeRoomSpec(roomId = "!before:example.org"),
+			FakeRoomSpec(roomId = "!malformed:example.org", malformedRoomId = true),
+			FakeRoomSpec(roomId = "!after:example.org"),
+		)
+
+		val result = client.getJoinedRooms(10)
+
+		assertEquals(emptyList<Any>(), result)
+		assertEquals(3, FakeMatrixSdkState.roomCloseCount)
+		assertEquals(
+			listOf("!before:example.org", "!malformed:example.org", "!after:example.org"),
+			FakeMatrixSdkState.closedRoomHandles,
+		)
+	}
+
+	@Test
 	fun `getJoinedRooms bounds to the requested limit and rejects a negative limit`() {
 		val client = newSessionClient()
 		client.login("https://matrix.example.org", "alice", "swordfish")
