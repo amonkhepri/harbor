@@ -5,10 +5,9 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 /**
- * MX-007 sub-slice 1: no implementation exists yet ([MatrixRoomConnector] still returns its
- * MX-006A "no known latest message" stub), so this only proves the interface/data-class shape a
- * later reflective implementation must satisfy, mirroring how MX-004 M2 item 3 sub-slice 1
- * proved `MatrixAuthState`/`MatrixAuthSession`'s shape before any SDK call existed.
+ * MX-007 sub-slice 1 shape proof retained beside the fake-backed reflective implementation tests.
+ * [MatrixRoomConnector] still returns its MX-006A "no known latest message" stub until the next
+ * separately reviewed wiring slice.
  */
 class MatrixMessageSnapshotClientShapeTest {
 

@@ -11,7 +11,7 @@ package org.briarproject.briar.matrix
  * `Room.timeline(Continuation)` is a suspend function returning a `Timeline`, and `Timeline`
  * exposes no synchronous "current items" call, only `addListener(TimelineListener)`, whose
  * `onUpdate(List<TimelineDiff>)` delivers the initial snapshot asynchronously. The reflective
- * implementation (a later, separately reviewed sub-slice) bridges that the same way
+ * implementation bridges that the same way
  * `ReflectiveMatrixHomeserverDiscoveryClient` already bridges `Client.login`'s suspend
  * `Continuation` to a blocking call. `MatrixRoomConnector` does not yet consume this interface;
  * wiring it in without a real implementation would trade its current honest "no known latest

@@ -14,6 +14,7 @@ import java.io.DataOutputStream
 import java.io.File
 import java.io.IOException
 import java.lang.reflect.InvocationTargetException
+import java.lang.reflect.Proxy
 import java.security.GeneralSecurityException
 import java.security.SecureRandom
 import java.util.concurrent.CountDownLatch
@@ -29,8 +30,8 @@ import kotlin.coroutines.EmptyCoroutineContext
 import kotlin.coroutines.intrinsics.COROUTINE_SUSPENDED
 
 /**
- * Production [MatrixHomeserverDiscoveryClient], [MatrixLoginClient], and
- * [MatrixRoomSnapshotClient] that invoke the pinned
+ * Production [MatrixHomeserverDiscoveryClient], [MatrixLoginClient], [MatrixRoomSnapshotClient],
+ * and [MatrixMessageSnapshotClient] that invoke the pinned
  * `org.matrix.rustcomponents:sdk-android` `ClientBuilder.serverName(...).build()`
  * discovery path entirely over reflection, so `:briar-matrix` keeps zero
  * compile-time dependency on the SDK (see this module's `build.gradle` and
@@ -63,7 +64,8 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 	private val sessionDelegateFactory: MatrixClientSessionDelegateFactory? = null,
 ) : MatrixHomeserverDiscoveryClient,
 	MatrixLoginClient,
-	MatrixRoomSnapshotClient {
+	MatrixRoomSnapshotClient,
+	MatrixMessageSnapshotClient {
 
 	private var loginClient: Any? = null
 
@@ -486,6 +488,190 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		null
 	}
 
+	/**
+	 * Reads one bounded timeline snapshot from the retained client. Timeline listeners own the
+	 * delivered diffs, so each callback maps all plain fields before destroying its diffs; the
+	 * retained SDK client is never closed here.
+	 */
+	@Synchronized
+	override fun getRecentMessages(roomId: String, limit: Int): List<MatrixMessageSnapshot>? {
+		val client = loginClient ?: return null
+		var room: Any? = null
+		var timeline: Any? = null
+		var listenerTask: Any? = null
+		return try {
+			room = client.javaClass.getMethod("getRoom", String::class.java).invoke(client, roomId)
+				?: throw SnapshotAdapterFailure()
+			if (limit <= 0) return emptyList()
+			val loadedTimeline =
+				invokeCloseableValue(room, "timeline", emptyArray(), emptyArray(), ::closeQuietly)
+			timeline = loadedTimeline
+			val update = TimelineSnapshotUpdate()
+			val listenerClass = Class.forName(TIMELINE_LISTENER_CLASS_NAME)
+			val listener = Proxy.newProxyInstance(
+				listenerClass.classLoader,
+				arrayOf(listenerClass),
+			) { proxy, method, arguments ->
+				when (method.name) {
+					"onUpdate" -> update.onUpdate(arguments?.firstOrNull())
+					"equals" -> proxy === arguments?.firstOrNull()
+					"hashCode" -> System.identityHashCode(proxy)
+					"toString" -> "MatrixTimelineListener"
+					else -> null
+				}
+			}
+			listenerTask = invokeCloseableValue(
+				loadedTimeline,
+				"addListener",
+				arrayOf(listenerClass),
+				arrayOf(listener),
+				::cancelAndCloseQuietly,
+			)
+			update.await(discoveryTimeoutMs).takeLast(limit)
+		} catch (e: InterruptedException) {
+			Thread.currentThread().interrupt()
+			null
+		} catch (e: Exception) {
+			null
+		} catch (e: LinkageError) {
+			null
+		} finally {
+			cancelAndCloseQuietly(listenerTask)
+			closeQuietly(timeline)
+			closeQuietly(room)
+		}
+	}
+
+	private inner class TimelineSnapshotUpdate {
+		private val stopped = AtomicBoolean(false)
+		private val outcome = AtomicReference<Result<List<MatrixMessageSnapshot>>>()
+		private val latch = CountDownLatch(1)
+
+		fun onUpdate(argument: Any?): Any? {
+			val diffs = try {
+				(argument as? List<*>)?.map { it ?: throw SnapshotAdapterFailure() }
+					?: throw SnapshotAdapterFailure()
+			} catch (e: Exception) {
+				publish(Result.failure(e), emptyList())
+				return null
+			}
+			if (stopped.get()) {
+				diffs.forEach(::destroyQuietly)
+				return null
+			}
+			val result = try {
+				Result.success(reduceTimelineDiffs(diffs).mapNotNull(::toMessageSnapshot))
+			} catch (e: Exception) {
+				Result.failure(e)
+			} catch (e: LinkageError) {
+				Result.failure(e)
+			}
+			publish(result, diffs)
+			return null
+		}
+
+		private fun publish(result: Result<List<MatrixMessageSnapshot>>, diffs: List<Any>) {
+			diffs.forEach(::destroyQuietly)
+			if (stopped.compareAndSet(false, true)) {
+				outcome.set(result)
+				latch.countDown()
+			}
+		}
+
+		fun await(timeoutMs: Long): List<MatrixMessageSnapshot> {
+			if (!latch.await(timeoutMs, TimeUnit.MILLISECONDS)) {
+				stopped.set(true)
+				throw SnapshotAdapterFailure()
+			}
+			return (outcome.get() ?: throw SnapshotAdapterFailure()).getOrThrow()
+		}
+	}
+
+	private fun reduceTimelineDiffs(diffs: List<Any>): List<Any> {
+		val items = ArrayList<Any>()
+		for (diff in diffs) {
+			when (diff.javaClass.simpleName) {
+				"Append" -> items.addAll(readTimelineItems(diff, "getValues"))
+				"Clear" -> items.clear()
+				"Insert" -> items.add(
+					readTimelineIndex(diff, "getIndex-pVg5ArA", items.size, true),
+					readTimelineItem(diff),
+				)
+				"PopBack" -> items.removeAt(items.lastIndexOrFailure())
+				"PopFront" -> items.removeAt(items.firstIndexOrFailure())
+				"PushBack" -> items.add(readTimelineItem(diff))
+				"PushFront" -> items.add(0, readTimelineItem(diff))
+				"Remove" -> items.removeAt(readTimelineIndex(diff, "getIndex-pVg5ArA", items.size, false))
+				"Reset" -> {
+					items.clear()
+					items.addAll(readTimelineItems(diff, "getValues"))
+				}
+				"Set" -> items[readTimelineIndex(diff, "getIndex-pVg5ArA", items.size, false)] =
+					readTimelineItem(diff)
+				"Truncate" -> {
+					val length = readUnsignedInt(diff, "getLength-pVg5ArA")
+					if (length < items.size) items.subList(length, items.size).clear()
+				}
+				else -> throw SnapshotAdapterFailure()
+			}
+		}
+		return items
+	}
+
+	private fun readTimelineItems(diff: Any, methodName: String): List<Any> {
+		val values = diff.javaClass.getMethod(methodName).invoke(diff) as? List<*>
+			?: throw SnapshotAdapterFailure()
+		return values.map { it ?: throw SnapshotAdapterFailure() }
+	}
+
+	private fun readTimelineItem(diff: Any): Any =
+		diff.javaClass.getMethod("getValue").invoke(diff) ?: throw SnapshotAdapterFailure()
+
+	private fun readTimelineIndex(diff: Any, methodName: String, size: Int, allowEnd: Boolean): Int {
+		val index = readUnsignedInt(diff, methodName)
+		val valid = if (allowEnd) index <= size else index < size
+		if (!valid) throw SnapshotAdapterFailure()
+		return index
+	}
+
+	private fun readUnsignedInt(target: Any, methodName: String): Int {
+		val raw = target.javaClass.getMethod(methodName).invoke(target) as? Int
+			?: throw SnapshotAdapterFailure()
+		if (raw < 0) throw SnapshotAdapterFailure()
+		return raw
+	}
+
+	private fun List<Any>.lastIndexOrFailure(): Int =
+		lastIndex.takeIf { it >= 0 } ?: throw SnapshotAdapterFailure()
+
+	private fun List<Any>.firstIndexOrFailure(): Int =
+		if (isEmpty()) throw SnapshotAdapterFailure() else 0
+
+	private fun toMessageSnapshot(timelineItem: Any): MatrixMessageSnapshot? {
+		val event = timelineItem.javaClass.getMethod("asEvent").invoke(timelineItem) ?: return null
+		return try {
+			val eventClass = event.javaClass
+			val identifier = eventClass.getMethod("getEventOrTransactionId").invoke(event)
+			if (identifier.javaClass.simpleName != "EventId") return null
+			val content = eventClass.getMethod("getContent").invoke(event)
+			if (content.javaClass.simpleName != "MsgLike") return null
+			val msgLike = content.javaClass.getMethod("getContent").invoke(content)
+			val kind = msgLike.javaClass.getMethod("getKind").invoke(msgLike)
+			if (kind.javaClass.simpleName != "Message") return null
+			val message = kind.javaClass.getMethod("getContent").invoke(kind)
+			val timestampMillis = eventClass.getMethod(TIMESTAMP_GETTER_NAME).invoke(event) as Long
+			MatrixMessageSnapshot(
+				eventId = identifier.javaClass.getMethod("getEventId").invoke(identifier) as String,
+				senderId = eventClass.getMethod("getSender").invoke(event) as String,
+				bodyText = message.javaClass.getMethod("getBody").invoke(message) as String,
+				originServerTimestampSeconds = (timestampMillis.toULong() / 1_000uL).toLong(),
+				isOutgoing = eventClass.getMethod("isOwn").invoke(event) as Boolean,
+			)
+		} finally {
+			destroyQuietly(event)
+		}
+	}
+
 	@Synchronized
 	override fun logout() {
 		val client = loginClient ?: return
@@ -601,6 +787,49 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		(outcome.get() ?: throw DiscoveryAdapterFailure()).getOrThrow()
 	}
 
+	/**
+	 * Bridges a suspend SDK call that returns an owned closeable value. If delivery loses a race
+	 * with timeout or interruption, [abandon] disposes the late value on the delivery thread.
+	 */
+	private fun invokeCloseableValue(
+		target: Any,
+		methodName: String,
+		parameterTypes: Array<Class<*>>,
+		arguments: Array<Any?>,
+		abandon: (Any?) -> Unit,
+	): Any {
+		val method = target.javaClass.getMethod(
+			methodName,
+			*(parameterTypes + Continuation::class.java),
+		)
+		val outcome = AtomicReference<Result<Any?>>()
+		val latch = CountDownLatch(1)
+		val claimed = AtomicBoolean(false)
+		val continuation = object : Continuation<Any?> {
+			override val context: CoroutineContext = EmptyCoroutineContext
+			override fun resumeWith(result: Result<Any?>) {
+				outcome.set(result)
+				latch.countDown()
+				if (!claimed.compareAndSet(false, true)) abandon(result.getOrNull())
+			}
+		}
+		val invokeResult = method.invoke(target, *(arguments + continuation))
+		if (invokeResult !== COROUTINE_SUSPENDED) {
+			return invokeResult ?: throw SnapshotAdapterFailure()
+		}
+		val completedInTime = try {
+			latch.await(discoveryTimeoutMs, TimeUnit.MILLISECONDS)
+		} catch (e: InterruptedException) {
+			if (!claimed.compareAndSet(false, true)) abandon(outcome.get()?.getOrNull())
+			throw e
+		}
+		if (!completedInTime && claimed.compareAndSet(false, true)) {
+			throw SnapshotAdapterFailure()
+		}
+		return (outcome.get() ?: throw SnapshotAdapterFailure()).getOrThrow()
+			?: throw SnapshotAdapterFailure()
+	}
+
 	private fun readHomeserverUrl(client: Any): String =
 		(client.javaClass.getMethod("homeserver").invoke(client) as? String)
 			?.takeIf { it.isNotEmpty() }
@@ -620,8 +849,29 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		}
 	}
 
+	private fun cancelAndCloseQuietly(target: Any?) {
+		if (target == null) return
+		try {
+			target.javaClass.getMethod("cancel").invoke(target)
+		} catch (e: ReflectiveOperationException) {
+		} catch (e: LinkageError) {
+		} finally {
+			closeQuietly(target)
+		}
+	}
+
+	private fun destroyQuietly(target: Any?) {
+		if (target == null) return
+		try {
+			target.javaClass.getMethod("destroy").invoke(target)
+		} catch (e: ReflectiveOperationException) {
+		} catch (e: LinkageError) {
+		}
+	}
+
 	/** Adapter-side failure (timeout, missing/blank result) with no SDK exception to map. */
 	private class DiscoveryAdapterFailure : Exception()
+	private class SnapshotAdapterFailure : Exception()
 
 	private companion object {
 		const val CLIENT_BUILDER_CLASS_NAME = "org.matrix.rustcomponents.sdk.ClientBuilder"
@@ -630,6 +880,8 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		const val SESSION_DELEGATE_CLASS_NAME = "org.matrix.rustcomponents.sdk.ClientSessionDelegate"
 		const val SESSION_DELEGATE_FACTORY_CLASS_NAME =
 			"org.briarproject.briar.matrix.DirectMatrixClientSessionDelegateFactory"
+		const val TIMELINE_LISTENER_CLASS_NAME = "org.matrix.rustcomponents.sdk.TimelineListener"
+		const val TIMESTAMP_GETTER_NAME = "getTimestamp-s-VKNKU"
 		const val DEVICE_NAME = "Harbor"
 		const val AEAD_TRANSFORMATION = "AES/GCM/NoPadding"
 		const val GCM_NONCE_LENGTH_BYTES = 12

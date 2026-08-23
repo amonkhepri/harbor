@@ -51,9 +51,204 @@ class Room(
 	fun displayName(): String? = roomDisplayName
 	fun isSpace(): Boolean = space
 	fun membership(): Membership = roomMembership
+
+	suspend fun timeline(): Timeline {
+		FakeMatrixSdkState.timelineCallCount++
+		val timeline = Timeline()
+		if (!FakeMatrixSdkState.timelineSuspendAsynchronously) return timeline
+		return suspendCoroutine { continuation ->
+			Thread {
+				if (FakeMatrixSdkState.timelineDelayMs > 0) {
+					Thread.sleep(FakeMatrixSdkState.timelineDelayMs)
+				}
+				continuation.resume(timeline)
+			}.start()
+		}
+	}
+
 	fun close() {
 		FakeMatrixSdkState.roomCloseCount++
 		FakeMatrixSdkState.closedRoomHandles.add(roomId)
+	}
+}
+
+interface TimelineListener {
+	fun onUpdate(diffs: List<TimelineDiff>)
+}
+
+class Timeline {
+	suspend fun addListener(listener: TimelineListener): TaskHandle {
+		FakeMatrixSdkState.listenerAddCount++
+		val task = TaskHandle()
+		if (!FakeMatrixSdkState.listenerRegistrationSuspendAsynchronously) {
+			deliverTimelineUpdate(listener)
+			return task
+		}
+		return suspendCoroutine { continuation ->
+			Thread {
+				if (FakeMatrixSdkState.listenerRegistrationDelayMs > 0) {
+					Thread.sleep(FakeMatrixSdkState.listenerRegistrationDelayMs)
+				}
+				continuation.resume(task)
+				deliverTimelineUpdate(listener)
+			}.start()
+		}
+	}
+
+	fun close() {
+		FakeMatrixSdkState.timelineCloseCount++
+	}
+
+	private fun deliverTimelineUpdate(listener: TimelineListener) {
+		val delayMs = FakeMatrixSdkState.timelineUpdateDelayMs
+		if (delayMs <= 0) {
+			listener.onUpdate(FakeMatrixSdkState.timelineDiffsToReturn)
+			return
+		}
+		Thread {
+			Thread.sleep(delayMs)
+			listener.onUpdate(FakeMatrixSdkState.timelineDiffsToReturn)
+		}.start()
+	}
+}
+
+class TaskHandle {
+	fun cancel() {
+		FakeMatrixSdkState.taskCancelCount++
+	}
+
+	fun close() {
+		FakeMatrixSdkState.taskCloseCount++
+	}
+}
+
+class TimelineItem(private val event: FakeTimelineEventSpec?) {
+	fun asEvent(): EventTimelineItem? = event?.toEventTimelineItem()
+
+	fun close() {
+		FakeMatrixSdkState.timelineItemCloseCount++
+	}
+}
+
+data class FakeTimelineEventSpec(
+	val identifier: EventOrTransactionId,
+	val sender: String,
+	val body: String?,
+	val timestamp: ULong,
+	val own: Boolean = false,
+) {
+	fun toEventTimelineItem(): EventTimelineItem {
+		val content = if (body == null) {
+			TimelineItemContent.Other
+		} else {
+			TimelineItemContent.MsgLike(MsgLikeContent(MsgLikeKind.Message(MessageContent(body))))
+		}
+		return EventTimelineItem(identifier, sender, own, content, timestamp)
+	}
+}
+
+sealed class EventOrTransactionId {
+	class EventId(val eventId: String) : EventOrTransactionId()
+	class TransactionId(val transactionId: String) : EventOrTransactionId()
+}
+
+class EventTimelineItem(
+	val eventOrTransactionId: EventOrTransactionId,
+	val sender: String,
+	private val own: Boolean,
+	val content: TimelineItemContent,
+	val timestamp: ULong,
+) {
+	fun isOwn(): Boolean = own
+
+	fun destroy() {
+		FakeMatrixSdkState.eventTimelineItemDestroyCount++
+		content.destroy()
+	}
+}
+
+sealed class TimelineItemContent {
+	abstract fun destroy()
+
+	class MsgLike(val content: MsgLikeContent) : TimelineItemContent() {
+		override fun destroy() = content.destroy()
+	}
+
+	object Other : TimelineItemContent() {
+		override fun destroy() {
+			FakeMatrixSdkState.otherContentDestroyCount++
+		}
+	}
+}
+
+class MsgLikeContent(val kind: MsgLikeKind) {
+	fun destroy() = kind.destroy()
+}
+
+sealed class MsgLikeKind {
+	abstract fun destroy()
+
+	class Message(val content: MessageContent) : MsgLikeKind() {
+		override fun destroy() = content.destroy()
+	}
+}
+
+class MessageContent(val body: String) {
+	fun destroy() {
+		FakeMatrixSdkState.messageContentDestroyCount++
+	}
+}
+
+sealed class TimelineDiff {
+	protected abstract val ownedItems: List<TimelineItem>
+
+	fun destroy() {
+		FakeMatrixSdkState.timelineDiffDestroyCount++
+		ownedItems.forEach(TimelineItem::close)
+	}
+
+	class Append(val values: List<TimelineItem>) : TimelineDiff() {
+		override val ownedItems = values
+	}
+
+	object Clear : TimelineDiff() {
+		override val ownedItems = emptyList<TimelineItem>()
+	}
+
+	class Insert(val index: UInt, val value: TimelineItem) : TimelineDiff() {
+		override val ownedItems = listOf(value)
+	}
+
+	object PopBack : TimelineDiff() {
+		override val ownedItems = emptyList<TimelineItem>()
+	}
+
+	object PopFront : TimelineDiff() {
+		override val ownedItems = emptyList<TimelineItem>()
+	}
+
+	class PushBack(val value: TimelineItem) : TimelineDiff() {
+		override val ownedItems = listOf(value)
+	}
+
+	class PushFront(val value: TimelineItem) : TimelineDiff() {
+		override val ownedItems = listOf(value)
+	}
+
+	class Remove(val index: UInt) : TimelineDiff() {
+		override val ownedItems = emptyList<TimelineItem>()
+	}
+
+	class Reset(val values: List<TimelineItem>) : TimelineDiff() {
+		override val ownedItems = values
+	}
+
+	class Set(val index: UInt, val value: TimelineItem) : TimelineDiff() {
+		override val ownedItems = listOf(value)
+	}
+
+	class Truncate(val length: UInt) : TimelineDiff() {
+		override val ownedItems = emptyList<TimelineItem>()
 	}
 }
 
@@ -99,6 +294,10 @@ class Client internal constructor(
 			Room(fake.roomId, fake.displayName, fake.isSpace, fake.membership)
 		}
 	} as List<Room>
+
+	fun getRoom(roomId: String): Room? = FakeMatrixSdkState.roomsToReturn
+		.firstOrNull { it.roomId == roomId }
+		?.let { fake -> Room(fake.roomId, fake.displayName, fake.isSpace, fake.membership) }
 
 	suspend fun login(
 		username: String,
@@ -294,6 +493,22 @@ object FakeMatrixSdkState {
 	var roomsToReturn: List<FakeRoomSpec> = emptyList()
 	var roomCloseCount = 0
 	val closedRoomHandles = mutableListOf<String>()
+	var timelineCallCount = 0
+	var timelineSuspendAsynchronously = false
+	var timelineDelayMs = 0L
+	var listenerAddCount = 0
+	var listenerRegistrationSuspendAsynchronously = false
+	var listenerRegistrationDelayMs = 0L
+	var timelineUpdateDelayMs = 0L
+	var timelineDiffsToReturn: List<TimelineDiff> = emptyList()
+	var timelineCloseCount = 0
+	var taskCancelCount = 0
+	var taskCloseCount = 0
+	var timelineDiffDestroyCount = 0
+	var timelineItemCloseCount = 0
+	var eventTimelineItemDestroyCount = 0
+	var messageContentDestroyCount = 0
+	var otherContentDestroyCount = 0
 
 	fun reset() {
 		lastServerName = null
@@ -321,5 +536,21 @@ object FakeMatrixSdkState {
 		roomsToReturn = emptyList()
 		roomCloseCount = 0
 		closedRoomHandles.clear()
+		timelineCallCount = 0
+		timelineSuspendAsynchronously = false
+		timelineDelayMs = 0L
+		listenerAddCount = 0
+		listenerRegistrationSuspendAsynchronously = false
+		listenerRegistrationDelayMs = 0L
+		timelineUpdateDelayMs = 0L
+		timelineDiffsToReturn = emptyList()
+		timelineCloseCount = 0
+		taskCancelCount = 0
+		taskCloseCount = 0
+		timelineDiffDestroyCount = 0
+		timelineItemCloseCount = 0
+		eventTimelineItemDestroyCount = 0
+		messageContentDestroyCount = 0
+		otherContentDestroyCount = 0
 	}
 }
