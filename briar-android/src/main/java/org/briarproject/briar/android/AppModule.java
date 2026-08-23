@@ -425,6 +425,6 @@ public class AppModule {
 		if (!BuildConfig.MATRIX_CONNECTOR_ENABLED) {
 			return new DisabledMatrixConnector();
 		}
-		return new MatrixRoomConnector(client, matrixAuthSession);
+		return new MatrixRoomConnector(client, matrixAuthSession, client);
 	}
 }
