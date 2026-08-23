@@ -7,6 +7,7 @@ import org.briarproject.briar.api.matrix.MatrixAuthSession.RecoverableErrorDetai
 import org.briarproject.briar.api.matrix.MatrixAuthSession.RecoverableErrorDetail.NONE
 import org.briarproject.briar.api.matrix.MatrixHomeserverDiscoveryClient
 import org.briarproject.briar.api.matrix.MatrixHomeserverDiscoveryClient.DiscoveryResult
+import org.briarproject.briar.api.connector.ConnectorMessageType
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.DataInputStream
@@ -679,6 +680,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			val kind = msgLike.javaClass.getMethod("getKind").invoke(msgLike)
 			if (kind.javaClass.simpleName != "Message") return null
 			val message = kind.javaClass.getMethod("getContent").invoke(kind)
+			val messageType = message.javaClass.getMethod("getMsgType").invoke(message)
 			val timestampMillis = eventClass.getMethod(TIMESTAMP_GETTER_NAME).invoke(event) as Long
 			MatrixMessageSnapshot(
 				eventId = identifier.javaClass.getMethod("getEventId").invoke(identifier) as String,
@@ -686,6 +688,11 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 				bodyText = message.javaClass.getMethod("getBody").invoke(message) as String,
 				originServerTimestampSeconds = (timestampMillis.toULong() / 1_000uL).toLong(),
 				isOutgoing = eventClass.getMethod("isOwn").invoke(event) as Boolean,
+				type = if (messageType.javaClass.simpleName == "Image") {
+					ConnectorMessageType.PHOTO
+				} else {
+					ConnectorMessageType.TEXT
+				},
 			)
 		} finally {
 			destroyQuietly(event)

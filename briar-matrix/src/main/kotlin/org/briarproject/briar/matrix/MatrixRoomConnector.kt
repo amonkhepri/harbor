@@ -51,7 +51,7 @@ class MatrixRoomConnector(
 					?.toInt() ?: 0,
 				latestMessageText = latest?.bodyText ?: "",
 				isLatestMessageOutgoing = latest?.isOutgoing ?: false,
-				latestMessageType = ConnectorMessageType.TEXT,
+				latestMessageType = latest?.type ?: ConnectorMessageType.TEXT,
 			)
 		}
 	}
@@ -71,7 +71,7 @@ class MatrixRoomConnector(
 					isOutgoing = snapshot.isOutgoing,
 					text = snapshot.bodyText,
 					sourceMessageOrder = snapshot.originServerTimestampSeconds,
-					type = ConnectorMessageType.TEXT,
+					type = snapshot.type,
 				)
 			},
 		)

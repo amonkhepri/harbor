@@ -1,5 +1,6 @@
 package org.briarproject.briar.matrix
 
+import org.briarproject.briar.api.connector.ConnectorMessageType
 import org.briarproject.briar.api.matrix.MatrixAuthSession.RecoverableErrorDetail.NONE
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -10,6 +11,7 @@ import org.matrix.rustcomponents.sdk.EventOrTransactionId
 import org.matrix.rustcomponents.sdk.FakeMatrixSdkState
 import org.matrix.rustcomponents.sdk.FakeRoomSpec
 import org.matrix.rustcomponents.sdk.FakeTimelineEventSpec
+import org.matrix.rustcomponents.sdk.MessageType
 import org.matrix.rustcomponents.sdk.TimelineDiff
 import org.matrix.rustcomponents.sdk.TimelineItem
 import java.util.concurrent.TimeUnit
@@ -33,6 +35,30 @@ class ReflectiveMatrixMessageSnapshotClientTest {
 		assertEquals(emptyList<Any>(), client.getRecentMessages("!room:example.org", 0))
 		assertEquals(0, FakeMatrixSdkState.timelineCallCount)
 		assertEquals(0, FakeMatrixSdkState.roomCloseCount)
+	}
+
+	@Test
+	fun `getRecentMessages maps Matrix images to connector photo placeholders`() {
+		val client = loggedInClient()
+		FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec("!room:example.org"))
+		FakeMatrixSdkState.timelineDiffsToReturn = listOf(
+			TimelineDiff.Reset(
+				listOf(
+					remoteEvent(
+						"\$image:example.org",
+						"private image body",
+						2_000uL,
+						messageType = MessageType.Image,
+					),
+				),
+			),
+		)
+
+		val result = client.getRecentMessages("!room:example.org", 1)
+
+		assertEquals(ConnectorMessageType.PHOTO, result?.single()?.type)
+		assertEquals(1, FakeMatrixSdkState.messageContentDestroyCount)
+		assertEquals(1, FakeMatrixSdkState.eventTimelineItemDestroyCount)
 	}
 
 	@Test
@@ -244,6 +270,7 @@ class ReflectiveMatrixMessageSnapshotClientTest {
 		body: String,
 		timestamp: ULong,
 		own: Boolean = false,
+		messageType: MessageType = MessageType.Text,
 	): TimelineItem = TimelineItem(
 		FakeTimelineEventSpec(
 			EventOrTransactionId.EventId(eventId),
@@ -251,6 +278,7 @@ class ReflectiveMatrixMessageSnapshotClientTest {
 			body,
 			timestamp,
 			own,
+			messageType,
 		),
 	)
 

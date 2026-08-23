@@ -103,6 +103,32 @@ class MatrixRoomConnectorTest {
 	}
 
 	@Test
+	fun `Matrix image snapshots use shared photo placeholders in inbox and conversation`() {
+		val snapshot = MatrixMessageSnapshot(
+			eventId = "\$image:example.org",
+			senderId = "@alice:example.org",
+			bodyText = "private image body",
+			originServerTimestampSeconds = 42L,
+			isOutgoing = false,
+			type = ConnectorMessageType.PHOTO,
+		)
+		val connector = connector(
+			roomSnapshotClient = FakeRoomSnapshotClient(
+				listOf(MatrixRoomSnapshot("!a:example.org", "Alpha")),
+			),
+			messageSnapshotClient = FakeMessageSnapshotClient(listOf(snapshot)),
+			authSession = FakeMatrixAuthSession(MatrixAuthState.READY),
+		)
+
+		val thread = connector.getRecentThreads(10).single()
+		val message = (connector.getRecentMessageReadResult("!a:example.org", 10) as Success)
+			.messages.single()
+
+		assertEquals(ConnectorMessageType.PHOTO, thread.latestMessageType)
+		assertEquals(ConnectorMessageType.PHOTO, message.type)
+	}
+
+	@Test
 	fun `getRecentThreads fails closed without querying rooms or messages when not authorized`() {
 		val roomSnapshotClient = FakeRoomSnapshotClient(
 			listOf(MatrixRoomSnapshot("!a:example.org", "Alpha")),

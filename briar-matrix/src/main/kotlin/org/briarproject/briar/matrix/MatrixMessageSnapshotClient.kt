@@ -1,5 +1,7 @@
 package org.briarproject.briar.matrix
 
+import org.briarproject.briar.api.connector.ConnectorMessageType
+
 /**
  * Narrow, fakeable boundary over recent-message reading for one joined Matrix room on an SDK
  * client retained by a prior [MatrixLoginClient.login] or [MatrixLoginClient.restore], mirroring
@@ -37,4 +39,5 @@ data class MatrixMessageSnapshot(
 	val bodyText: String,
 	val originServerTimestampSeconds: Long,
 	val isOutgoing: Boolean,
+	val type: ConnectorMessageType = ConnectorMessageType.TEXT,
 )
