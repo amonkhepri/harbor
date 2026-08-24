@@ -72,6 +72,7 @@ class MatrixRoomConnector(
 					text = snapshot.bodyText,
 					sourceMessageOrder = snapshot.originServerTimestampSeconds,
 					type = snapshot.type,
+					isEdited = snapshot.isEdited,
 				)
 			},
 		)

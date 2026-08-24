@@ -46,6 +46,15 @@ class ConnectorConversationMessageItemTest {
 		)
 	}
 
+	@Test
+	fun testFromMessagesPreservesEditedState() {
+		val item = ConnectorConversationMessageItem.fromMessages(
+			listOf(connectorMessage("1", 10, false, "edited", 1L, isEdited = true)),
+		).single()
+
+		assertEquals(true, item.isEdited)
+	}
+
 	private fun connectorMessageItem(
 		messageId: String,
 		isOutgoing: Boolean,
@@ -69,6 +78,7 @@ class ConnectorConversationMessageItemTest {
 		text: String,
 		sourceMessageOrder: Long,
 		type: ConnectorMessageType = ConnectorMessageType.TEXT,
+		isEdited: Boolean = false,
 	): ConnectorMessage = ConnectorMessage(
 		source = CONNECTOR_SOURCE,
 		threadId = "thread-1",
@@ -78,6 +88,7 @@ class ConnectorConversationMessageItemTest {
 		text = text,
 		sourceMessageOrder = sourceMessageOrder,
 		type = type,
+		isEdited = isEdited,
 	)
 
 	companion object {

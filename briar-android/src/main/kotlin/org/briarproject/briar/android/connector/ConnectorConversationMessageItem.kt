@@ -12,6 +12,7 @@ data class ConnectorConversationMessageItem(
 	val isOutgoing: Boolean,
 	val text: String,
 	val type: ConnectorMessageType,
+	val isEdited: Boolean = false,
 ) {
 	val stableId: String
 		get() = "${connectorSource.id}:$connectorThreadId:$connectorMessageId"
@@ -43,6 +44,7 @@ data class ConnectorConversationMessageItem(
 				message.isOutgoing,
 				message.text,
 				message.type,
+				message.isEdited,
 			)
 	}
 }

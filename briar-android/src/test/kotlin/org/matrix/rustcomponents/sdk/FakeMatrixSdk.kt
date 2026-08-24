@@ -152,13 +152,14 @@ data class FakeTimelineEventSpec(
 	val timestamp: ULong,
 	val own: Boolean = false,
 	val messageType: MessageType = MessageType.Text,
+	val edited: Boolean = false,
 ) {
 	fun toEventTimelineItem(): EventTimelineItem {
 		val content = if (body == null) {
 			TimelineItemContent.Other
 		} else {
 			TimelineItemContent.MsgLike(
-				MsgLikeContent(MsgLikeKind.Message(MessageContent(messageType, body))),
+				MsgLikeContent(MsgLikeKind.Message(MessageContent(messageType, body, edited))),
 			)
 		}
 		return EventTimelineItem(identifier, sender, own, content, timestamp)
@@ -219,7 +220,7 @@ sealed class MessageType {
 	object File : MessageType()
 }
 
-class MessageContent(val msgType: MessageType, val body: String) {
+class MessageContent(val msgType: MessageType, val body: String, val isEdited: Boolean) {
 	fun destroy() {
 		FakeMatrixSdkState.messageContentDestroyCount++
 	}

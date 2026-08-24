@@ -157,6 +157,7 @@ class MatrixRoomConnectorTest {
 					bodyText = "hello",
 					originServerTimestampSeconds = 42L,
 					isOutgoing = true,
+					isEdited = true,
 				),
 			),
 		)
@@ -179,6 +180,7 @@ class MatrixRoomConnectorTest {
 						text = "hello",
 						sourceMessageOrder = 42L,
 						type = ConnectorMessageType.TEXT,
+						isEdited = true,
 					),
 				),
 			),

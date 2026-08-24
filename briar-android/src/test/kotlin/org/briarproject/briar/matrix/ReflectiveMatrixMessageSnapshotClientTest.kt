@@ -62,6 +62,23 @@ class ReflectiveMatrixMessageSnapshotClientTest {
 	}
 
 	@Test
+	fun `getRecentMessages preserves Matrix edited state`() {
+		val client = loggedInClient()
+		FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec("!room:example.org"))
+		FakeMatrixSdkState.timelineDiffsToReturn = listOf(
+			TimelineDiff.Reset(
+				listOf(
+					remoteEvent("\$edited:example.org", "edited body", 2_000uL, edited = true),
+				),
+			),
+		)
+
+		val result = client.getRecentMessages("!room:example.org", 1)
+
+		assertTrue(result?.single()?.isEdited == true)
+	}
+
+	@Test
 	fun `getRecentMessages maps Matrix video, audio, and file to connector file placeholders`() {
 		val client = loggedInClient()
 		FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec("!room:example.org"))
@@ -308,6 +325,7 @@ class ReflectiveMatrixMessageSnapshotClientTest {
 		timestamp: ULong,
 		own: Boolean = false,
 		messageType: MessageType = MessageType.Text,
+		edited: Boolean = false,
 	): TimelineItem = TimelineItem(
 		FakeTimelineEventSpec(
 			EventOrTransactionId.EventId(eventId),
@@ -316,6 +334,7 @@ class ReflectiveMatrixMessageSnapshotClientTest {
 			timestamp,
 			own,
 			messageType,
+			edited,
 		),
 	)
 

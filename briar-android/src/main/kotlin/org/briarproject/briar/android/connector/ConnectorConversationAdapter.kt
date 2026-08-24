@@ -39,10 +39,15 @@ internal class ConnectorConversationAdapter :
 			itemView.findViewById(R.id.connectorMessageDate)
 
 		fun bind(item: ConnectorConversationMessageItem) {
-			text.text = when (item.type) {
+			val messageText = when (item.type) {
 				ConnectorMessageType.PHOTO -> text.resources.getString(R.string.connector_message_photo)
 				ConnectorMessageType.FILE -> text.resources.getString(R.string.connector_message_file)
 				else -> item.text
+			}
+			text.text = if (item.isEdited) {
+				text.resources.getString(R.string.connector_message_edited, messageText)
+			} else {
+				messageText
 			}
 			direction.setText(
 				if (item.isOutgoing) {
@@ -69,6 +74,7 @@ internal class ConnectorConversationAdapter :
 		): Boolean = i1.dateMillis == i2.dateMillis &&
 			i1.isOutgoing == i2.isOutgoing &&
 			i1.text == i2.text &&
-			i1.type == i2.type
+			i1.type == i2.type &&
+			i1.isEdited == i2.isEdited
 	}
 }

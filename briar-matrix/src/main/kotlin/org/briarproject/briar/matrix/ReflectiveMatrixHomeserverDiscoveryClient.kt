@@ -693,6 +693,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 					"Video", "Audio", "File", "Gallery" -> ConnectorMessageType.FILE
 					else -> ConnectorMessageType.TEXT
 				},
+				isEdited = message.javaClass.getMethod("isEdited").invoke(message) as Boolean,
 			)
 		} finally {
 			destroyQuietly(event)
