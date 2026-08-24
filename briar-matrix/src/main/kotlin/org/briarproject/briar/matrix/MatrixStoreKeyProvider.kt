@@ -1,5 +1,6 @@
 package org.briarproject.briar.matrix
 
+import org.briarproject.bramble.api.account.AccountManager
 import org.briarproject.bramble.api.db.DatabaseConfig
 import org.briarproject.briar.connector.ConnectorStoreKeyProvider
 import org.briarproject.briar.connector.ProtectedConnectorStoreKeyProvider
@@ -24,7 +25,9 @@ class MatrixStoreConfiguration(
 
 class ProtectedMatrixStoreConfigurationProvider @JvmOverloads constructor(
 	private val databaseConfig: DatabaseConfig,
-	private val keyProvider: MatrixStoreKeyProvider = ProtectedMatrixStoreKeyProvider(databaseConfig),
+	accountManager: AccountManager,
+	private val keyProvider: MatrixStoreKeyProvider =
+		ProtectedMatrixStoreKeyProvider(databaseConfig, accountManager),
 ) : MatrixStoreConfigurationProvider {
 	override fun getStoreConfiguration(): MatrixStoreConfiguration? {
 		val directory = File(databaseConfig.databaseDirectory, STORE_NAME)
@@ -39,9 +42,11 @@ class ProtectedMatrixStoreConfigurationProvider @JvmOverloads constructor(
 
 class ProtectedMatrixStoreKeyProvider(
 	databaseConfig: DatabaseConfig,
+	accountManager: AccountManager,
 	random: SecureRandom = SecureRandom(),
 ) : MatrixStoreKeyProvider {
-	private val delegate = ProtectedConnectorStoreKeyProvider(databaseConfig, STATE_NAME, random)
+	private val delegate =
+		ProtectedConnectorStoreKeyProvider(databaseConfig, STATE_NAME, accountManager, random)
 
 	override fun getStoreEncryptionKey(storeDirectory: File): ByteArray? =
 		delegate.getStoreEncryptionKey(storeDirectory)

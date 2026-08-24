@@ -1,5 +1,6 @@
 package org.briarproject.briar.telegram
 
+import org.briarproject.bramble.api.account.AccountManager
 import org.briarproject.bramble.api.db.DatabaseConfig
 import org.briarproject.briar.connector.ProtectedConnectorStoreKeyProvider
 import java.io.File
@@ -19,9 +20,11 @@ object NoOpTelegramTdlibDatabaseKeyProvider : TelegramTdlibDatabaseKeyProvider {
 
 class ProtectedTelegramTdlibDatabaseKeyProvider(
 	databaseConfig: DatabaseConfig,
+	accountManager: AccountManager,
 	random: SecureRandom = SecureRandom(),
 ) : TelegramTdlibDatabaseKeyProvider {
-	private val delegate = ProtectedConnectorStoreKeyProvider(databaseConfig, STATE_NAME, random)
+	private val delegate =
+		ProtectedConnectorStoreKeyProvider(databaseConfig, STATE_NAME, accountManager, random)
 
 	override fun isKeyStrengtheningAvailable(): Boolean = delegate.isKeyStrengtheningAvailable()
 

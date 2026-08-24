@@ -1,10 +1,12 @@
 package org.briarproject.briar.matrix
 
+import org.briarproject.bramble.api.account.AccountManager
 import org.briarproject.bramble.api.crypto.KeyStrengthener
 import org.briarproject.bramble.api.crypto.SecretKey
 import org.briarproject.bramble.api.db.DatabaseConfig
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Rule
 import org.junit.Test
@@ -19,7 +21,10 @@ class MatrixStoreKeyProviderTest {
 	@Test
 	fun testResetsUnmarkedStoreAndReusesStrengthenedKey() {
 		val keyDirectory = testFolder.newFolder("key")
-		val provider = ProtectedMatrixStoreKeyProvider(config(keyDirectory, FakeKeyStrengthener()))
+		val provider = ProtectedMatrixStoreKeyProvider(
+			config(keyDirectory, FakeKeyStrengthener()),
+			fakeAccountManager(),
+		)
 		val storeDirectory = testFolder.newFolder("matrix")
 		val staleState = File(storeDirectory, "store/stale").also {
 			it.parentFile?.mkdirs()
@@ -45,7 +50,10 @@ class MatrixStoreKeyProviderTest {
 	@Test
 	fun testReturnsNoKeyWhenUnmarkedStoreCannotBeReset() {
 		val keyDirectory = testFolder.newFolder("failed-reset-key")
-		val provider = ProtectedMatrixStoreKeyProvider(config(keyDirectory, FakeKeyStrengthener()))
+		val provider = ProtectedMatrixStoreKeyProvider(
+			config(keyDirectory, FakeKeyStrengthener()),
+			fakeAccountManager(),
+		)
 		val storeDirectory = UndeletableDirectory(testFolder.newFolder("failed-reset-store"))
 		File(storeDirectory, "stale").writeText("stale")
 
@@ -61,6 +69,7 @@ class MatrixStoreKeyProviderTest {
 		var requestedStoreDirectory: File? = null
 		val provider = ProtectedMatrixStoreConfigurationProvider(
 			config(databaseDirectory = databaseDirectory),
+			fakeAccountManager(),
 			keyProvider(sourceKey) { requestedStoreDirectory = it },
 		)
 
@@ -80,6 +89,7 @@ class MatrixStoreKeyProviderTest {
 	fun testReturnsNoStoreConfigurationWhenProtectedKeyIsUnavailable() {
 		val provider = ProtectedMatrixStoreConfigurationProvider(
 			config(),
+			fakeAccountManager(),
 			keyProvider(null),
 		)
 
@@ -102,6 +112,49 @@ class MatrixStoreKeyProviderTest {
 				onStoreDirectory(storeDirectory)
 				return key
 			}
+		}
+
+	@Test
+	fun testReturnsNoKeyWithoutDatabaseKey() {
+		val provider = ProtectedMatrixStoreKeyProvider(
+			config(testFolder.newFolder("key"), FakeKeyStrengthener()),
+			fakeAccountManager(null),
+		)
+
+		assertNull(provider.getStoreEncryptionKey(testFolder.newFolder("matrix")))
+	}
+
+	@Test
+	fun testKeyIsBoundToTheDatabaseKey() {
+		val keyDirectory = testFolder.newFolder("bound-key")
+		val firstProvider = ProtectedMatrixStoreKeyProvider(
+			config(keyDirectory, FakeKeyStrengthener()),
+			fakeAccountManager(SecretKey(ByteArray(SecretKey.LENGTH))),
+		)
+		val boundKey = checkNotNull(firstProvider.getStoreEncryptionKey(testFolder.newFolder("matrix1")))
+
+		val secondProvider = ProtectedMatrixStoreKeyProvider(
+			config(keyDirectory, FakeKeyStrengthener()),
+			fakeAccountManager(SecretKey(ByteArray(SecretKey.LENGTH) { 1 })),
+		)
+		val differentlyBoundKey =
+			checkNotNull(secondProvider.getStoreEncryptionKey(testFolder.newFolder("matrix2")))
+
+		// Same on-disk seed, different account database keys, must not derive the same store key.
+		assertNotEquals(boundKey.toList(), differentlyBoundKey.toList())
+	}
+
+	private fun fakeAccountManager(databaseKey: SecretKey? = SecretKey(ByteArray(SecretKey.LENGTH))) =
+		object : AccountManager {
+			override fun hasDatabaseKey() = databaseKey != null
+			override fun getDatabaseKey() = databaseKey
+			override fun accountExists() = true
+			override fun createAccount(name: String, password: String) =
+				throw UnsupportedOperationException()
+			override fun deleteAccount() = throw UnsupportedOperationException()
+			override fun signIn(password: String) = throw UnsupportedOperationException()
+			override fun changePassword(oldPassword: String, newPassword: String) =
+				throw UnsupportedOperationException()
 		}
 
 	private class FakeKeyStrengthener : KeyStrengthener {

@@ -9,6 +9,7 @@ import com.vanniktech.emoji.RecentEmoji;
 
 import org.briarproject.bramble.api.FeatureFlags;
 import org.briarproject.bramble.api.FormatException;
+import org.briarproject.bramble.api.account.AccountManager;
 import org.briarproject.bramble.api.crypto.CryptoComponent;
 import org.briarproject.bramble.api.crypto.KeyStrengthener;
 import org.briarproject.bramble.api.crypto.PublicKey;
@@ -408,12 +409,14 @@ public class AppModule {
 	@Singleton
 	MatrixAuthSession provideMatrixAuthSession(
 			DatabaseConfig databaseConfig,
+			AccountManager accountManager,
 			ReflectiveMatrixHomeserverDiscoveryClient client) {
 		if (!BuildConfig.MATRIX_CONNECTOR_ENABLED) {
 			return new DisabledMatrixAuthSession();
 		}
 		MatrixStoreConfigurationProvider storeConfigurationProvider =
-				new ProtectedMatrixStoreConfigurationProvider(databaseConfig);
+				new ProtectedMatrixStoreConfigurationProvider(databaseConfig,
+						accountManager);
 		return new MatrixAuthSessionImpl(client, client, storeConfigurationProvider);
 	}
 

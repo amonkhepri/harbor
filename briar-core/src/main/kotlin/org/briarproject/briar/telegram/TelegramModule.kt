@@ -3,6 +3,7 @@ package org.briarproject.briar.telegram
 import dagger.Module
 import dagger.Provides
 import org.briarproject.bramble.api.FeatureFlags
+import org.briarproject.bramble.api.account.AccountManager
 import org.briarproject.bramble.api.db.DatabaseConfig
 import org.briarproject.bramble.api.lifecycle.LifecycleManager
 import org.briarproject.briar.api.connector.ConnectorRegistry
@@ -29,7 +30,9 @@ class TelegramModule {
 	@Singleton
 	fun provideTelegramTdlibDatabaseKeyProvider(
 		databaseConfig: DatabaseConfig,
-	): TelegramTdlibDatabaseKeyProvider = ProtectedTelegramTdlibDatabaseKeyProvider(databaseConfig)
+		accountManager: AccountManager,
+	): TelegramTdlibDatabaseKeyProvider =
+		ProtectedTelegramTdlibDatabaseKeyProvider(databaseConfig, accountManager)
 
 	@Provides
 	@Singleton
