@@ -8,6 +8,7 @@ import org.briarproject.briar.api.matrix.MatrixAuthSession.RecoverableErrorDetai
 import org.briarproject.briar.api.matrix.MatrixHomeserverDiscoveryClient
 import org.briarproject.briar.api.matrix.MatrixHomeserverDiscoveryClient.DiscoveryResult
 import org.briarproject.briar.api.connector.ConnectorMessageType
+import org.briarproject.briar.api.connector.ConnectorReactionSummary
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.DataInputStream
@@ -668,6 +669,23 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 	private fun List<Any>.firstIndexOrFailure(): Int =
 		if (isEmpty()) throw SnapshotAdapterFailure() else 0
 
+	private fun readReactionSummaries(msgLike: Any): List<ConnectorReactionSummary> {
+		val reactions = msgLike.javaClass.getMethod("getReactions").invoke(msgLike) as? List<*>
+			?: throw SnapshotAdapterFailure()
+		return reactions.mapNotNull { reaction ->
+			reaction ?: throw SnapshotAdapterFailure()
+			val key = reaction.javaClass.getMethod("getKey").invoke(reaction) as? String
+				?: throw SnapshotAdapterFailure()
+			val senders = reaction.javaClass.getMethod("getSenders").invoke(reaction) as? List<*>
+				?: throw SnapshotAdapterFailure()
+			if (key.isEmpty() || senders.isEmpty()) {
+				null
+			} else {
+				ConnectorReactionSummary(key, senders.size)
+			}
+		}
+	}
+
 	private fun toMessageSnapshot(timelineItem: Any): MatrixMessageSnapshot? {
 		val event = timelineItem.javaClass.getMethod("asEvent").invoke(timelineItem) ?: return null
 		return try {
@@ -687,6 +705,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			// mx007_m3_item2_timeline_scoping.md), so no separate destroy call is needed here,
 			// consistent with message/kind/msgLike/content also being left undestroyed.
 			val inReplyTo = msgLike.javaClass.getMethod("getInReplyTo").invoke(msgLike)
+			val reactions = readReactionSummaries(msgLike)
 			MatrixMessageSnapshot(
 				eventId = identifier.javaClass.getMethod("getEventId").invoke(identifier) as String,
 				senderId = eventClass.getMethod("getSender").invoke(event) as String,
@@ -700,6 +719,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 				},
 				isEdited = message.javaClass.getMethod("isEdited").invoke(message) as Boolean,
 				isReply = inReplyTo != null,
+				reactions = reactions,
 			)
 		} finally {
 			destroyQuietly(event)

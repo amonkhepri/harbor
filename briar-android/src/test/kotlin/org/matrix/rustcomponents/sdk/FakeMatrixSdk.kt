@@ -154,6 +154,7 @@ data class FakeTimelineEventSpec(
 	val messageType: MessageType = MessageType.Text,
 	val edited: Boolean = false,
 	val isReply: Boolean = false,
+	val reactions: List<Reaction> = emptyList(),
 ) {
 	fun toEventTimelineItem(): EventTimelineItem {
 		val content = if (body == null) {
@@ -163,6 +164,7 @@ data class FakeTimelineEventSpec(
 				MsgLikeContent(
 					MsgLikeKind.Message(MessageContent(messageType, body, edited)),
 					inReplyTo = if (isReply) InReplyToDetails() else null,
+					reactions = reactions,
 				),
 			)
 		}
@@ -204,7 +206,11 @@ sealed class TimelineItemContent {
 	}
 }
 
-class MsgLikeContent(val kind: MsgLikeKind, private val inReplyTo: InReplyToDetails? = null) {
+class MsgLikeContent(
+	val kind: MsgLikeKind,
+	private val inReplyTo: InReplyToDetails? = null,
+	val reactions: List<Reaction> = emptyList(),
+) {
 	fun getInReplyTo(): InReplyToDetails? = inReplyTo
 
 	fun destroy() {
@@ -212,6 +218,10 @@ class MsgLikeContent(val kind: MsgLikeKind, private val inReplyTo: InReplyToDeta
 		inReplyTo?.destroy()
 	}
 }
+
+data class Reaction(val key: String, val senders: List<ReactionSenderData>)
+
+class ReactionSenderData
 
 class InReplyToDetails {
 	fun destroy() {

@@ -1,8 +1,9 @@
 package org.briarproject.briar.android.connector
 
 import org.briarproject.briar.api.connector.ConnectorMessage
-import org.briarproject.briar.api.connector.ConnectorSource
 import org.briarproject.briar.api.connector.ConnectorMessageType
+import org.briarproject.briar.api.connector.ConnectorReactionSummary
+import org.briarproject.briar.api.connector.ConnectorSource
 
 data class ConnectorConversationMessageItem(
 	val connectorSource: ConnectorSource,
@@ -14,6 +15,7 @@ data class ConnectorConversationMessageItem(
 	val type: ConnectorMessageType,
 	val isEdited: Boolean = false,
 	val isReply: Boolean = false,
+	val reactions: List<ConnectorReactionSummary> = emptyList(),
 ) {
 	val stableId: String
 		get() = "${connectorSource.id}:$connectorThreadId:$connectorMessageId"
@@ -47,6 +49,7 @@ data class ConnectorConversationMessageItem(
 				message.type,
 				message.isEdited,
 				message.isReply,
+				message.reactions,
 			)
 	}
 }

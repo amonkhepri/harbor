@@ -1,6 +1,7 @@
 package org.briarproject.briar.matrix
 
 import org.briarproject.briar.api.connector.ConnectorMessageType
+import org.briarproject.briar.api.connector.ConnectorReactionSummary
 
 /**
  * Narrow, fakeable boundary over recent-message reading for one joined Matrix room on an SDK
@@ -42,4 +43,5 @@ data class MatrixMessageSnapshot(
 	val type: ConnectorMessageType = ConnectorMessageType.TEXT,
 	val isEdited: Boolean = false,
 	val isReply: Boolean = false,
+	val reactions: List<ConnectorReactionSummary> = emptyList(),
 )

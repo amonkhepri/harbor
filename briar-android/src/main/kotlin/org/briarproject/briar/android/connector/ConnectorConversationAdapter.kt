@@ -49,10 +49,26 @@ internal class ConnectorConversationAdapter :
 			} else {
 				messageText
 			}
-			text.text = if (item.isEdited) {
+			val decoratedText = if (item.isEdited) {
 				text.resources.getString(R.string.connector_message_edited, replyText)
 			} else {
 				replyText
+			}
+			text.text = if (item.reactions.isEmpty()) {
+				decoratedText
+			} else {
+				val reactionText = item.reactions.joinToString("  ") { reaction ->
+					text.resources.getString(
+						R.string.connector_message_reaction_summary,
+						reaction.key,
+						reaction.count,
+					)
+				}
+				text.resources.getString(
+					R.string.connector_message_with_reactions,
+					decoratedText,
+					reactionText,
+				)
 			}
 			direction.setText(
 				if (item.isOutgoing) {
@@ -81,6 +97,7 @@ internal class ConnectorConversationAdapter :
 			i1.text == i2.text &&
 			i1.type == i2.type &&
 			i1.isEdited == i2.isEdited &&
-			i1.isReply == i2.isReply
+			i1.isReply == i2.isReply &&
+			i1.reactions == i2.reactions
 	}
 }

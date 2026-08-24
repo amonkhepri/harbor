@@ -1,6 +1,7 @@
 package org.briarproject.briar.matrix
 
 import org.briarproject.briar.api.connector.ConnectorMessageType
+import org.briarproject.briar.api.connector.ConnectorReactionSummary
 import org.briarproject.briar.api.matrix.MatrixAuthSession.RecoverableErrorDetail.NONE
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -12,6 +13,8 @@ import org.matrix.rustcomponents.sdk.FakeMatrixSdkState
 import org.matrix.rustcomponents.sdk.FakeRoomSpec
 import org.matrix.rustcomponents.sdk.FakeTimelineEventSpec
 import org.matrix.rustcomponents.sdk.MessageType
+import org.matrix.rustcomponents.sdk.Reaction
+import org.matrix.rustcomponents.sdk.ReactionSenderData
 import org.matrix.rustcomponents.sdk.TimelineDiff
 import org.matrix.rustcomponents.sdk.TimelineItem
 import java.util.concurrent.TimeUnit
@@ -95,6 +98,32 @@ class ReflectiveMatrixMessageSnapshotClientTest {
 
 		assertEquals(listOf(true, false), result?.map { it.isReply })
 		assertEquals(1, FakeMatrixSdkState.inReplyToDetailsDestroyCount)
+	}
+
+	@Test
+	fun `getRecentMessages maps only non-empty reactions to aggregate counts`() {
+		val client = loggedInClient()
+		FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec("!room:example.org"))
+		FakeMatrixSdkState.timelineDiffsToReturn = listOf(
+			TimelineDiff.Reset(
+				listOf(
+					remoteEvent(
+						"\$reacted:example.org",
+						"body",
+						2_000uL,
+						reactions = listOf(
+							Reaction("👍", List(2) { ReactionSenderData() }),
+							Reaction("", listOf(ReactionSenderData())),
+							Reaction("😂", emptyList()),
+						),
+					),
+				),
+			),
+		)
+
+		val result = client.getRecentMessages("!room:example.org", 1)
+
+		assertEquals(listOf(ConnectorReactionSummary("👍", 2)), result?.single()?.reactions)
 	}
 
 	@Test
@@ -346,6 +375,7 @@ class ReflectiveMatrixMessageSnapshotClientTest {
 		messageType: MessageType = MessageType.Text,
 		edited: Boolean = false,
 		isReply: Boolean = false,
+		reactions: List<Reaction> = emptyList(),
 	): TimelineItem = TimelineItem(
 		FakeTimelineEventSpec(
 			EventOrTransactionId.EventId(eventId),
@@ -356,6 +386,7 @@ class ReflectiveMatrixMessageSnapshotClientTest {
 			messageType,
 			edited,
 			isReply,
+			reactions,
 		),
 	)
 

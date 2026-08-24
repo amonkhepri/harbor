@@ -4,6 +4,7 @@ import org.briarproject.briar.api.connector.ConnectorMessage
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult.LoadFailed
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult.Success
 import org.briarproject.briar.api.connector.ConnectorMessageType
+import org.briarproject.briar.api.connector.ConnectorReactionSummary
 import org.briarproject.briar.api.connector.ConnectorSources
 import org.briarproject.briar.api.matrix.MatrixAuthSession
 import org.briarproject.briar.api.matrix.MatrixAuthSession.RecoverableErrorDetail.NONE
@@ -159,6 +160,7 @@ class MatrixRoomConnectorTest {
 					isOutgoing = true,
 					isEdited = true,
 					isReply = true,
+					reactions = listOf(ConnectorReactionSummary("👍", 2)),
 				),
 			),
 		)
@@ -183,6 +185,7 @@ class MatrixRoomConnectorTest {
 						type = ConnectorMessageType.TEXT,
 						isEdited = true,
 						isReply = true,
+						reactions = listOf(ConnectorReactionSummary("👍", 2)),
 					),
 				),
 			),

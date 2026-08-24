@@ -74,6 +74,7 @@ class MatrixRoomConnector(
 					type = snapshot.type,
 					isEdited = snapshot.isEdited,
 					isReply = snapshot.isReply,
+					reactions = snapshot.reactions,
 				)
 			},
 		)

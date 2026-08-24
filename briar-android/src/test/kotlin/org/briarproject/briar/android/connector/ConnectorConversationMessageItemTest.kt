@@ -2,6 +2,7 @@ package org.briarproject.briar.android.connector
 
 import org.briarproject.briar.api.connector.ConnectorMessage
 import org.briarproject.briar.api.connector.ConnectorMessageType
+import org.briarproject.briar.api.connector.ConnectorReactionSummary
 import org.briarproject.briar.api.connector.ConnectorSource
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -64,6 +65,16 @@ class ConnectorConversationMessageItemTest {
 		assertEquals(true, item.isReply)
 	}
 
+	@Test
+	fun testFromMessagesPreservesReactionSummaries() {
+		val reactions = listOf(ConnectorReactionSummary("👍", 2))
+		val item = ConnectorConversationMessageItem.fromMessages(
+			listOf(connectorMessage("1", 10, false, "reacted", 1L, reactions = reactions)),
+		).single()
+
+		assertEquals(reactions, item.reactions)
+	}
+
 	private fun connectorMessageItem(
 		messageId: String,
 		isOutgoing: Boolean,
@@ -89,6 +100,7 @@ class ConnectorConversationMessageItemTest {
 		type: ConnectorMessageType = ConnectorMessageType.TEXT,
 		isEdited: Boolean = false,
 		isReply: Boolean = false,
+		reactions: List<ConnectorReactionSummary> = emptyList(),
 	): ConnectorMessage = ConnectorMessage(
 		source = CONNECTOR_SOURCE,
 		threadId = "thread-1",
@@ -100,6 +112,7 @@ class ConnectorConversationMessageItemTest {
 		type = type,
 		isEdited = isEdited,
 		isReply = isReply,
+		reactions = reactions,
 	)
 
 	companion object {
