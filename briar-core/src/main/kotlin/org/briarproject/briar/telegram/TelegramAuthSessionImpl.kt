@@ -56,7 +56,7 @@ class TelegramAuthSessionImpl(
 	override fun startService() = accessGate.start()
 
 	override fun stopService() = accessGate.stop {
-		currentState = tdlibLoginClient.close()
+		currentState = tdlibLoginClient.closeForShutdown()
 	}
 }
 
@@ -80,6 +80,8 @@ class DisabledTelegramTdlibLoginClient : TelegramTdlibLoginClient {
 	override fun getQrAuthorizationLink(): String? = null
 
 	override fun close(): TelegramAuthState = TelegramAuthState.CLOSED
+
+	override fun closeForShutdown(): TelegramAuthState = TelegramAuthState.CLOSED
 }
 
 class ReflectiveTelegramTdlibLoginClient(
@@ -341,6 +343,11 @@ class ReflectiveTelegramTdlibLoginClient(
 		return clearRecoverableErrorDetail(TelegramAuthState.CLOSED)
 	}
 
+	override fun closeForShutdown(): TelegramAuthState {
+		closeTdlibClient(waitUntilConfirmed = true)
+		return clearRecoverableErrorDetail(TelegramAuthState.CLOSED)
+	}
+
 	private fun awaitAuthorizationStateClassName(createClient: Boolean): String {
 		val pendingAuthorizationUpdate = prepareAuthorizationUpdate()
 		return try {
@@ -507,7 +514,7 @@ class ReflectiveTelegramTdlibLoginClient(
 		return recoverableError(RecoverableErrorDetail.PERSISTED_SESSION_IDENTITY_UNVERIFIED)
 	}
 
-	private fun closeTdlibClient() {
+	private fun closeTdlibClient(waitUntilConfirmed: Boolean = false) {
 		activeClientGeneration = ++nextClientGeneration
 		lastAuthorizationStateClassName = ""
 		qrAuthorizationLink = null
@@ -516,14 +523,22 @@ class ReflectiveTelegramTdlibLoginClient(
 		val client = tdlibClient ?: return
 		tdlibClient = null
 		val closeUpdate = prepareAuthorizationUpdate("AuthorizationStateClosed")
+		var interrupted = false
+		var confirmed: Boolean
 		try {
 			closeReflectiveTdlibClient(client)
-			awaitAuthorizationUpdate(closeUpdate)
+			do {
+				confirmed = try {
+					awaitAuthorizationUpdate(closeUpdate).isNotEmpty()
+				} catch (_: InterruptedException) {
+					interrupted = true
+					false
+				}
+			} while (waitUntilConfirmed && !confirmed)
 		} catch (_: ReflectiveOperationException) {
 		} catch (_: LinkageError) {
-		} catch (e: InterruptedException) {
-			Thread.currentThread().interrupt()
 		} finally {
+			if (interrupted) Thread.currentThread().interrupt()
 			if (pendingAuthorizationUpdate === closeUpdate) {
 				pendingAuthorizationUpdate = null
 			}
