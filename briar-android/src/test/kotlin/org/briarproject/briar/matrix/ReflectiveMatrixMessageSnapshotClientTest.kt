@@ -79,6 +79,25 @@ class ReflectiveMatrixMessageSnapshotClientTest {
 	}
 
 	@Test
+	fun `getRecentMessages preserves Matrix reply state and destroys the reply handle`() {
+		val client = loggedInClient()
+		FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec("!room:example.org"))
+		FakeMatrixSdkState.timelineDiffsToReturn = listOf(
+			TimelineDiff.Reset(
+				listOf(
+					remoteEvent("\$reply:example.org", "reply body", 2_000uL, isReply = true),
+					remoteEvent("\$plain:example.org", "plain body", 3_000uL),
+				),
+			),
+		)
+
+		val result = client.getRecentMessages("!room:example.org", 2)
+
+		assertEquals(listOf(true, false), result?.map { it.isReply })
+		assertEquals(1, FakeMatrixSdkState.inReplyToDetailsDestroyCount)
+	}
+
+	@Test
 	fun `getRecentMessages maps Matrix video, audio, and file to connector file placeholders`() {
 		val client = loggedInClient()
 		FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec("!room:example.org"))
@@ -326,6 +345,7 @@ class ReflectiveMatrixMessageSnapshotClientTest {
 		own: Boolean = false,
 		messageType: MessageType = MessageType.Text,
 		edited: Boolean = false,
+		isReply: Boolean = false,
 	): TimelineItem = TimelineItem(
 		FakeTimelineEventSpec(
 			EventOrTransactionId.EventId(eventId),
@@ -335,6 +355,7 @@ class ReflectiveMatrixMessageSnapshotClientTest {
 			own,
 			messageType,
 			edited,
+			isReply,
 		),
 	)
 

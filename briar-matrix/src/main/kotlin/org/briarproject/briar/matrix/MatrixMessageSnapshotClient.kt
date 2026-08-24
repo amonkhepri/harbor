@@ -41,4 +41,5 @@ data class MatrixMessageSnapshot(
 	val isOutgoing: Boolean,
 	val type: ConnectorMessageType = ConnectorMessageType.TEXT,
 	val isEdited: Boolean = false,
+	val isReply: Boolean = false,
 )

@@ -44,10 +44,15 @@ internal class ConnectorConversationAdapter :
 				ConnectorMessageType.FILE -> text.resources.getString(R.string.connector_message_file)
 				else -> item.text
 			}
-			text.text = if (item.isEdited) {
-				text.resources.getString(R.string.connector_message_edited, messageText)
+			val replyText = if (item.isReply) {
+				text.resources.getString(R.string.connector_message_reply, messageText)
 			} else {
 				messageText
+			}
+			text.text = if (item.isEdited) {
+				text.resources.getString(R.string.connector_message_edited, replyText)
+			} else {
+				replyText
 			}
 			direction.setText(
 				if (item.isOutgoing) {
@@ -75,6 +80,7 @@ internal class ConnectorConversationAdapter :
 			i1.isOutgoing == i2.isOutgoing &&
 			i1.text == i2.text &&
 			i1.type == i2.type &&
-			i1.isEdited == i2.isEdited
+			i1.isEdited == i2.isEdited &&
+			i1.isReply == i2.isReply
 	}
 }

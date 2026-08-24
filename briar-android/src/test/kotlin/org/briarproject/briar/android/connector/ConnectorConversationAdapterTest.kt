@@ -40,4 +40,28 @@ class ConnectorConversationAdapterTest {
 			view.findViewById<TextView>(R.id.connectorMessageText).text.toString(),
 		)
 	}
+
+	@Test
+	fun testReplyMessageRendersVisibleMarker() {
+		val view = LayoutInflater.from(RuntimeEnvironment.getApplication())
+			.inflate(R.layout.list_item_connector_message, null)
+		val holder = ConnectorConversationAdapter.MessageViewHolder(view)
+		holder.bind(
+			ConnectorConversationMessageItem(
+				connectorSource = ConnectorSources.MATRIX,
+				connectorThreadId = "!room:example.org",
+				connectorMessageId = "\$event:example.org",
+				dateMillis = 1_000L,
+				isOutgoing = false,
+				text = "reply body",
+				type = ConnectorMessageType.TEXT,
+				isReply = true,
+			),
+		)
+
+		assertEquals(
+			"↩ reply body",
+			view.findViewById<TextView>(R.id.connectorMessageText).text.toString(),
+		)
+	}
 }

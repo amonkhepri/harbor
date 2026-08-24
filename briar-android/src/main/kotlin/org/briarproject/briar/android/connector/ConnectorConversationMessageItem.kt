@@ -13,6 +13,7 @@ data class ConnectorConversationMessageItem(
 	val text: String,
 	val type: ConnectorMessageType,
 	val isEdited: Boolean = false,
+	val isReply: Boolean = false,
 ) {
 	val stableId: String
 		get() = "${connectorSource.id}:$connectorThreadId:$connectorMessageId"
@@ -45,6 +46,7 @@ data class ConnectorConversationMessageItem(
 				message.text,
 				message.type,
 				message.isEdited,
+				message.isReply,
 			)
 	}
 }

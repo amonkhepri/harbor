@@ -153,13 +153,17 @@ data class FakeTimelineEventSpec(
 	val own: Boolean = false,
 	val messageType: MessageType = MessageType.Text,
 	val edited: Boolean = false,
+	val isReply: Boolean = false,
 ) {
 	fun toEventTimelineItem(): EventTimelineItem {
 		val content = if (body == null) {
 			TimelineItemContent.Other
 		} else {
 			TimelineItemContent.MsgLike(
-				MsgLikeContent(MsgLikeKind.Message(MessageContent(messageType, body, edited))),
+				MsgLikeContent(
+					MsgLikeKind.Message(MessageContent(messageType, body, edited)),
+					inReplyTo = if (isReply) InReplyToDetails() else null,
+				),
 			)
 		}
 		return EventTimelineItem(identifier, sender, own, content, timestamp)
@@ -200,8 +204,19 @@ sealed class TimelineItemContent {
 	}
 }
 
-class MsgLikeContent(val kind: MsgLikeKind) {
-	fun destroy() = kind.destroy()
+class MsgLikeContent(val kind: MsgLikeKind, private val inReplyTo: InReplyToDetails? = null) {
+	fun getInReplyTo(): InReplyToDetails? = inReplyTo
+
+	fun destroy() {
+		kind.destroy()
+		inReplyTo?.destroy()
+	}
+}
+
+class InReplyToDetails {
+	fun destroy() {
+		FakeMatrixSdkState.inReplyToDetailsDestroyCount++
+	}
 }
 
 sealed class MsgLikeKind {
@@ -542,6 +557,7 @@ object FakeMatrixSdkState {
 	var eventTimelineItemDestroyCount = 0
 	var messageContentDestroyCount = 0
 	var otherContentDestroyCount = 0
+	var inReplyToDetailsDestroyCount = 0
 
 	fun reset() {
 		lastServerName = null
@@ -591,5 +607,6 @@ object FakeMatrixSdkState {
 		eventTimelineItemDestroyCount = 0
 		messageContentDestroyCount = 0
 		otherContentDestroyCount = 0
+		inReplyToDetailsDestroyCount = 0
 	}
 }

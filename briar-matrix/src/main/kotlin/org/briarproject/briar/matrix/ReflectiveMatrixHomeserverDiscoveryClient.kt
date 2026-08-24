@@ -682,6 +682,11 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			val message = kind.javaClass.getMethod("getContent").invoke(kind)
 			val messageType = message.javaClass.getMethod("getMsgType").invoke(message)
 			val timestampMillis = eventClass.getMethod(TIMESTAMP_GETTER_NAME).invoke(event) as Long
+			// getInReplyTo() is only used to check presence: msgLike's owning event.destroy()
+			// below recursively destroys this entire nested content chain (documented in
+			// mx007_m3_item2_timeline_scoping.md), so no separate destroy call is needed here,
+			// consistent with message/kind/msgLike/content also being left undestroyed.
+			val inReplyTo = msgLike.javaClass.getMethod("getInReplyTo").invoke(msgLike)
 			MatrixMessageSnapshot(
 				eventId = identifier.javaClass.getMethod("getEventId").invoke(identifier) as String,
 				senderId = eventClass.getMethod("getSender").invoke(event) as String,
@@ -694,6 +699,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 					else -> ConnectorMessageType.TEXT
 				},
 				isEdited = message.javaClass.getMethod("isEdited").invoke(message) as Boolean,
+				isReply = inReplyTo != null,
 			)
 		} finally {
 			destroyQuietly(event)

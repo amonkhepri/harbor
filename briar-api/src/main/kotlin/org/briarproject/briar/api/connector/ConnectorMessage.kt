@@ -10,6 +10,7 @@ data class ConnectorMessage(
 	val sourceMessageOrder: Long,
 	val type: ConnectorMessageType,
 	val isEdited: Boolean = false,
+	val isReply: Boolean = false,
 )
 
 enum class ConnectorMessageType {
