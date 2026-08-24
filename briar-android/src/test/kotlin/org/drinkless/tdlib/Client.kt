@@ -139,6 +139,7 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 	}
 
 	private fun emitCloseAuthorizationState() {
+		if (!closeAuthorizationUpdateEnabled) return
 		emitAfter(closeAuthorizationUpdateDelayMs) {
 			clearActiveDatabaseDirectory(databaseDirectory)
 			updateHandler.onResult(
@@ -180,6 +181,7 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 		private val sentRequestNames = mutableListOf<String>()
 		private val authorizationUpdateDelaySequenceMs = mutableListOf<Long>()
 		private var authorizationUpdateDelayMs = 0L
+		private var closeAuthorizationUpdateEnabled = true
 		private var closeAuthorizationUpdateDelayMs = 0L
 		private var phoneNumberResultDelayMs = 0L
 		private var authenticationCodeResultDelayMs = 0L
@@ -222,6 +224,7 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 			sentRequestNames.clear()
 			authorizationUpdateDelaySequenceMs.clear()
 			authorizationUpdateDelayMs = 0L
+			closeAuthorizationUpdateEnabled = true
 			closeAuthorizationUpdateDelayMs = 0L
 			phoneNumberResultDelayMs = 0L
 			authenticationCodeResultDelayMs = 0L
@@ -255,6 +258,10 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 
 		fun setCloseAuthorizationUpdateDelayMs(delayMs: Long) {
 			closeAuthorizationUpdateDelayMs = delayMs
+		}
+
+		fun setCloseAuthorizationUpdateEnabled(enabled: Boolean) {
+			closeAuthorizationUpdateEnabled = enabled
 		}
 
 		fun setAuthorizationUpdateDelaySequenceMs(vararg delayMs: Long) {

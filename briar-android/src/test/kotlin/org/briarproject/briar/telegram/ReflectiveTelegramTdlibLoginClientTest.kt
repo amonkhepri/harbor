@@ -27,6 +27,7 @@ class ReflectiveTelegramTdlibLoginClientTest {
 		tdlibKeyProvider: TelegramTdlibDatabaseKeyProvider =
 			StaticTelegramTdlibDatabaseKeyProvider(TDLIB_KEY),
 		authorizationUpdateTimeoutMs: Long = 10_000L,
+		shutdownCloseTimeoutMs: Long = 60_000L,
 		qrAuthorizationTimeoutMs: Long = 300_000L,
 		qrAuthorizationPollMs: Long = 1_000L,
 	) = ReflectiveTelegramTdlibLoginClient(
@@ -35,6 +36,7 @@ class ReflectiveTelegramTdlibLoginClientTest {
 		apiHash = "test-api-hash",
 		tdlibKeyProvider = tdlibKeyProvider,
 		authorizationUpdateTimeoutMs = authorizationUpdateTimeoutMs,
+		shutdownCloseTimeoutMs = shutdownCloseTimeoutMs,
 		qrAuthorizationTimeoutMs = qrAuthorizationTimeoutMs,
 		qrAuthorizationPollMs = qrAuthorizationPollMs,
 	)
@@ -542,6 +544,19 @@ class ReflectiveTelegramTdlibLoginClientTest {
 
 		assertEquals("Expected shutdown close wait, got ${elapsed}ms", true, elapsed >= 150L)
 		assertEquals(TelegramAuthState.CLOSED, session.getSnapshot().authState)
+		assertSentRequests(CLOSE)
+	}
+
+	@Test(timeout = 2_000L)
+	fun testShutdownCloseIsBoundedWhenTdlibNeverConfirms() {
+		Client.setCloseAuthorizationUpdateEnabled(false)
+		val client = createClient(
+			authorizationUpdateTimeoutMs = 25L,
+			shutdownCloseTimeoutMs = 100L,
+		)
+		client.start()
+
+		assertEquals(TelegramAuthState.RECOVERABLE_ERROR, client.closeForShutdown())
 		assertSentRequests(CLOSE)
 	}
 
