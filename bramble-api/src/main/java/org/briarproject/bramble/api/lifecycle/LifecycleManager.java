@@ -32,6 +32,14 @@ public interface LifecycleManager {
 	}
 
 	/**
+	 * The result of stopping services and closing the database.
+	 */
+	enum StopResult {
+		ERROR,
+		SUCCESS
+	}
+
+	/**
 	 * The state the lifecycle can be in.
 	 * Returned by {@link #getLifecycleState()}
 	 */
@@ -105,7 +113,7 @@ public interface LifecycleManager {
 	 * registered {@link ExecutorService ExecutorServices} to shut down, and
 	 * the {@link DatabaseComponent} to be closed before returning.
 	 */
-	void waitForShutdown() throws InterruptedException;
+	StopResult waitForShutdown() throws InterruptedException;
 
 	/**
 	 * Returns the current state of the lifecycle.

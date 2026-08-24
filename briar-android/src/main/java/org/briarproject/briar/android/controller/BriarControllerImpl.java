@@ -29,6 +29,7 @@ import static java.util.logging.Level.WARNING;
 import static java.util.logging.Logger.getLogger;
 import static org.briarproject.android.dontkillmelib.DozeUtils.needsDozeWhitelisting;
 import static org.briarproject.bramble.api.lifecycle.LifecycleManager.LifecycleState.STARTING_SERVICES;
+import static org.briarproject.bramble.api.lifecycle.LifecycleManager.StopResult.SUCCESS;
 import static org.briarproject.bramble.util.LogUtils.logException;
 import static org.briarproject.briar.android.settings.SettingsFragment.SETTINGS_NAMESPACE;
 
@@ -140,6 +141,7 @@ public class BriarControllerImpl implements BriarController {
 	public void signOut(ResultHandler<Void> handler, boolean deleteAccount) {
 		wakeLockManager.executeWakefully(() -> {
 			boolean interrupted = false;
+			boolean shutdownSucceeded = false;
 			try {
 				// Wait for the service to finish starting up
 				IBinder binder = serviceConnection.waitForBinder();
@@ -151,7 +153,8 @@ public class BriarControllerImpl implements BriarController {
 				service.shutdown(true);
 				while (true) {
 					try {
-						service.waitForShutdown();
+						shutdownSucceeded =
+								service.waitForShutdown() == SUCCESS;
 						break;
 					} catch (InterruptedException e) {
 						interrupted = true;
@@ -162,7 +165,10 @@ public class BriarControllerImpl implements BriarController {
 				interrupted = true;
 				LOG.warning("Interrupted while waiting for service");
 			} finally {
-				if (deleteAccount) accountManager.deleteAccount();
+				if (deleteAccount) {
+					if (shutdownSucceeded) accountManager.deleteAccount();
+					else LOG.warning("Skipping account deletion after incomplete shutdown");
+				}
 				if (interrupted) Thread.currentThread().interrupt();
 			}
 			handler.onResult(null);

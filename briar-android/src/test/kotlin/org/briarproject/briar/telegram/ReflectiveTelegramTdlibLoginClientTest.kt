@@ -2,11 +2,13 @@ package org.briarproject.briar.telegram
 
 import org.briarproject.briar.api.telegram.TelegramAuthSession.RecoverableErrorDetail
 import org.briarproject.briar.api.telegram.TelegramAuthState
+import org.briarproject.bramble.api.lifecycle.ServiceException
 import org.drinkless.tdlib.Client
 import org.drinkless.tdlib.TdApi
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertThrows
 import org.junit.Test
 import java.io.File
 
@@ -557,6 +559,21 @@ class ReflectiveTelegramTdlibLoginClientTest {
 		client.start()
 
 		assertEquals(TelegramAuthState.RECOVERABLE_ERROR, client.closeForShutdown())
+		assertSentRequests(CLOSE)
+	}
+
+	@Test(timeout = 2_000L)
+	fun testServiceStopFailsWhenTdlibNeverConfirmsClose() {
+		Client.setCloseAuthorizationUpdateEnabled(false)
+		val session = TelegramAuthSessionImpl(
+			createClient(
+				authorizationUpdateTimeoutMs = 25L,
+				shutdownCloseTimeoutMs = 100L,
+			),
+		)
+		session.start()
+
+		assertThrows(ServiceException::class.java) { session.stopService() }
 		assertSentRequests(CLOSE)
 	}
 

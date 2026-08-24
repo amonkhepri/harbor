@@ -5,6 +5,7 @@ import org.briarproject.briar.api.telegram.TelegramAuthSession.RecoverableErrorD
 import org.briarproject.briar.api.telegram.TelegramAuthSession.Snapshot
 import org.briarproject.briar.api.telegram.TelegramAuthState
 import org.briarproject.bramble.api.lifecycle.Service
+import org.briarproject.bramble.api.lifecycle.ServiceException
 import java.io.File
 import java.util.logging.Logger
 
@@ -57,6 +58,7 @@ class TelegramAuthSessionImpl(
 
 	override fun stopService() = accessGate.stop {
 		currentState = tdlibLoginClient.closeForShutdown()
+		if (currentState != TelegramAuthState.CLOSED) throw ServiceException()
 	}
 }
 

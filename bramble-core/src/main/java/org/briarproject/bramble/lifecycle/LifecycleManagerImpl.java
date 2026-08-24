@@ -67,6 +67,8 @@ class LifecycleManagerImpl implements LifecycleManager, MigrationListener {
 	private final CountDownLatch shutdownLatch = new CountDownLatch(1);
 	private final AtomicReference<LifecycleState> state =
 			new AtomicReference<>(CREATED);
+	private final AtomicReference<StopResult> stopResult =
+			new AtomicReference<>(StopResult.SUCCESS);
 
 	@Inject
 	LifecycleManagerImpl(DatabaseComponent db, EventBus eventBus,
@@ -198,6 +200,7 @@ class LifecycleManagerImpl implements LifecycleManager, MigrationListener {
 				}
 			} catch (ServiceException e) {
 				logException(LOG, WARNING, e);
+				stopResult.set(StopResult.ERROR);
 			}
 		}
 		for (ExecutorService e : executors) {
@@ -213,6 +216,7 @@ class LifecycleManagerImpl implements LifecycleManager, MigrationListener {
 			logDuration(LOG, "Closing database", start);
 		} catch (DbException e) {
 			logException(LOG, WARNING, e);
+			stopResult.set(StopResult.ERROR);
 		}
 		state.set(STOPPED);
 		shutdownLatch.countDown();
@@ -230,8 +234,9 @@ class LifecycleManagerImpl implements LifecycleManager, MigrationListener {
 	}
 
 	@Override
-	public void waitForShutdown() throws InterruptedException {
+	public StopResult waitForShutdown() throws InterruptedException {
 		shutdownLatch.await();
+		return stopResult.get();
 	}
 
 	@Override
