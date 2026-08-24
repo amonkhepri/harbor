@@ -1,7 +1,10 @@
 package org.briarproject.briar.android.contact
 
+import org.briarproject.bramble.test.TestUtils.getContact
+import org.briarproject.briar.api.client.MessageTracker.GroupCount
 import org.briarproject.briar.api.connector.ConnectorSource
 import org.briarproject.briar.api.connector.ConnectorMessageType
+import org.briarproject.briar.api.identity.AuthorInfo
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -33,6 +36,30 @@ class InboxThreadAdapterTest {
 		assertContentsChanged(item.copy(isLastMessageOutgoing = true))
 		assertContentsChanged(item.copy(isPreviewLoading = true))
 		assertContentsChanged(item.copy(latestActivityMillis = 2L))
+	}
+
+	@Test
+	fun testBriarContentsDetectAuthorInfoStatusChange() {
+		val contact = getContact()
+		val groupCount = GroupCount(0, 0, 1L)
+		fun briarItem(status: AuthorInfo.Status) = BriarInboxThreadItem(
+			ContactListItem(contact, AuthorInfo(status), false, groupCount),
+		)
+
+		assertEquals(
+			true,
+			callback.areContentsTheSame(
+				briarItem(AuthorInfo.Status.VERIFIED),
+				briarItem(AuthorInfo.Status.VERIFIED),
+			),
+		)
+		assertEquals(
+			false,
+			callback.areContentsTheSame(
+				briarItem(AuthorInfo.Status.VERIFIED),
+				briarItem(AuthorInfo.Status.UNVERIFIED),
+			),
+		)
 	}
 
 	private fun connectorItem(previewText: String = "") = FakeConnectorInboxThreadItem(
