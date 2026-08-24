@@ -79,6 +79,7 @@ class InboxThreadAdapter(private val listener: OnInboxThreadClickListener) :
 			if (!NullSafety.equals(c1.contact.alias, c2.contact.alias)) {
 				return false
 			}
+			if (c1.authorInfo.status != c2.authorInfo.status) return false
 			return NullSafety.equals(
 				c1.authorInfo.avatarHeader,
 				c2.authorInfo.avatarHeader,
