@@ -48,6 +48,28 @@ class ConnectorConversationMessageItemTest {
 	}
 
 	@Test
+	fun testFromMessagesPreservesInputOrderWhenDateAndSourceOrderTie() {
+		// Mirrors Matrix: `sourceMessageOrder` is the same second-truncated timestamp as
+		// `dateSeconds` (MatrixRoomConnector.kt), so same-second messages tie on both sort
+		// keys. `messageId` ("z-event" sorts after "a-event") must not be used to break that
+		// tie; the connector client's own oldest-first order should win instead.
+		val items = ConnectorConversationMessageItem.fromMessages(
+			listOf(
+				connectorMessage("z-event", 30, false, "first", 30L),
+				connectorMessage("a-event", 30, false, "second", 30L),
+			),
+		)
+
+		assertEquals(
+			listOf(
+				connectorMessageItem("z-event", false, "first", 30000L),
+				connectorMessageItem("a-event", false, "second", 30000L),
+			),
+			items,
+		)
+	}
+
+	@Test
 	fun testFromMessagesPreservesEditedState() {
 		val item = ConnectorConversationMessageItem.fromMessages(
 			listOf(connectorMessage("1", 10, false, "edited", 1L, isEdited = true)),
