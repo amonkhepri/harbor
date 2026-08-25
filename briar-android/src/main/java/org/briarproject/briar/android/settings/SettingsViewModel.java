@@ -48,11 +48,9 @@ import androidx.lifecycle.MutableLiveData;
 
 import static android.widget.Toast.LENGTH_LONG;
 import static java.util.Arrays.asList;
-import static java.util.logging.Level.WARNING;
 import static java.util.logging.Logger.getLogger;
 import static org.briarproject.bramble.util.AndroidUtils.getSupportedImageContentTypes;
 import static org.briarproject.bramble.util.LogUtils.logDuration;
-import static org.briarproject.bramble.util.LogUtils.logException;
 import static org.briarproject.bramble.util.LogUtils.now;
 import static org.briarproject.briar.android.settings.SecurityFragment.PREF_SCREEN_LOCK;
 import static org.briarproject.briar.android.settings.SecurityFragment.PREF_SCREEN_LOCK_TIMEOUT;
@@ -213,7 +211,8 @@ class SettingsViewModel extends DbViewModel implements EventListener {
 			try {
 				trySetAvatar(uri);
 			} catch (IOException e) {
-				logException(LOG, WARNING, e);
+				LOG.warning("Failed to set avatar: " +
+						e.getClass().getSimpleName());
 				onSetAvatarFailed();
 			}
 		});
@@ -242,7 +241,8 @@ class SettingsViewModel extends DbViewModel implements EventListener {
 				avatarManager.addAvatar(ImageCompressor.MIME_TYPE, compressed);
 				loadOwnIdentityInfo();
 			} catch (IOException | DbException e) {
-				logException(LOG, WARNING, e);
+				LOG.warning("Failed to set avatar: " +
+						e.getClass().getSimpleName());
 				onSetAvatarFailed();
 			}
 		});
