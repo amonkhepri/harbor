@@ -1,6 +1,7 @@
 package org.briarproject.briar.android.telegram
 
 import android.os.Bundle
+import android.os.Parcelable
 import android.view.Menu
 import android.view.MenuItem
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -52,6 +53,7 @@ class TelegramConversationActivity : BriarActivity() {
 
 		private const val MESSAGE_LIMIT = 50
 		private const val TELEGRAM_REFRESH_INTERVAL_MS = 15_000L
+		private const val STATE_LAYOUT_MANAGER = "layoutManager"
 
 		private fun emptyTextForState(state: ConnectorConversationAvailabilityState): Int = when (state) {
 			LOADING ->
@@ -94,6 +96,8 @@ class TelegramConversationActivity : BriarActivity() {
 	lateinit var ioExecutor: Executor
 
 	private lateinit var list: BriarRecyclerView
+	private lateinit var layoutManager: LinearLayoutManager
+	private var layoutManagerState: Parcelable? = null
 	private var chatId = 0L
 	private var messageState = ConnectorConversationMessageListState()
 	private var automaticRefreshRunning = false
@@ -123,7 +127,8 @@ class TelegramConversationActivity : BriarActivity() {
 		}
 
 		list = findViewById(R.id.connectorConversationList)
-		list.setLayoutManager(LinearLayoutManager(this).apply { stackFromEnd = true })
+		layoutManager = LinearLayoutManager(this).apply { stackFromEnd = true }
+		list.setLayoutManager(layoutManager)
 		list.setAdapter(adapter)
 		loadMessages()
 	}
@@ -131,6 +136,16 @@ class TelegramConversationActivity : BriarActivity() {
 	override fun onCreateOptionsMenu(menu: Menu): Boolean {
 		menuInflater.inflate(R.menu.connector_conversation_actions, menu)
 		return super.onCreateOptionsMenu(menu)
+	}
+
+	override fun onSaveInstanceState(outState: Bundle) {
+		super.onSaveInstanceState(outState)
+		outState.putParcelable(STATE_LAYOUT_MANAGER, layoutManager.onSaveInstanceState())
+	}
+
+	override fun onRestoreInstanceState(savedInstanceState: Bundle) {
+		super.onRestoreInstanceState(savedInstanceState)
+		layoutManagerState = savedInstanceState.getParcelable(STATE_LAYOUT_MANAGER)
 	}
 
 	override fun onStart() {
@@ -253,7 +268,15 @@ class TelegramConversationActivity : BriarActivity() {
 		list.setEmptyText(state.emptyText)
 		adapter.submitList(state.messages) {
 			if (!state.isLoading) list.showData()
-			if (!list.recyclerView.canScrollVertically(1)) list.scrollToPosition(state.messages.lastIndex)
+			val savedLayoutManagerState = layoutManagerState
+			if (savedLayoutManagerState != null) {
+				// Restore the scroll position from before a config change instead of
+				// jumping to the end now that the async adapter update has landed.
+				layoutManager.onRestoreInstanceState(savedLayoutManagerState)
+				layoutManagerState = null
+			} else if (!list.recyclerView.canScrollVertically(1)) {
+				list.scrollToPosition(state.messages.lastIndex)
+			}
 		}
 		if (state.isLoading) list.showProgressBar()
 		state.visibleStatusText?.takeIf { it != messageState.visibleStatusText }?.let {
