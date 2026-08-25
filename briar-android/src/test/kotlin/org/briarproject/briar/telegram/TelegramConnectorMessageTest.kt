@@ -248,6 +248,28 @@ class TelegramConnectorMessageTest {
 	}
 
 	@Test
+	fun testReflectiveClientReturnsAlreadyLoadedChatsWhenLaterChatPageFails() {
+		val client = readyReflectiveMessageClient {
+			Client.setMaxChatLoadPageSize(1)
+			Client.setChats(
+				chat(10L, lastMessageDateSeconds = 1_700_000_002),
+				chat(11L, lastMessageDateSeconds = 1_700_000_001),
+			)
+			Client.setRejectGetChatsAfterPages(1)
+		}
+
+		assertEquals(listOf("10"), client.getRecentThreads(3).map { it.threadId })
+		assertSentRequests(
+			"LoadChats",
+			"GetChats",
+			"LoadChats",
+			"GetChats",
+			"GetChat",
+			"Close",
+		)
+	}
+
+	@Test
 	fun testReflectiveClientPaginatesPartialHistoryPages() {
 		val client = readyReflectiveMessageClient {
 			Client.setMaxHistoryPageSize(1)

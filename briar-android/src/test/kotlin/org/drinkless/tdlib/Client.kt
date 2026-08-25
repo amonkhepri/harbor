@@ -90,6 +90,11 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 				resultHandler?.onResult(TdApi.Ok())
 			}
 			is TdApi.GetChats -> {
+				getChatsRequestCount++
+				if (getChatsRequestCount > rejectGetChatsAfterPages) {
+					resultHandler?.onResult(TdApi.Error())
+					return
+				}
 				val chatIds = chatsById.keys
 					.take(minOf(request.limit.coerceAtLeast(0), loadedChatCount))
 					.toLongArray()
@@ -203,6 +208,8 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 		private var setTdlibParametersAcceptedLatch: CountDownLatch? = null
 		private var rejectSetTdlibParameters = false
 		private var rejectResendAuthenticationCode = false
+		private var rejectGetChatsAfterPages = Int.MAX_VALUE
+		private var getChatsRequestCount = 0
 		private var rejectGetChatHistory = false
 		private var rejectGetChatHistoryAfterPages = Int.MAX_VALUE
 		private var getChatHistoryRequestCount = 0
@@ -245,6 +252,8 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 			setTdlibParametersAcceptedLatch = null
 			rejectSetTdlibParameters = false
 			rejectResendAuthenticationCode = false
+			rejectGetChatsAfterPages = Int.MAX_VALUE
+			getChatsRequestCount = 0
 			rejectGetChatHistory = false
 			rejectGetChatHistoryAfterPages = Int.MAX_VALUE
 			getChatHistoryRequestCount = 0
@@ -316,6 +325,10 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 
 		fun setRejectResendAuthenticationCode(reject: Boolean) {
 			rejectResendAuthenticationCode = reject
+		}
+
+		fun setRejectGetChatsAfterPages(pagesBeforeReject: Int) {
+			rejectGetChatsAfterPages = pagesBeforeReject
 		}
 
 		fun setRejectGetChatHistory(reject: Boolean) {

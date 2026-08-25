@@ -91,7 +91,7 @@ class ReflectiveTelegramTdlibMessageClient(
 			val loadResult = sendAndAwait(client, createLoadChatsRequest(safeLimit))
 			val loadedChatIds = sendAndAwait(client, createGetChatsRequest(safeLimit))
 				?.let { getLongArrayField(it, "chatIds") }
-				?: LongArray(0)
+				?: break
 			requestCount++
 			val countStoppedGrowing = loadedChatIds.size <= chatIds.size
 			chatIds = loadedChatIds
