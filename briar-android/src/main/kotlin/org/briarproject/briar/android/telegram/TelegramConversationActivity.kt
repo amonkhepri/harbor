@@ -31,6 +31,16 @@ import java.util.concurrent.Executor
 import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
 
+// A restored layoutManagerState that the async submitList callback has not
+// consumed yet still holds the original scroll position. The layout manager
+// has no pending state or children at that point, so its own
+// onSaveInstanceState() would return an invalid anchor and overwrite it on a
+// consecutive configuration change. Prefer the unconsumed restored state.
+internal fun layoutManagerStateToSave(
+	pendingRestoreState: Parcelable?,
+	currentLayoutManagerState: Parcelable?,
+): Parcelable? = pendingRestoreState ?: currentLayoutManagerState
+
 internal class ConnectorConversationLoadOwner {
 	private val generation = AtomicLong()
 
@@ -140,7 +150,9 @@ class TelegramConversationActivity : BriarActivity() {
 
 	override fun onSaveInstanceState(outState: Bundle) {
 		super.onSaveInstanceState(outState)
-		outState.putParcelable(STATE_LAYOUT_MANAGER, layoutManager.onSaveInstanceState())
+		val stateToSave =
+			layoutManagerStateToSave(layoutManagerState, layoutManager.onSaveInstanceState())
+		outState.putParcelable(STATE_LAYOUT_MANAGER, stateToSave)
 	}
 
 	override fun onRestoreInstanceState(savedInstanceState: Bundle) {
