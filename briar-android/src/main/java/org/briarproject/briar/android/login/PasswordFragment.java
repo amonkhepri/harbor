@@ -180,7 +180,10 @@ public class PasswordFragment extends BaseFragment implements TextWatcher {
 		builder.setMessage(R.string.dialog_message_lost_password);
 		builder.setPositiveButton(R.string.cancel, null);
 		builder.setNegativeButton(R.string.delete,
-				(dialog, which) -> viewModel.deleteAccount());
+				(dialog, which) -> {
+					telegramLoginButton.setEnabled(false);
+					viewModel.deleteAccount();
+				});
 		AlertDialog dialog = builder.create();
 		dialog.show();
 	}

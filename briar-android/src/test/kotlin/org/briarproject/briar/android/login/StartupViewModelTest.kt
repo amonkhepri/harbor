@@ -175,6 +175,20 @@ class StartupViewModelTest {
 	}
 
 	@Test
+	fun testAccountDeletionBlocksTelegramLogin() {
+		val executor = QueuedExecutor()
+		viewModel = createViewModel(executor)
+
+		viewModel.deleteAccount()
+		viewModel.showTelegramLoginPlaceholder()
+
+		assertEquals(SIGNED_OUT, getOrAwaitValue(viewModel.state))
+		assertEquals(0, telegramAuthSession.startCalls)
+		executor.runNext()
+		assertEquals(0, telegramAuthSession.startCalls)
+	}
+
+	@Test
 	fun testTelegramAuthActionQueuedBeforeCancelIsSkipped() {
 		val executor = QueuedExecutor()
 		viewModel = createViewModel(executor)

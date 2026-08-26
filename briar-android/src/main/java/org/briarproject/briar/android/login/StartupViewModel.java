@@ -185,6 +185,7 @@ public class StartupViewModel extends AndroidViewModel
 
 	void showTelegramLoginPlaceholder() {
 		if (passwordValidationInProgress.get()) return;
+		if (accountDeletionInProgress.get()) return;
 		telegramAuthGeneration.incrementAndGet();
 		telegramLoginCode = telegramLoginPassword = "";
 		state.setValue(TELEGRAM_LOGIN);
