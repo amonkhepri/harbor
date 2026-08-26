@@ -60,5 +60,18 @@
 # not resolved, matching the existing org.drinkless.tdlib.** keep rule's pattern.
 -keep,includedescriptorclasses class org.matrix.rustcomponents.sdk.** { *; }
 
+# P351-001: org.matrix.rustcomponents:sdk-android's UniFFI-generated bridge code (top-level
+# uniffi.** packages, not covered by the org.matrix.rustcomponents.sdk.** rule above) declares
+# JNA com.sun.jna.Structure/Callback subclasses whose fields are populated by JNA's own runtime
+# reflection rather than direct bytecode reads. R8 shrinking can drop such "unreferenced" fields
+# even with obfuscation disabled, corrupting the native marshaling layer. Neither the sdk-android
+# aar nor the jna aar ships its own consumer ProGuard/R8 rules (both proguard.txt entries are
+# empty and no META-INF/proguard rules are embedded), so this app must supply both. No-op when
+# the flag is off and neither dependency is resolved.
+-keep,includedescriptorclasses class uniffi.** { *; }
+-keep class com.sun.jna.** { *; }
+-keepclassmembers class * extends com.sun.jna.Structure { *; }
+-keepclassmembers class * implements com.sun.jna.Callback { *; }
+
 # H2 database: keep H2 MVStore classes
 -keep class org.h2.mvstore.db.MVTableEngine
