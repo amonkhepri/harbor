@@ -74,9 +74,12 @@
 # java.awt.GraphicsEnvironment, java.awt.HeadlessException, and java.awt.Window. Android ships
 # no java.awt package, so R8 fails the build resolving those references even though this
 # integration is desktop-only and unreachable from the Matrix connector's native marshaling
-# path. Silence just that gap instead of narrowing the keep, since JNA's own reflection still
-# needs every other com.sun.jna.** member kept.
--dontwarn java.awt.**
+# path. Silence just those four evidenced types instead of the whole java.awt.** package, since
+# JNA's own reflection still needs every other com.sun.jna.** member kept.
+-dontwarn java.awt.Component
+-dontwarn java.awt.GraphicsEnvironment
+-dontwarn java.awt.HeadlessException
+-dontwarn java.awt.Window
 -keep,includedescriptorclasses class uniffi.** { *; }
 -keep class com.sun.jna.** { *; }
 -keepclassmembers class * extends com.sun.jna.Structure { *; }
