@@ -215,20 +215,20 @@ class TelegramConversationActivity : BriarActivity() {
 		}
 		ioExecutor.execute {
 			if (!loadOwner.owns(loadGeneration)) return@execute
-			if (!readOnlyConnector.isEnabled()) {
-				showMessages(loadGeneration, ConnectorConversationMessageListState(), DISABLED)
-				return@execute
-			}
-			if (!readOnlyConnector.isAuthorized()) {
-				showMessages(
-					loadGeneration,
-					ConnectorConversationMessageListState(),
-					ACCOUNT_UNAVAILABLE,
-				)
-				return@execute
-			}
-			if (!loadOwner.owns(loadGeneration)) return@execute
 			try {
+				if (!readOnlyConnector.isEnabled()) {
+					showMessages(loadGeneration, ConnectorConversationMessageListState(), DISABLED)
+					return@execute
+				}
+				if (!readOnlyConnector.isAuthorized()) {
+					showMessages(
+						loadGeneration,
+						ConnectorConversationMessageListState(),
+						ACCOUNT_UNAVAILABLE,
+					)
+					return@execute
+				}
+				if (!loadOwner.owns(loadGeneration)) return@execute
 				val result = readOnlyConnector.getRecentMessageReadResult(
 					chatId.toString(),
 					MESSAGE_LIMIT,
