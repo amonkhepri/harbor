@@ -80,6 +80,8 @@ public class PasswordFragment extends BaseFragment implements TextWatcher {
 			@Nullable Bundle savedInstanceState) {
 		View v = inflater.inflate(R.layout.fragment_password, container,
 				false);
+		boolean validationInProgress =
+				viewModel.isPasswordValidationInProgress();
 
 		LifecycleOwner owner = getViewLifecycleOwner();
 		viewModel.getPasswordValidated().observeEvent(owner, result -> {
@@ -87,15 +89,16 @@ public class PasswordFragment extends BaseFragment implements TextWatcher {
 		});
 
 		signInButton = v.findViewById(R.id.btn_sign_in);
+		signInButton.setVisibility(validationInProgress ? INVISIBLE : VISIBLE);
 		telegramLoginButton = v.findViewById(R.id.btn_telegram_login);
 		telegramLoginButton.setVisibility(
 				viewModel.shouldShowTelegramLogin() ? VISIBLE : GONE);
-		telegramLoginButton.setEnabled(
-				!viewModel.isPasswordValidationInProgress());
+		telegramLoginButton.setEnabled(!validationInProgress);
 		telegramLoginButton.setOnClickListener(
 				view -> onTelegramLoginClick());
 		signInButton.setOnClickListener(view -> onSignInButtonClicked());
 		progress = v.findViewById(R.id.progress_wheel);
+		progress.setVisibility(validationInProgress ? VISIBLE : INVISIBLE);
 		input = v.findViewById(R.id.password_layout);
 		password = v.findViewById(R.id.edit_password);
 		password.setOnEditorActionListener((view, actionId, event) -> {
@@ -107,8 +110,7 @@ public class PasswordFragment extends BaseFragment implements TextWatcher {
 		});
 		password.addTextChangedListener(this);
 		forgottenPasswordButton = v.findViewById(R.id.btn_forgotten);
-		forgottenPasswordButton.setEnabled(
-				!viewModel.isPasswordValidationInProgress());
+		forgottenPasswordButton.setEnabled(!validationInProgress);
 		forgottenPasswordButton.setOnClickListener(
 				view -> onForgottenPasswordClick());
 

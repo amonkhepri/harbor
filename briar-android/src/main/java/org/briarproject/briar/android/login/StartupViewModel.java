@@ -149,7 +149,7 @@ public class StartupViewModel extends AndroidViewModel
 
 	void validatePassword(String password) {
 		if (accountDeletionInProgress.get()) return;
-		passwordValidationInProgress.set(true);
+		if (!passwordValidationInProgress.compareAndSet(false, true)) return;
 		ioExecutor.execute(() -> {
 			try {
 				accountManager.signIn(password);

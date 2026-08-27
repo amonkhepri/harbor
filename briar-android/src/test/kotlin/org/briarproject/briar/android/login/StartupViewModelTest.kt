@@ -134,6 +134,17 @@ class StartupViewModelTest {
 	}
 
 	@Test
+	fun testPasswordValidationRejectsDuplicateRequest() {
+		val executor = QueuedExecutor()
+		viewModel = createViewModel(executor)
+
+		viewModel.validatePassword("test-password")
+		viewModel.validatePassword("test-password")
+
+		assertEquals(1, executor.taskCount)
+	}
+
+	@Test
 	fun testPasswordValidationBlocksAccountDeletion() {
 		val executor = QueuedExecutor()
 		viewModel = createViewModel(executor)
@@ -460,6 +471,7 @@ class StartupViewModelTest {
 
 	private class QueuedExecutor : Executor {
 		private val tasks = ArrayDeque<Runnable>()
+		val taskCount: Int get() = tasks.size
 
 		override fun execute(command: Runnable) {
 			tasks.add(command)
