@@ -16,11 +16,14 @@ import javax.inject.Singleton
 @Module
 class TelegramModule {
 
-	private fun tdlibDirectory(databaseConfig: DatabaseConfig): File {
-		val databaseDirectory = databaseConfig.databaseDirectory
-		val appPrivateRoot = databaseDirectory.parentFile ?: databaseDirectory
-		return File(appPrivateRoot, "tdlib")
-	}
+	// Nested inside databaseDirectory (not a sibling) so account deletion's
+	// unconditional AccountManagerImpl.deleteAccount() -> deleteFileOrDir(
+	// databaseConfig.getDatabaseDirectory()) always removes it, matching the
+	// same pattern MatrixStoreConfigurationProvider already uses for the
+	// Matrix SDK store, instead of relying solely on AndroidAccountManager's
+	// best-effort app-data-root sweep.
+	private fun tdlibDirectory(databaseConfig: DatabaseConfig): File =
+		File(databaseConfig.databaseDirectory, "tdlib")
 
 	@Provides
 	@Singleton
