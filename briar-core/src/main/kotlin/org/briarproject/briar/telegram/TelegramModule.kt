@@ -104,10 +104,11 @@ class TelegramModule {
 		accessGate: TelegramTdlibAccessGate,
 		lifecycleManager: LifecycleManager,
 	): TelegramAuthSession {
+		val tdlibDirectory = tdlibDirectory(databaseConfig)
 		val session = if (featureFlags.shouldEnableTelegramConnector()) {
 			TelegramAuthSessionImpl(
 				ReflectiveTelegramTdlibLoginClient(
-					tdlibDirectory(databaseConfig),
+					tdlibDirectory,
 					featureFlags.getTelegramApiId(),
 					featureFlags.getTelegramApiHash(),
 					tdlibKeyProvider,
