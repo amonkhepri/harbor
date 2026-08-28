@@ -39,8 +39,10 @@ class TelegramModule {
 	internal fun migrateLegacyTdlibDirectory(legacy: File, nested: File): File {
 		if (legacy == nested || !legacy.exists()) return nested
 		if (nested.exists()) {
-			IoUtils.deleteFileOrDir(legacy) // stale leftover from a prior migration
-			return nested
+			// nested's mere existence doesn't prove it's a valid replacement
+			// (P354-001); only an empty stub is a safe stale leftover.
+			if (nested.listFiles()?.isEmpty() != true) return legacy
+			IoUtils.deleteFileOrDir(nested)
 		}
 		val parent = nested.parentFile
 		if (parent != null && !parent.exists() && !parent.mkdirs()) {
