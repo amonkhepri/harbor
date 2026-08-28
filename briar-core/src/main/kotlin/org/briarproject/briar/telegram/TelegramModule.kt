@@ -41,7 +41,7 @@ class TelegramModule {
 		if (nested.exists()) {
 			// nested's mere existence doesn't prove it's a valid replacement
 			// (P354-001); only an empty stub is a safe stale leftover.
-			if (nested.listFiles()?.isEmpty() != true) return legacy
+			if (nested.listFiles()?.isEmpty() != true) return if (legacy.listFiles()?.isEmpty() == true) nested else legacy
 			IoUtils.deleteFileOrDir(nested)
 		}
 		val parent = nested.parentFile
