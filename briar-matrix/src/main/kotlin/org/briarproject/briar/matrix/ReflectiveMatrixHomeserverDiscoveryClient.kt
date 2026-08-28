@@ -500,6 +500,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 	override fun getRecentMessages(roomId: String, limit: Int): List<MatrixMessageSnapshot>? {
 		if (limit <= 0) return emptyList()
 		val client = loginClient ?: return null
+		var initialSnapshot: List<MatrixMessageSnapshot>? = null
 		var room: Any? = null
 		var timeline: Any? = null
 		return try {
@@ -509,7 +510,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 				invokeCloseableValue(room, "timeline", emptyArray(), emptyArray(), ::closeQuietly)
 			timeline = loadedTimeline
 			val listenerClass = Class.forName(TIMELINE_LISTENER_CLASS_NAME)
-			val initialSnapshot = readTimelineSnapshot(loadedTimeline, listenerClass)
+			initialSnapshot = readTimelineSnapshot(loadedTimeline, listenerClass)
 			if (initialSnapshot.size >= limit) return initialSnapshot.takeLast(limit)
 			val remaining = (limit - initialSnapshot.size).coerceAtMost(MAX_UNSIGNED_SHORT)
 			invokeUnit(
@@ -521,11 +522,11 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			readTimelineSnapshot(loadedTimeline, listenerClass).takeLast(limit)
 		} catch (e: InterruptedException) {
 			Thread.currentThread().interrupt()
-			null
+			initialSnapshot
 		} catch (e: Exception) {
-			null
+			initialSnapshot
 		} catch (e: LinkageError) {
-			null
+			initialSnapshot
 		} finally {
 			closeQuietly(timeline)
 			closeQuietly(room)

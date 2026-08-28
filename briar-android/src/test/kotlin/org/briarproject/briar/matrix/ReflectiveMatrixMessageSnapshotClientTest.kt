@@ -259,37 +259,31 @@ class ReflectiveMatrixMessageSnapshotClientTest {
 	}
 
 	@Test
-	fun `getRecentMessages maps pagination and second snapshot failures to null`() {
-		val client = loggedInClient()
-		FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec("!room:example.org"))
-		FakeMatrixSdkState.timelineDiffsToReturn = listOf(
-			TimelineDiff.Reset(listOf(remoteEvent("\$newer:example.org", "newer", 2_000uL))),
+	fun `getRecentMessages preserves initial snapshot when pagination refresh fails`() {
+		val expected = listOf(
+			MatrixMessageSnapshot("\$newer:example.org", "@alice:example.org", "newer", 2L, false),
 		)
-		FakeMatrixSdkState.paginationFailureToThrow = IllegalStateException("pagination failed")
-
-		assertNull(client.getRecentMessages("!room:example.org", 2))
-		assertEquals(1, FakeMatrixSdkState.paginationCallCount)
-		assertEquals(1, FakeMatrixSdkState.listenerAddCount)
-		assertEquals(1, FakeMatrixSdkState.taskCancelCount)
-		assertEquals(1, FakeMatrixSdkState.taskCloseCount)
-		assertEquals(1, FakeMatrixSdkState.timelineCloseCount)
-		assertEquals(1, FakeMatrixSdkState.roomCloseCount)
-
-		FakeMatrixSdkState.reset()
-		val secondClient = loggedInClient()
-		FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec("!room:example.org"))
-		FakeMatrixSdkState.timelineDiffsToReturn = listOf(
-			TimelineDiff.Reset(listOf(remoteEvent("\$newer:example.org", "newer", 2_000uL))),
+		val failures = listOf<Pair<Int, () -> Unit>>(
+			1 to { FakeMatrixSdkState.paginationFailureToThrow = IllegalStateException("failed") },
+			2 to { FakeMatrixSdkState.timelineDiffsAfterPagination = listOf(TimelineDiff.PopBack) },
 		)
-		FakeMatrixSdkState.timelineDiffsAfterPagination = listOf(TimelineDiff.PopBack)
+		failures.forEach { (expectedListenerCount, configureFailure) ->
+			FakeMatrixSdkState.reset()
+			val client = loggedInClient()
+			FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec("!room:example.org"))
+			FakeMatrixSdkState.timelineDiffsToReturn = listOf(
+				TimelineDiff.Reset(listOf(remoteEvent("\$newer:example.org", "newer", 2_000uL))),
+			)
+			configureFailure()
 
-		assertNull(secondClient.getRecentMessages("!room:example.org", 2))
-		assertEquals(1, FakeMatrixSdkState.paginationCallCount)
-		assertEquals(2, FakeMatrixSdkState.listenerAddCount)
-		assertEquals(2, FakeMatrixSdkState.taskCancelCount)
-		assertEquals(2, FakeMatrixSdkState.taskCloseCount)
-		assertEquals(1, FakeMatrixSdkState.timelineCloseCount)
-		assertEquals(1, FakeMatrixSdkState.roomCloseCount)
+			assertEquals(expected, client.getRecentMessages("!room:example.org", 2))
+			assertEquals(1, FakeMatrixSdkState.paginationCallCount)
+			assertEquals(expectedListenerCount, FakeMatrixSdkState.listenerAddCount)
+			assertEquals(expectedListenerCount, FakeMatrixSdkState.taskCancelCount)
+			assertEquals(expectedListenerCount, FakeMatrixSdkState.taskCloseCount)
+			assertEquals(1, FakeMatrixSdkState.timelineCloseCount)
+			assertEquals(1, FakeMatrixSdkState.roomCloseCount)
+		}
 	}
 
 	@Test
