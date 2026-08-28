@@ -71,10 +71,13 @@ class TelegramModuleTest {
 
 	@Test
 	fun `uses a data-bearing nested store when legacy is an empty stub`() {
-		val nested = File(File(root, "app_db"), "tdlib").apply { mkdirs(); File(this, "session.bin").writeText("authorized-session") }
+		val nested = File(File(root, "app_db"), "tdlib").apply { mkdirs() }
+		File(nested, "session.bin").writeText("authorized-session")
 		val result = module.migrateLegacyTdlibDirectory(File(root, "tdlib").apply { mkdirs() }, nested)
-		assertEquals(nested to "authorized-session", result to File(nested, "session.bin").readText())
+		assertEquals(nested, result)
+		assertEquals("authorized-session", File(nested, "session.bin").readText())
 	}
+
 	@Test
 	fun `keeps using the legacy store instead of losing it when migration fails`() {
 		val legacy = File(root, "tdlib")
