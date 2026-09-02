@@ -19,7 +19,7 @@ import org.matrix.rustcomponents.sdk.TimelineDiff
 import org.matrix.rustcomponents.sdk.TimelineItem
 import java.util.concurrent.TimeUnit
 
-class ReflectiveMatrixMessageSnapshotClientTest {
+class ReflectiveMatrixHomeserverDiscoveryClientMessagesTest {
 
 	@After
 	fun tearDown() {

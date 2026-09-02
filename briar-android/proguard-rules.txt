@@ -53,7 +53,7 @@
     *;
 }
 
-# P345-001: ReflectiveMatrixHomeserverDiscoveryClient/ReflectiveMatrixMessageSnapshotClient
+# P345-001: ReflectiveMatrixHomeserverDiscoveryClient
 # resolve most SDK types (ClientBuilder, Client, Room, HomeserverLoginDetails, etc.) purely
 # by Class.forName()/getMethod() string lookups, never by a static type reference, so R8
 # shrinking removes them with no keep rule. No-op when the flag is off and the dependency is
