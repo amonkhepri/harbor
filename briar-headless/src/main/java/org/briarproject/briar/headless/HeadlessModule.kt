@@ -29,6 +29,11 @@ import org.briarproject.bramble.system.DesktopSecureRandomModule
 import org.briarproject.bramble.util.OsUtils.isLinux
 import org.briarproject.bramble.util.OsUtils.isMac
 import org.briarproject.bramble.util.OsUtils.isWindows
+import org.briarproject.briar.api.connector.ConnectorMessageReadResult
+import org.briarproject.briar.api.connector.ConnectorSource
+import org.briarproject.briar.api.connector.ConnectorSources
+import org.briarproject.briar.api.connector.ConnectorThread
+import org.briarproject.briar.api.matrix.MatrixConnector
 import org.briarproject.briar.headless.blogs.HeadlessBlogModule
 import org.briarproject.briar.headless.contact.HeadlessContactModule
 import org.briarproject.briar.headless.event.HeadlessEventModule
@@ -113,6 +118,19 @@ internal class HeadlessModule(private val appDir: File) {
     @Provides
     @Singleton
     internal fun provideObjectMapper() = ObjectMapper()
+
+    // Headless has no Matrix login UI or SDK dependency, so it always wires the disabled
+    // connector rather than depending on the android-only MATRIX_CONNECTOR_ENABLED build flag.
+    @Provides
+    @Singleton
+    internal fun provideMatrixConnector(): MatrixConnector = object : MatrixConnector {
+        override val source: ConnectorSource = ConnectorSources.MATRIX
+        override fun isEnabled() = false
+        override fun isAuthorized() = false
+        override fun getRecentThreads(limit: Int): List<ConnectorThread> = emptyList()
+        override fun getRecentMessageReadResult(threadId: String, limit: Int) =
+            ConnectorMessageReadResult.Success(emptyList())
+    }
 
     @Provides
     internal fun provideFeatureFlags() = object : FeatureFlags {

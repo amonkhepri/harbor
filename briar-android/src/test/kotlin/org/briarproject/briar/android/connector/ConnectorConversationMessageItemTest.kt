@@ -2,6 +2,7 @@ package org.briarproject.briar.android.connector
 
 import org.briarproject.briar.api.connector.ConnectorMessage
 import org.briarproject.briar.api.connector.ConnectorMessageType
+import org.briarproject.briar.api.connector.ConnectorReactionSummary
 import org.briarproject.briar.api.connector.ConnectorSource
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -9,7 +10,7 @@ import org.junit.Test
 class ConnectorConversationMessageItemTest {
 
 	@Test
-	fun testFromMessagesKeepsPhotoButSkipsBlankTextAndSortsByConnectorOrder() {
+	fun testFromMessagesKeepsPhotoAndFileButSkipsBlankTextAndSortsByConnectorOrder() {
 		val items = ConnectorConversationMessageItem.fromMessages(
 			listOf(
 				connectorMessage("30", 30, true, "new", 30L),
@@ -17,6 +18,7 @@ class ConnectorConversationMessageItemTest {
 				connectorMessage("3", 25, false, "", 3L, ConnectorMessageType.PHOTO),
 				connectorMessage("4", 40, false, " \t\n", 4L),
 				connectorMessage("1", 10, false, "old", 1L),
+				connectorMessage("5", 26, false, "", 5L, ConnectorMessageType.FILE),
 				connectorMessage("20", 30, false, "same time", 20L),
 			),
 		)
@@ -31,11 +33,68 @@ class ConnectorConversationMessageItemTest {
 					25000L,
 					ConnectorMessageType.PHOTO,
 				),
+				connectorMessageItem(
+					"5",
+					false,
+					"",
+					26000L,
+					ConnectorMessageType.FILE,
+				),
 				connectorMessageItem("20", false, "same time", 30000L),
 				connectorMessageItem("30", true, "new", 30000L),
 			),
 			items,
 		)
+	}
+
+	@Test
+	fun testFromMessagesPreservesInputOrderWhenDateAndSourceOrderTie() {
+		// Mirrors Matrix: `sourceMessageOrder` is the same second-truncated timestamp as
+		// `dateSeconds` (MatrixRoomConnector.kt), so same-second messages tie on both sort
+		// keys. `messageId` ("z-event" sorts after "a-event") must not be used to break that
+		// tie; the connector client's own oldest-first order should win instead.
+		val items = ConnectorConversationMessageItem.fromMessages(
+			listOf(
+				connectorMessage("z-event", 30, false, "first", 30L),
+				connectorMessage("a-event", 30, false, "second", 30L),
+			),
+		)
+
+		assertEquals(
+			listOf(
+				connectorMessageItem("z-event", false, "first", 30000L),
+				connectorMessageItem("a-event", false, "second", 30000L),
+			),
+			items,
+		)
+	}
+
+	@Test
+	fun testFromMessagesPreservesEditedState() {
+		val item = ConnectorConversationMessageItem.fromMessages(
+			listOf(connectorMessage("1", 10, false, "edited", 1L, isEdited = true)),
+		).single()
+
+		assertEquals(true, item.isEdited)
+	}
+
+	@Test
+	fun testFromMessagesPreservesReplyState() {
+		val item = ConnectorConversationMessageItem.fromMessages(
+			listOf(connectorMessage("1", 10, false, "reply", 1L, isReply = true)),
+		).single()
+
+		assertEquals(true, item.isReply)
+	}
+
+	@Test
+	fun testFromMessagesPreservesReactionSummaries() {
+		val reactions = listOf(ConnectorReactionSummary("👍", 2))
+		val item = ConnectorConversationMessageItem.fromMessages(
+			listOf(connectorMessage("1", 10, false, "reacted", 1L, reactions = reactions)),
+		).single()
+
+		assertEquals(reactions, item.reactions)
 	}
 
 	private fun connectorMessageItem(
@@ -61,6 +120,9 @@ class ConnectorConversationMessageItemTest {
 		text: String,
 		sourceMessageOrder: Long,
 		type: ConnectorMessageType = ConnectorMessageType.TEXT,
+		isEdited: Boolean = false,
+		isReply: Boolean = false,
+		reactions: List<ConnectorReactionSummary> = emptyList(),
 	): ConnectorMessage = ConnectorMessage(
 		source = CONNECTOR_SOURCE,
 		threadId = "thread-1",
@@ -70,6 +132,9 @@ class ConnectorConversationMessageItemTest {
 		text = text,
 		sourceMessageOrder = sourceMessageOrder,
 		type = type,
+		isEdited = isEdited,
+		isReply = isReply,
+		reactions = reactions,
 	)
 
 	companion object {

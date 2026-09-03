@@ -1,11 +1,11 @@
 package org.briarproject.briar.android.contact
 
 import org.briarproject.briar.R
-import org.briarproject.briar.android.contact.TelegramInboxAvailabilityState.ACCOUNT_UNAVAILABLE
-import org.briarproject.briar.android.contact.TelegramInboxAvailabilityState.EMPTY
-import org.briarproject.briar.android.contact.TelegramInboxAvailabilityState.LOAD_FAILED
-import org.briarproject.briar.android.contact.TelegramInboxAvailabilityState.LOADING
-import org.briarproject.briar.android.contact.TelegramInboxAvailabilityState.NONE
+import org.briarproject.briar.android.contact.ConnectorInboxAvailabilityState.ACCOUNT_UNAVAILABLE
+import org.briarproject.briar.android.contact.ConnectorInboxAvailabilityState.EMPTY
+import org.briarproject.briar.android.contact.ConnectorInboxAvailabilityState.LOAD_FAILED
+import org.briarproject.briar.android.contact.ConnectorInboxAvailabilityState.LOADING
+import org.briarproject.briar.android.contact.ConnectorInboxAvailabilityState.NONE
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -13,22 +13,39 @@ class ContactListFragmentTest {
 
 	@Test
 	fun testManualRefreshActionIsRecognized() {
-		listOf(R.id.action_refresh_telegram_threads to true,
+		listOf(
+			R.id.action_refresh_telegram_threads to true,
 			android.R.id.home to false,
-			R.id.action_add_contact_remotely to false).forEach { (actionId, expected) ->
+			R.id.action_add_contact_remotely to false,
+		).forEach { (actionId, expected) ->
 			assertEquals(expected, ContactListFragment.isManualRefreshAction(actionId))
 		}
 	}
 
 	@Test
 	fun testManualRefreshVisibilityHidesWhileLoading() {
-		listOf(LOADING to false, NONE to true, EMPTY to true,
-			ACCOUNT_UNAVAILABLE to true, LOAD_FAILED to true).forEach { (state, expected) ->
-			assertEquals(expected, ContactListFragment.shouldShowManualRefreshAction(
-				true, state))
+		listOf(
+			LOADING to false,
+			NONE to true,
+			EMPTY to true,
+			ACCOUNT_UNAVAILABLE to true,
+			LOAD_FAILED to true,
+		).forEach { (state, expected) ->
+			assertEquals(
+				expected,
+				ContactListFragment.shouldShowManualRefreshAction(
+					true,
+					state,
+				),
+			)
 		}
-		assertEquals(false, ContactListFragment.shouldShowManualRefreshAction(
-			false, NONE))
+		assertEquals(
+			false,
+			ContactListFragment.shouldShowManualRefreshAction(
+				false,
+				NONE,
+			),
+		)
 	}
 
 	@Test
@@ -46,7 +63,7 @@ class ContactListFragmentTest {
 
 	@Test
 	fun testTelegramAvailabilityDoesNotAddEmptyAction() {
-		TelegramInboxAvailabilityState.values().forEach { state ->
+		ConnectorInboxAvailabilityState.values().forEach { state ->
 			val expected = if (state == NONE) R.string.no_contacts_action else 0
 			assertEquals(expected, ContactListFragment.emptyActionTextForState(state))
 		}

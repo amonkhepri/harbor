@@ -60,6 +60,14 @@ def telegramConfigValue = { propertyNames, environmentNames, defaultValue ->
 def telegramConnectorEnabled =
 		(project.findProperty('harbor.telegramConnector.enabled') ?: 'false')
 				.toString().toBoolean()
+// MX-004-REV-001: org.matrix.rustcomponents:sdk-android only publishes an
+// androidJvm variant, so the default-off dependency is gated here (a
+// Kotlin/Android consumer) rather than in :briar-matrix (a plain Kotlin/JVM
+// library, which cannot request that variant). See
+// briar-matrix/build.gradle for why :briar-matrix itself stays Kotlin/JVM.
+def matrixConnectorEnabled =
+		(project.findProperty('harbor.matrixConnector.enabled') ?: 'false')
+				.toString().toBoolean()
 def configuredTelegramApiId =
 		telegramConfigValue(
 				['harbor.telegram.apiId'],
@@ -75,6 +83,21 @@ if (telegramConnectorEnabled &&
 				fileTree(tdlibJniLibsDir).matching { include '**/libtdjni.so' }.isEmpty())) {
 	throw new GradleException(
 			'Telegram connector requires generated TDLib Java and JNI artifacts')
+}
+// P318-001: the non-empty check above only requires one libtdjni.so
+// somewhere under tdlibJniLibsDir, so a partial-ABI drop (e.g. only
+// arm64-v8a) silently passes and ships an APK that only initializes TDLib
+// on the ABI(s) actually present. Fail loudly at build time instead.
+def requiredTdlibAbis = ['arm64-v8a', 'armeabi-v7a', 'x86', 'x86_64']
+if (telegramConnectorEnabled) {
+	def missingTdlibAbis = requiredTdlibAbis.findAll { abi ->
+		!new File(tdlibJniLibsDir, "${abi}/libtdjni.so").isFile()
+	}
+	if (!missingTdlibAbis.isEmpty()) {
+		throw new GradleException(
+				'Telegram connector TDLib artifacts are missing libtdjni.so ' +
+						"for ABI(s): ${missingTdlibAbis.join(', ')}")
+	}
 }
 def configuredTelegramApiHash =
 		telegramConfigValue(
@@ -128,6 +151,7 @@ android {
 		buildConfigField "String", "TorVersion", "\"$tor_version\""
 		buildConfigField "boolean", "TELEGRAM_CONNECTOR_ENABLED",
 			"${telegramConnectorEnabled}"
+		buildConfigField "boolean", "MATRIX_CONNECTOR_ENABLED", "${matrixConnectorEnabled}"
 		buildConfigField "int", "TELEGRAM_API_ID", "${telegramApiId}"
 		buildConfigField "String", "TELEGRAM_API_HASH", telegramApiHashLiteral
 
@@ -183,6 +207,12 @@ android {
 			}
 		}
 	}
+	if (matrixConnectorEnabled) {
+		sourceSets.main.java.srcDirs += ['src/matrix/kotlin']
+	} else {
+		// Compile the same direct bridge against the same-FQN SDK fake in default-off tests.
+		sourceSets.test.java.srcDirs += ['src/matrix/kotlin']
+	}
 
 	compileOptions {
 		sourceCompatibility JavaVersion.VERSION_17
@@ -216,6 +246,14 @@ dependencies {
 	implementation project(':bramble-core')
 	implementation project(':bramble-android')
 	implementation project(':briar-core')
+	implementation project(':briar-matrix')
+
+	if (matrixConnectorEnabled) {
+		// Pinned per the MX-003 compatibility spike: minSdk 21, arm64-v8a/
+		// armeabi-v7a/x86/x86_64 ABIs, Apache-2.0. Not resolved or bundled
+		// while the flag is off (default).
+		implementation 'org.matrix.rustcomponents:sdk-android:26.08.05'
+	}
 
 	// newer versions of the libraries below require compileSdk 34
 	implementation 'androidx.fragment:fragment:1.6.2'

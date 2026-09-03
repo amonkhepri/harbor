@@ -1,6 +1,7 @@
 package org.briarproject.briar.android.telegram
 
 import android.os.Bundle
+import android.os.Parcelable
 import android.view.Menu
 import android.view.MenuItem
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -30,6 +31,16 @@ import java.util.concurrent.Executor
 import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
 
+// A restored layoutManagerState that the async submitList callback has not
+// consumed yet still holds the original scroll position. The layout manager
+// has no pending state or children at that point, so its own
+// onSaveInstanceState() would return an invalid anchor and overwrite it on a
+// consecutive configuration change. Prefer the unconsumed restored state.
+internal fun layoutManagerStateToSave(
+	pendingRestoreState: Parcelable?,
+	currentLayoutManagerState: Parcelable?,
+): Parcelable? = pendingRestoreState ?: currentLayoutManagerState
+
 internal class ConnectorConversationLoadOwner {
 	private val generation = AtomicLong()
 
@@ -52,6 +63,7 @@ class TelegramConversationActivity : BriarActivity() {
 
 		private const val MESSAGE_LIMIT = 50
 		private const val TELEGRAM_REFRESH_INTERVAL_MS = 15_000L
+		private const val STATE_LAYOUT_MANAGER = "layoutManager"
 
 		private fun emptyTextForState(state: ConnectorConversationAvailabilityState): Int = when (state) {
 			LOADING ->
@@ -94,6 +106,8 @@ class TelegramConversationActivity : BriarActivity() {
 	lateinit var ioExecutor: Executor
 
 	private lateinit var list: BriarRecyclerView
+	private lateinit var layoutManager: LinearLayoutManager
+	private var layoutManagerState: Parcelable? = null
 	private var chatId = 0L
 	private var messageState = ConnectorConversationMessageListState()
 	private var automaticRefreshRunning = false
@@ -123,7 +137,8 @@ class TelegramConversationActivity : BriarActivity() {
 		}
 
 		list = findViewById(R.id.connectorConversationList)
-		list.setLayoutManager(LinearLayoutManager(this).apply { stackFromEnd = true })
+		layoutManager = LinearLayoutManager(this).apply { stackFromEnd = true }
+		list.setLayoutManager(layoutManager)
 		list.setAdapter(adapter)
 		loadMessages()
 	}
@@ -131,6 +146,18 @@ class TelegramConversationActivity : BriarActivity() {
 	override fun onCreateOptionsMenu(menu: Menu): Boolean {
 		menuInflater.inflate(R.menu.connector_conversation_actions, menu)
 		return super.onCreateOptionsMenu(menu)
+	}
+
+	override fun onSaveInstanceState(outState: Bundle) {
+		super.onSaveInstanceState(outState)
+		val stateToSave =
+			layoutManagerStateToSave(layoutManagerState, layoutManager.onSaveInstanceState())
+		outState.putParcelable(STATE_LAYOUT_MANAGER, stateToSave)
+	}
+
+	override fun onRestoreInstanceState(savedInstanceState: Bundle) {
+		super.onRestoreInstanceState(savedInstanceState)
+		layoutManagerState = savedInstanceState.getParcelable(STATE_LAYOUT_MANAGER)
 	}
 
 	override fun onStart() {
@@ -188,20 +215,20 @@ class TelegramConversationActivity : BriarActivity() {
 		}
 		ioExecutor.execute {
 			if (!loadOwner.owns(loadGeneration)) return@execute
-			if (!readOnlyConnector.isEnabled()) {
-				showMessages(loadGeneration, ConnectorConversationMessageListState(), DISABLED)
-				return@execute
-			}
-			if (!readOnlyConnector.isAuthorized()) {
-				showMessages(
-					loadGeneration,
-					ConnectorConversationMessageListState(),
-					ACCOUNT_UNAVAILABLE,
-				)
-				return@execute
-			}
-			if (!loadOwner.owns(loadGeneration)) return@execute
 			try {
+				if (!readOnlyConnector.isEnabled()) {
+					showMessages(loadGeneration, ConnectorConversationMessageListState(), DISABLED)
+					return@execute
+				}
+				if (!readOnlyConnector.isAuthorized()) {
+					showMessages(
+						loadGeneration,
+						ConnectorConversationMessageListState(),
+						ACCOUNT_UNAVAILABLE,
+					)
+					return@execute
+				}
+				if (!loadOwner.owns(loadGeneration)) return@execute
 				val result = readOnlyConnector.getRecentMessageReadResult(
 					chatId.toString(),
 					MESSAGE_LIMIT,
@@ -253,7 +280,15 @@ class TelegramConversationActivity : BriarActivity() {
 		list.setEmptyText(state.emptyText)
 		adapter.submitList(state.messages) {
 			if (!state.isLoading) list.showData()
-			if (!list.recyclerView.canScrollVertically(1)) list.scrollToPosition(state.messages.lastIndex)
+			val savedLayoutManagerState = layoutManagerState
+			if (savedLayoutManagerState != null) {
+				// Restore the scroll position from before a config change instead of
+				// jumping to the end now that the async adapter update has landed.
+				layoutManager.onRestoreInstanceState(savedLayoutManagerState)
+				layoutManagerState = null
+			} else if (!list.recyclerView.canScrollVertically(1)) {
+				list.scrollToPosition(state.messages.lastIndex)
+			}
 		}
 		if (state.isLoading) list.showProgressBar()
 		state.visibleStatusText?.takeIf { it != messageState.visibleStatusText }?.let {

@@ -10,6 +10,8 @@ internal class PendingAuthorizationUpdate(private val acceptedClassName: String?
 	private val authorizationStateClassName = AtomicReference("")
 	private val updateReceived = CountDownLatch(1)
 
+	fun acceptsOnly(className: String): Boolean = acceptedClassName == className
+
 	fun capture(className: String) {
 		if (className.isEmpty() ||
 			acceptedClassName != null &&

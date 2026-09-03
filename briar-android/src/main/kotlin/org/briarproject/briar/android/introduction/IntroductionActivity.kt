@@ -22,6 +22,20 @@ class IntroductionActivity :
 
 	companion object {
 		private const val BUNDLE_CONTACT2 = "contact2"
+
+		// Bundle.getInt() defaults to 0 when the key is absent, which is
+		// indistinguishable from a real ContactId. onSaveInstanceState only
+		// writes BUNDLE_CONTACT2 once a second contact has been selected, so
+		// restoring must check for its presence rather than trusting the
+		// default: a savedInstanceState from a rotation on ContactChooserFragment
+		// (before any contact was picked) never contains the key and must not
+		// be misread as ContactId(0).
+		internal fun restoredSecondContactId(savedInstanceState: Bundle): Int? =
+			if (savedInstanceState.containsKey(BUNDLE_CONTACT2)) {
+				savedInstanceState.getInt(BUNDLE_CONTACT2)
+			} else {
+				null
+			}
 	}
 
 	@Inject
@@ -48,8 +62,9 @@ class IntroductionActivity :
 		if (savedInstanceState == null) {
 			showInitialFragment(ContactChooserFragment())
 		} else {
-			val contactId2 = savedInstanceState.getInt(BUNDLE_CONTACT2)
-			viewModel.setSecondContactId(ContactId(contactId2))
+			restoredSecondContactId(savedInstanceState)?.let {
+				viewModel.setSecondContactId(ContactId(it))
+			}
 		}
 
 		viewModel.secondContactSelected.observeEvent(this) {

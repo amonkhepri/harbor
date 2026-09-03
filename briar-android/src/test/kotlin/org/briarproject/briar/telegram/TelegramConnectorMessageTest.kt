@@ -77,6 +77,7 @@ class TelegramConnectorMessageTest {
 	fun testDisabledConnectorReturnsDisabledEmptyMessageLists() {
 		val connector = DisabledTelegramConnector()
 
+		assertEquals(ConnectorSources.TELEGRAM, connector.source)
 		assertEquals(listOf(false, false), listOf(connector.isEnabled(), connector.isAuthorized()))
 		assertEquals(
 			emptyList<ConnectorThread>() to Success(emptyList()),
@@ -186,6 +187,7 @@ class TelegramConnectorMessageTest {
 			)
 		}
 
+		assertEquals(ConnectorSources.TELEGRAM, client.source)
 		assertEquals(
 			listOf(
 				telegramThread(
@@ -246,6 +248,28 @@ class TelegramConnectorMessageTest {
 	}
 
 	@Test
+	fun testReflectiveClientReturnsAlreadyLoadedChatsWhenLaterChatPageFails() {
+		val client = readyReflectiveMessageClient {
+			Client.setMaxChatLoadPageSize(1)
+			Client.setChats(
+				chat(10L, lastMessageDateSeconds = 1_700_000_002),
+				chat(11L, lastMessageDateSeconds = 1_700_000_001),
+			)
+			Client.setRejectGetChatsAfterPages(1)
+		}
+
+		assertEquals(listOf("10"), client.getRecentThreads(3).map { it.threadId })
+		assertSentRequests(
+			"LoadChats",
+			"GetChats",
+			"LoadChats",
+			"GetChats",
+			"GetChat",
+			"Close",
+		)
+	}
+
+	@Test
 	fun testReflectiveClientPaginatesPartialHistoryPages() {
 		val client = readyReflectiveMessageClient {
 			Client.setMaxHistoryPageSize(1)
@@ -292,6 +316,23 @@ class TelegramConnectorMessageTest {
 		}
 
 		assertEquals(LoadFailed, failingClient.getRecentMessageReadResult("10", 3))
+	}
+
+	@Test
+	fun testReflectiveClientReturnsAlreadyFetchedMessagesWhenLaterHistoryPageFails() {
+		val client = readyReflectiveMessageClient {
+			Client.setMaxHistoryPageSize(1)
+			Client.setMessages(
+				10L,
+				textMessage(10L, 40L, 1_700_000_004, isOutgoing = false, body = "latest"),
+				textMessage(10L, 30L, 1_700_000_003, isOutgoing = false, body = "middle"),
+			)
+			Client.setRejectGetChatHistoryAfterPages(1)
+		}
+
+		val result = client.getRecentMessageReadResult("10", 4)
+
+		assertEquals(listOf(40L), (result as? Success)?.messages?.map { it.sourceMessageOrder })
 	}
 
 	@Test
@@ -425,6 +466,8 @@ class TelegramConnectorMessageTest {
 		var lastChatLimit = 0
 		var lastMessageChatId = 0L
 		var lastMessageLimit = 0
+
+		override val source = ConnectorSources.TELEGRAM
 
 		override fun isEnabled(): Boolean = true
 

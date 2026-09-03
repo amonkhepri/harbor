@@ -24,6 +24,7 @@ import org.briarproject.briar.api.telegram.TelegramAuthState;
 import org.briarproject.nullsafety.NotNullByDefault;
 
 import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import javax.inject.Inject;
@@ -59,6 +60,10 @@ public class StartupViewModel extends AndroidViewModel
 	@IoExecutor
 	private final Executor ioExecutor;
 	private final Executor telegramAuthExecutor;
+	private final AtomicBoolean passwordValidationInProgress =
+			new AtomicBoolean();
+	private final AtomicBoolean accountDeletionInProgress =
+			new AtomicBoolean();
 	private final AtomicInteger telegramAuthGeneration = new AtomicInteger();
 
 	private final MutableLiveEvent<DecryptionResult> passwordValidated =
@@ -143,6 +148,8 @@ public class StartupViewModel extends AndroidViewModel
 	}
 
 	void validatePassword(String password) {
+		if (accountDeletionInProgress.get()) return;
+		if (!passwordValidationInProgress.compareAndSet(false, true)) return;
 		ioExecutor.execute(() -> {
 			try {
 				accountManager.signIn(password);
@@ -150,8 +157,18 @@ public class StartupViewModel extends AndroidViewModel
 				state.postValue(SIGNED_IN);
 			} catch (DecryptionException e) {
 				passwordValidated.postEvent(e.getDecryptionResult());
+			} finally {
+				passwordValidationInProgress.set(false);
 			}
 		});
+	}
+
+	boolean isPasswordValidationInProgress() {
+		return passwordValidationInProgress.get();
+	}
+
+	boolean isAccountDeletionInProgress() {
+		return accountDeletionInProgress.get();
 	}
 
 	LiveEvent<DecryptionResult> getPasswordValidated() {
@@ -167,6 +184,8 @@ public class StartupViewModel extends AndroidViewModel
 	}
 
 	void showTelegramLoginPlaceholder() {
+		if (passwordValidationInProgress.get()) return;
+		if (accountDeletionInProgress.get()) return;
 		telegramAuthGeneration.incrementAndGet();
 		telegramLoginCode = telegramLoginPassword = "";
 		state.setValue(TELEGRAM_LOGIN);
@@ -309,6 +328,8 @@ public class StartupViewModel extends AndroidViewModel
 
 	@UiThread
 	void deleteAccount() {
+		if (passwordValidationInProgress.get()) return;
+		if (!accountDeletionInProgress.compareAndSet(false, true)) return;
 		telegramAuthExecutor.execute(() -> {
 			telegramAuthSession.close();
 			accountManager.deleteAccount();

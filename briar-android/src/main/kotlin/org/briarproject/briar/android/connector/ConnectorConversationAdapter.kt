@@ -39,10 +39,36 @@ internal class ConnectorConversationAdapter :
 			itemView.findViewById(R.id.connectorMessageDate)
 
 		fun bind(item: ConnectorConversationMessageItem) {
-			text.text = if (item.type == ConnectorMessageType.PHOTO) {
-				text.resources.getString(R.string.connector_message_photo)
+			val messageText = when (item.type) {
+				ConnectorMessageType.PHOTO -> text.resources.getString(R.string.connector_message_photo)
+				ConnectorMessageType.FILE -> text.resources.getString(R.string.connector_message_file)
+				else -> item.text
+			}
+			val replyText = if (item.isReply) {
+				text.resources.getString(R.string.connector_message_reply, messageText)
 			} else {
-				item.text
+				messageText
+			}
+			val decoratedText = if (item.isEdited) {
+				text.resources.getString(R.string.connector_message_edited, replyText)
+			} else {
+				replyText
+			}
+			text.text = if (item.reactions.isEmpty()) {
+				decoratedText
+			} else {
+				val reactionText = item.reactions.joinToString("  ") { reaction ->
+					text.resources.getString(
+						R.string.connector_message_reaction_summary,
+						reaction.key,
+						reaction.count,
+					)
+				}
+				text.resources.getString(
+					R.string.connector_message_with_reactions,
+					decoratedText,
+					reactionText,
+				)
 			}
 			direction.setText(
 				if (item.isOutgoing) {
@@ -69,6 +95,9 @@ internal class ConnectorConversationAdapter :
 		): Boolean = i1.dateMillis == i2.dateMillis &&
 			i1.isOutgoing == i2.isOutgoing &&
 			i1.text == i2.text &&
-			i1.type == i2.type
+			i1.type == i2.type &&
+			i1.isEdited == i2.isEdited &&
+			i1.isReply == i2.isReply &&
+			i1.reactions == i2.reactions
 	}
 }

@@ -9,6 +9,7 @@ import com.vanniktech.emoji.RecentEmoji;
 
 import org.briarproject.bramble.api.FeatureFlags;
 import org.briarproject.bramble.api.FormatException;
+import org.briarproject.bramble.api.account.AccountManager;
 import org.briarproject.bramble.api.crypto.CryptoComponent;
 import org.briarproject.bramble.api.crypto.KeyStrengthener;
 import org.briarproject.bramble.api.crypto.PublicKey;
@@ -61,7 +62,16 @@ import org.briarproject.briar.api.android.DozeWatchdog;
 import org.briarproject.briar.api.android.LockManager;
 import org.briarproject.briar.api.android.NetworkUsageMetrics;
 import org.briarproject.briar.api.android.ScreenFilterMonitor;
+import org.briarproject.briar.api.matrix.MatrixAuthSession;
+import org.briarproject.briar.api.matrix.MatrixConnector;
 import org.briarproject.briar.api.test.TestAvatarCreator;
+import org.briarproject.briar.matrix.DisabledMatrixAuthSession;
+import org.briarproject.briar.matrix.DisabledMatrixConnector;
+import org.briarproject.briar.matrix.MatrixAuthSessionImpl;
+import org.briarproject.briar.matrix.MatrixRoomConnector;
+import org.briarproject.briar.matrix.MatrixStoreConfigurationProvider;
+import org.briarproject.briar.matrix.ProtectedMatrixStoreConfigurationProvider;
+import org.briarproject.briar.matrix.ReflectiveMatrixHomeserverDiscoveryClient;
 import org.briarproject.nullsafety.NotNullByDefault;
 
 import java.io.File;
@@ -383,5 +393,41 @@ public class AppModule {
 				return BuildConfig.TELEGRAM_API_HASH;
 			}
 		};
+	}
+
+	// Shared by provideMatrixAuthSession and provideMatrixConnector (MX-006A) so both consume the
+	// same retained/restored SDK client instead of opening the sqlite session store twice.
+	// Constructing this reflective client is cheap and touches no SDK class until a method is
+	// invoked, so building it unconditionally stays safe in the default-off build.
+	@Provides
+	@Singleton
+	ReflectiveMatrixHomeserverDiscoveryClient provideMatrixReflectiveClient() {
+		return new ReflectiveMatrixHomeserverDiscoveryClient();
+	}
+
+	@Provides
+	@Singleton
+	MatrixAuthSession provideMatrixAuthSession(
+			DatabaseConfig databaseConfig,
+			AccountManager accountManager,
+			ReflectiveMatrixHomeserverDiscoveryClient client) {
+		if (!BuildConfig.MATRIX_CONNECTOR_ENABLED) {
+			return new DisabledMatrixAuthSession();
+		}
+		MatrixStoreConfigurationProvider storeConfigurationProvider =
+				new ProtectedMatrixStoreConfigurationProvider(databaseConfig,
+						accountManager);
+		return new MatrixAuthSessionImpl(client, client, storeConfigurationProvider);
+	}
+
+	@Provides
+	@Singleton
+	MatrixConnector provideMatrixConnector(
+			MatrixAuthSession matrixAuthSession,
+			ReflectiveMatrixHomeserverDiscoveryClient client) {
+		if (!BuildConfig.MATRIX_CONNECTOR_ENABLED) {
+			return new DisabledMatrixConnector();
+		}
+		return new MatrixRoomConnector(client, matrixAuthSession, client);
 	}
 }

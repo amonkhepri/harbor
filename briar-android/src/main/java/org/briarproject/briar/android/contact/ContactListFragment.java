@@ -50,7 +50,7 @@ public class ContactListFragment extends BaseFragment
 		OnInboxThreadClickListener {
 
 	public static final String TAG = ContactListFragment.class.getName();
-	private static final long TELEGRAM_REFRESH_INTERVAL_MS = 15_000;
+	private static final long CONNECTOR_REFRESH_INTERVAL_MS = 15_000;
 
 	@Inject
 	ViewModelProvider.Factory viewModelFactory;
@@ -60,9 +60,9 @@ public class ContactListFragment extends BaseFragment
 	private BriarRecyclerView list;
 	private FabSpeedDial speedDial;
 	private List<ContactListItem> briarItems = emptyList();
-	private List<TelegramInboxThreadItem> telegramItems = emptyList();
-	private TelegramInboxAvailabilityState telegramAvailabilityState =
-			TelegramInboxAvailabilityState.NONE;
+	private List<ConnectorInboxThreadItem> connectorItems = emptyList();
+	private ConnectorInboxAvailabilityState telegramAvailabilityState =
+			ConnectorInboxAvailabilityState.NONE;
 
 	/**
 	 * The Snackbar is non-null when shown and null otherwise.
@@ -117,14 +117,17 @@ public class ContactListFragment extends BaseFragment
 						submitInboxItems();
 					});
 				});
-		viewModel.getTelegramThreadItems()
+		viewModel.getConnectorThreadItems()
 				.observe(getViewLifecycleOwner(), items -> {
-					telegramItems = items;
+					connectorItems = items;
 					submitInboxItems();
 				});
-		viewModel.getTelegramAvailabilityState()
-				.observe(getViewLifecycleOwner(), state -> {
-					telegramAvailabilityState = state;
+		viewModel.getConnectorAvailabilityStates()
+				.observe(getViewLifecycleOwner(), states -> {
+					ConnectorInboxAvailabilityState state =
+							states.get(ConnectorSources.TELEGRAM);
+					telegramAvailabilityState = state == null ?
+							ConnectorInboxAvailabilityState.NONE : state;
 					updateEmptyState();
 					requireActivity().invalidateOptionsMenu();
 				});
@@ -167,7 +170,7 @@ public class ContactListFragment extends BaseFragment
 		MenuItem refresh = menu.findItem(R.id.action_refresh_telegram_threads);
 		if (refresh != null) {
 			refresh.setVisible(shouldShowManualRefreshAction(
-					viewModel.isTelegramConnectorEnabled(),
+					viewModel.isAnyConnectorEnabled(),
 					telegramAvailabilityState));
 		}
 	}
@@ -175,7 +178,7 @@ public class ContactListFragment extends BaseFragment
 	@Override
 	public boolean onOptionsItemSelected(MenuItem item) {
 		if (isManualRefreshAction(item.getItemId())) {
-			viewModel.loadTelegramThreads();
+			viewModel.loadConnectorThreads();
 			return true;
 		}
 		return super.onOptionsItemSelected(item);
@@ -199,10 +202,10 @@ public class ContactListFragment extends BaseFragment
 		viewModel.clearAllContactNotifications();
 		viewModel.clearAllContactAddedNotifications();
 		viewModel.loadContacts();
-		viewModel.loadTelegramThreads();
+		viewModel.loadConnectorThreads();
 		viewModel.checkForPendingContacts();
-		list.startPeriodicUpdate(TELEGRAM_REFRESH_INTERVAL_MS,
-				viewModel::loadTelegramThreads);
+		list.startPeriodicUpdate(CONNECTOR_REFRESH_INTERVAL_MS,
+				viewModel::loadConnectorThreads);
 	}
 
 	@Override
@@ -239,7 +242,7 @@ public class ContactListFragment extends BaseFragment
 
 	private void submitInboxItems() {
 		updateEmptyState();
-		adapter.submitList(InboxThreadMerger.merge(briarItems, telegramItems), list::showData);
+		adapter.submitList(InboxThreadMerger.merge(briarItems, connectorItems), list::showData);
 	}
 
 	private void updateEmptyState() {
@@ -254,12 +257,12 @@ public class ContactListFragment extends BaseFragment
 	}
 
 	static boolean shouldShowManualRefreshAction(boolean connectorEnabled,
-			TelegramInboxAvailabilityState state) {
+			ConnectorInboxAvailabilityState state) {
 		return connectorEnabled &&
-				state != TelegramInboxAvailabilityState.LOADING;
+				state != ConnectorInboxAvailabilityState.LOADING;
 	}
 
-	static int emptyTextForState(TelegramInboxAvailabilityState state) {
+	static int emptyTextForState(ConnectorInboxAvailabilityState state) {
 		switch (state) {
 			case LOADING:
 				return R.string.telegram_inbox_loading;
@@ -274,8 +277,8 @@ public class ContactListFragment extends BaseFragment
 		}
 	}
 
-	static int emptyActionTextForState(TelegramInboxAvailabilityState state) {
-		return state == TelegramInboxAvailabilityState.NONE ?
+	static int emptyActionTextForState(ConnectorInboxAvailabilityState state) {
+		return state == ConnectorInboxAvailabilityState.NONE ?
 				R.string.no_contacts_action : 0;
 	}
 }

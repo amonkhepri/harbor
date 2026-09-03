@@ -14,4 +14,5 @@ interface TelegramTdlibLoginClient {
 	fun awaitQrAuthorizationUpdate(): TelegramAuthState
 	fun getQrAuthorizationLink(): String?
 	fun close(): TelegramAuthState
+	fun closeForShutdown(): TelegramAuthState
 }

@@ -81,7 +81,8 @@ public class ConfirmAvatarDialogFragment extends DialogFragment {
 
 		// we can't use getViewLifecycleOwner() here
 		// as this fragment technically doesn't have a view
-		viewModel.getOwnIdentityInfo().observe(activity, us ->
+		// (observe with `this`, not activity, to remove on dismiss)
+		viewModel.getOwnIdentityInfo().observe(this, us ->
 				textViewUserName.setText(us.getLocalAuthor().getName())
 		);
 

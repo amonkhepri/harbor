@@ -9,9 +9,15 @@ data class ConnectorMessage(
 	val text: String,
 	val sourceMessageOrder: Long,
 	val type: ConnectorMessageType,
+	val isEdited: Boolean = false,
+	val isReply: Boolean = false,
+	val reactions: List<ConnectorReactionSummary> = emptyList(),
 )
+
+data class ConnectorReactionSummary(val key: String, val count: Int)
 
 enum class ConnectorMessageType {
 	TEXT,
 	PHOTO,
+	FILE,
 }

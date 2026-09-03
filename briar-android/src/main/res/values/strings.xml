@@ -147,6 +147,11 @@
 	<string name="connector_thread_preview_empty">No recent text</string>
 	<string name="connector_thread_preview_outgoing">Outgoing: %1$s</string>
 	<string name="connector_message_photo">Photo</string>
+	<string name="connector_message_file">File</string>
+	<string name="connector_message_edited">%1$s (edited)</string>
+	<string name="connector_message_reply">↩ %1$s</string>
+	<string name="connector_message_reaction_summary">%1$s %2$d</string>
+	<string name="connector_message_with_reactions">%1$s\n%2$s</string>
 	<string name="telegram_inbox_loading">Loading Telegram inbox...</string>
 	<string name="telegram_inbox_account_unavailable">Telegram account unavailable</string>
 	<string name="telegram_inbox_empty">No recent Telegram chats</string>

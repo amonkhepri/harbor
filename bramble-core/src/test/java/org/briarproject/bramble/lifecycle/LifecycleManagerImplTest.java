@@ -4,8 +4,10 @@ import org.briarproject.bramble.api.crypto.SecretKey;
 import org.briarproject.bramble.api.db.DatabaseComponent;
 import org.briarproject.bramble.api.db.Transaction;
 import org.briarproject.bramble.api.event.EventBus;
+import org.briarproject.bramble.api.lifecycle.LifecycleManager;
 import org.briarproject.bramble.api.lifecycle.LifecycleManager.OpenDatabaseHook;
 import org.briarproject.bramble.api.lifecycle.Service;
+import org.briarproject.bramble.api.lifecycle.ServiceException;
 import org.briarproject.bramble.api.lifecycle.event.LifecycleEvent;
 import org.briarproject.bramble.api.system.Clock;
 import org.briarproject.bramble.test.BrambleMockTestCase;
@@ -89,6 +91,40 @@ public class LifecycleManagerImplTest extends BrambleMockTestCase {
 
 		lifecycleManager.stopServices();
 		assertEquals(STOPPED, lifecycleManager.getLifecycleState());
+	}
+
+	@Test
+	public void testServiceStopFailureIsReported() throws Exception {
+		long now = System.currentTimeMillis();
+		Transaction txn = new Transaction(null, false);
+
+		context.checking(new DbExpectations() {{
+			oneOf(clock).currentTimeMillis();
+			will(returnValue(now));
+			oneOf(db).open(dbKey, lifecycleManager);
+			will(returnValue(false));
+			oneOf(db).transaction(with(false), withDbRunnable(txn));
+			oneOf(db).removeTemporaryMessages(txn);
+			oneOf(service).startService();
+			allowing(eventBus).broadcast(with(any(LifecycleEvent.class)));
+		}});
+
+		lifecycleManager.registerService(service);
+		assertEquals(SUCCESS, lifecycleManager.startServices(dbKey));
+		context.assertIsSatisfied();
+
+		context.checking(new Expectations() {{
+			oneOf(db).close();
+			oneOf(service).stopService();
+			will(throwException(new ServiceException()));
+			allowing(eventBus).broadcast(with(any(LifecycleEvent.class)));
+		}});
+
+		lifecycleManager.stopServices();
+
+		assertEquals(STOPPED, lifecycleManager.getLifecycleState());
+		assertEquals(LifecycleManager.StopResult.ERROR,
+				lifecycleManager.waitForShutdown());
 	}
 
 	@Test

@@ -2,11 +2,13 @@ package org.briarproject.briar.telegram
 
 import org.briarproject.briar.api.telegram.TelegramAuthSession.RecoverableErrorDetail
 import org.briarproject.briar.api.telegram.TelegramAuthState
+import org.briarproject.bramble.api.lifecycle.ServiceException
 import org.drinkless.tdlib.Client
 import org.drinkless.tdlib.TdApi
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertThrows
 import org.junit.Test
 import java.io.File
 
@@ -27,6 +29,7 @@ class ReflectiveTelegramTdlibLoginClientTest {
 		tdlibKeyProvider: TelegramTdlibDatabaseKeyProvider =
 			StaticTelegramTdlibDatabaseKeyProvider(TDLIB_KEY),
 		authorizationUpdateTimeoutMs: Long = 10_000L,
+		shutdownCloseTimeoutMs: Long = 60_000L,
 		qrAuthorizationTimeoutMs: Long = 300_000L,
 		qrAuthorizationPollMs: Long = 1_000L,
 	) = ReflectiveTelegramTdlibLoginClient(
@@ -35,6 +38,7 @@ class ReflectiveTelegramTdlibLoginClientTest {
 		apiHash = "test-api-hash",
 		tdlibKeyProvider = tdlibKeyProvider,
 		authorizationUpdateTimeoutMs = authorizationUpdateTimeoutMs,
+		shutdownCloseTimeoutMs = shutdownCloseTimeoutMs,
 		qrAuthorizationTimeoutMs = qrAuthorizationTimeoutMs,
 		qrAuthorizationPollMs = qrAuthorizationPollMs,
 	)
@@ -528,6 +532,52 @@ class ReflectiveTelegramTdlibLoginClientTest {
 	}
 
 	@Test
+	fun testServiceStopWaitsPastCloseTimeoutForTdlibConfirmation() {
+		Client.setCloseAuthorizationUpdateDelayMs(200L)
+		val session = TelegramAuthSessionImpl(
+			createClient(authorizationUpdateTimeoutMs = 50L),
+		)
+		session.startService()
+		session.start()
+
+		val startedAt = System.currentTimeMillis()
+		session.stopService()
+		val elapsed = System.currentTimeMillis() - startedAt
+
+		assertEquals("Expected shutdown close wait, got ${elapsed}ms", true, elapsed >= 150L)
+		assertEquals(TelegramAuthState.CLOSED, session.getSnapshot().authState)
+		assertSentRequests(CLOSE)
+	}
+
+	@Test(timeout = 2_000L)
+	fun testShutdownCloseIsBoundedWhenTdlibNeverConfirms() {
+		Client.setCloseAuthorizationUpdateEnabled(false)
+		val client = createClient(
+			authorizationUpdateTimeoutMs = 25L,
+			shutdownCloseTimeoutMs = 100L,
+		)
+		client.start()
+
+		assertEquals(TelegramAuthState.RECOVERABLE_ERROR, client.closeForShutdown())
+		assertSentRequests(CLOSE)
+	}
+
+	@Test(timeout = 2_000L)
+	fun testServiceStopFailsWhenTdlibNeverConfirmsClose() {
+		Client.setCloseAuthorizationUpdateEnabled(false)
+		val session = TelegramAuthSessionImpl(
+			createClient(
+				authorizationUpdateTimeoutMs = 25L,
+				shutdownCloseTimeoutMs = 100L,
+			),
+		)
+		session.start()
+
+		assertThrows(ServiceException::class.java) { session.stopService() }
+		assertSentRequests(CLOSE)
+	}
+
+	@Test
 	fun testQrAuthorizationRequestIsIdempotentAndCapturesRotatedLink() {
 		val client = createClient(qrAuthorizationPollMs = 1L)
 		client.start()
@@ -572,5 +622,19 @@ class ReflectiveTelegramTdlibLoginClientTest {
 		}
 		assertEquals(null, client.getQrAuthorizationLink())
 		assertSentRequestsAndClose(client, SET_PARAMETERS, REQUEST_QR, CLOSE)
+	}
+
+	@Test
+	fun testLateQrAuthorizationUpdateAfterCloseDoesNotRestoreLink() {
+		val client = createClient()
+		client.start()
+		client.requestQrCodeAuthentication()
+
+		assertEquals(TelegramAuthState.CLOSED, client.close())
+		Client.emitAuthorizationStateForTest(
+			TdApi.AuthorizationStateWaitOtherDeviceConfirmation("late-test-qr-link"),
+		)
+
+		assertEquals(null, client.getQrAuthorizationLink())
 	}
 }

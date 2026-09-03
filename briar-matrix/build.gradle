@@ -1,0 +1,32 @@
+apply plugin: 'java-library'
+apply plugin: 'org.jetbrains.kotlin.jvm'
+sourceCompatibility = 1.8
+targetCompatibility = 1.8
+
+compileKotlin {
+	kotlinOptions.jvmTarget = '1.8'
+}
+
+compileTestKotlin {
+	kotlinOptions.jvmTarget = '1.8'
+}
+
+apply plugin: 'witness'
+apply from: 'witness.gradle'
+
+// MX-004/MX-004-REV-001: this module stays a plain Kotlin/JVM library (like
+// briar-api/briar-core) so it does not collide with briar-android's
+// Kotlin/AGP variant metadata resolution as a sibling Android library would
+// (reproduced previously as an IllegalStateException project-configuration
+// deadlock). The pinned org.matrix.rustcomponents:sdk-android dependency
+// only publishes an androidJvm variant, which this Kotlin/JVM consumer
+// cannot request; the default-off dependency is gated in
+// briar-android/build.gradle instead, where the Kotlin/Android consumer can
+// resolve it. This module holds connector-neutral, SDK-free Matrix code only
+// (see DisabledMatrixConnector).
+dependencies {
+	api project(':briar-api')
+	implementation project(':bramble-api')
+	implementation project(':briar-core')
+	implementation "org.jetbrains.kotlin:kotlin-stdlib:$kotlin_version"
+}

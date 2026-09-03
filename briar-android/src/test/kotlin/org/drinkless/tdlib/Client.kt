@@ -90,6 +90,11 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 				resultHandler?.onResult(TdApi.Ok())
 			}
 			is TdApi.GetChats -> {
+				getChatsRequestCount++
+				if (getChatsRequestCount > rejectGetChatsAfterPages) {
+					resultHandler?.onResult(TdApi.Error())
+					return
+				}
 				val chatIds = chatsById.keys
 					.take(minOf(request.limit.coerceAtLeast(0), loadedChatCount))
 					.toLongArray()
@@ -104,7 +109,8 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 				resultHandler?.onResult(chatsById[request.chatId] ?: TdApi.Error())
 			}
 			is TdApi.GetChatHistory -> {
-				if (rejectGetChatHistory) {
+				getChatHistoryRequestCount++
+				if (rejectGetChatHistory || getChatHistoryRequestCount > rejectGetChatHistoryAfterPages) {
 					resultHandler?.onResult(TdApi.Error())
 					return
 				}
@@ -138,6 +144,7 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 	}
 
 	private fun emitCloseAuthorizationState() {
+		if (!closeAuthorizationUpdateEnabled) return
 		emitAfter(closeAuthorizationUpdateDelayMs) {
 			clearActiveDatabaseDirectory(databaseDirectory)
 			updateHandler.onResult(
@@ -179,6 +186,7 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 		private val sentRequestNames = mutableListOf<String>()
 		private val authorizationUpdateDelaySequenceMs = mutableListOf<Long>()
 		private var authorizationUpdateDelayMs = 0L
+		private var closeAuthorizationUpdateEnabled = true
 		private var closeAuthorizationUpdateDelayMs = 0L
 		private var phoneNumberResultDelayMs = 0L
 		private var authenticationCodeResultDelayMs = 0L
@@ -200,7 +208,11 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 		private var setTdlibParametersAcceptedLatch: CountDownLatch? = null
 		private var rejectSetTdlibParameters = false
 		private var rejectResendAuthenticationCode = false
+		private var rejectGetChatsAfterPages = Int.MAX_VALUE
+		private var getChatsRequestCount = 0
 		private var rejectGetChatHistory = false
+		private var rejectGetChatHistoryAfterPages = Int.MAX_VALUE
+		private var getChatHistoryRequestCount = 0
 		private var qrAuthorizationLink = "test-qr-link"
 		private var activeInstance: Client? = null
 
@@ -219,6 +231,7 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 			sentRequestNames.clear()
 			authorizationUpdateDelaySequenceMs.clear()
 			authorizationUpdateDelayMs = 0L
+			closeAuthorizationUpdateEnabled = true
 			closeAuthorizationUpdateDelayMs = 0L
 			phoneNumberResultDelayMs = 0L
 			authenticationCodeResultDelayMs = 0L
@@ -239,7 +252,11 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 			setTdlibParametersAcceptedLatch = null
 			rejectSetTdlibParameters = false
 			rejectResendAuthenticationCode = false
+			rejectGetChatsAfterPages = Int.MAX_VALUE
+			getChatsRequestCount = 0
 			rejectGetChatHistory = false
+			rejectGetChatHistoryAfterPages = Int.MAX_VALUE
+			getChatHistoryRequestCount = 0
 			qrAuthorizationLink = "test-qr-link"
 			activeInstance = null
 		}
@@ -250,6 +267,10 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 
 		fun setCloseAuthorizationUpdateDelayMs(delayMs: Long) {
 			closeAuthorizationUpdateDelayMs = delayMs
+		}
+
+		fun setCloseAuthorizationUpdateEnabled(enabled: Boolean) {
+			closeAuthorizationUpdateEnabled = enabled
 		}
 
 		fun setAuthorizationUpdateDelaySequenceMs(vararg delayMs: Long) {
@@ -306,8 +327,16 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 			rejectResendAuthenticationCode = reject
 		}
 
+		fun setRejectGetChatsAfterPages(pagesBeforeReject: Int) {
+			rejectGetChatsAfterPages = pagesBeforeReject
+		}
+
 		fun setRejectGetChatHistory(reject: Boolean) {
 			rejectGetChatHistory = reject
+		}
+
+		fun setRejectGetChatHistoryAfterPages(pagesBeforeReject: Int) {
+			rejectGetChatHistoryAfterPages = pagesBeforeReject
 		}
 
 		fun awaitSetTdlibParametersAccepted(timeoutMs: Long): Boolean =

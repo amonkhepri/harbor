@@ -323,8 +323,9 @@ public class BriarService extends Service {
 	/**
 	 * Waits for all services to stop before returning.
 	 */
-	public void waitForShutdown() throws InterruptedException {
-		lifecycleManager.waitForShutdown();
+	public LifecycleManager.StopResult waitForShutdown()
+			throws InterruptedException {
+		return lifecycleManager.waitForShutdown();
 	}
 
 	/**

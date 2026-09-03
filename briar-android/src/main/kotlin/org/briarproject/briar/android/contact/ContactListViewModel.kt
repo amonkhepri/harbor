@@ -16,13 +16,15 @@ import org.briarproject.bramble.api.lifecycle.IoExecutor
 import org.briarproject.bramble.api.lifecycle.LifecycleManager
 import org.briarproject.bramble.api.system.AndroidExecutor
 import org.briarproject.briar.api.android.AndroidNotificationManager
+import org.briarproject.briar.api.connector.ConnectorRegistry
+import org.briarproject.briar.api.connector.ConnectorSource
 import org.briarproject.briar.api.conversation.ConversationManager
 import org.briarproject.briar.api.identity.AuthorManager
-import org.briarproject.briar.api.telegram.TelegramConnector
-import org.briarproject.briar.android.contact.TelegramInboxAvailabilityState.ACCOUNT_UNAVAILABLE
-import org.briarproject.briar.android.contact.TelegramInboxAvailabilityState.EMPTY
-import org.briarproject.briar.android.contact.TelegramInboxAvailabilityState.LOAD_FAILED
-import org.briarproject.briar.android.contact.TelegramInboxAvailabilityState.NONE
+import org.briarproject.briar.android.contact.ConnectorInboxAvailabilityState.ACCOUNT_UNAVAILABLE
+import org.briarproject.briar.android.contact.ConnectorInboxAvailabilityState.EMPTY
+import org.briarproject.briar.android.contact.ConnectorInboxAvailabilityState.LOAD_FAILED
+import org.briarproject.briar.android.contact.ConnectorInboxAvailabilityState.LOADING
+import org.briarproject.briar.android.contact.ConnectorInboxAvailabilityState.NONE
 import java.util.concurrent.Executor
 import javax.inject.Inject
 
@@ -38,7 +40,7 @@ internal class ContactListViewModel @Inject constructor(
 	connectionRegistry: ConnectionRegistry,
 	eventBus: EventBus,
 	private val notificationManager: AndroidNotificationManager,
-	private val telegramConnector: TelegramConnector,
+	private val connectorRegistry: ConnectorRegistry,
 	@IoExecutor private val ioExecutor: Executor,
 ) : ContactsViewModel(
 	application,
@@ -54,13 +56,15 @@ internal class ContactListViewModel @Inject constructor(
 ) {
 
 	private val _hasPendingContacts = MutableLiveData<Boolean>()
-	private val _telegramThreadItems = MutableLiveData<List<TelegramInboxThreadItem>>(emptyList())
-	private val _telegramAvailabilityState = MutableLiveData(NONE)
+	private val _connectorThreadItems = MutableLiveData<List<ConnectorInboxThreadItem>>(emptyList())
+	private val _connectorAvailabilityStates =
+		MutableLiveData<Map<ConnectorSource, ConnectorInboxAvailabilityState>>(emptyMap())
 
 	val hasPendingContacts: LiveData<Boolean> = _hasPendingContacts
-	val telegramThreadItems: LiveData<List<TelegramInboxThreadItem>> = _telegramThreadItems
-	val telegramAvailabilityState: LiveData<TelegramInboxAvailabilityState> =
-		_telegramAvailabilityState
+	val connectorThreadItems: LiveData<List<ConnectorInboxThreadItem>> = _connectorThreadItems
+	val connectorAvailabilityStates:
+		LiveData<Map<ConnectorSource, ConnectorInboxAvailabilityState>> =
+		_connectorAvailabilityStates
 
 	override fun eventOccurred(event: Event) {
 		super.eventOccurred(event)
@@ -69,7 +73,7 @@ internal class ContactListViewModel @Inject constructor(
 		}
 	}
 
-	fun isTelegramConnectorEnabled(): Boolean = telegramConnector.isEnabled()
+	fun isAnyConnectorEnabled(): Boolean = connectorRegistry.connectors.any { it.isEnabled() }
 
 	fun checkForPendingContacts() {
 		runOnDbThread {
@@ -85,27 +89,39 @@ internal class ContactListViewModel @Inject constructor(
 
 	fun clearAllContactAddedNotifications() = notificationManager.clearAllContactAddedNotifications()
 
-	fun loadTelegramThreads() {
-		if (_telegramAvailabilityState.value == TelegramInboxAvailabilityState.LOADING) return
-		if (!telegramConnector.isEnabled()) {
-			_telegramAvailabilityState.value = NONE
-			_telegramThreadItems.value = emptyList()
+	fun loadConnectorThreads() {
+		if (_connectorAvailabilityStates.value.orEmpty().values.any { it == LOADING }) return
+		val connectors = connectorRegistry.connectors.filter { it.isEnabled() }
+		if (connectors.isEmpty()) {
+			_connectorAvailabilityStates.value = emptyMap()
+			_connectorThreadItems.value = emptyList()
 			return
 		}
-		_telegramAvailabilityState.value = TelegramInboxAvailabilityState.LOADING
+		val previousItems = _connectorThreadItems.value.orEmpty().groupBy {
+			it.connectorSource
+		}
+		_connectorAvailabilityStates.value = connectors.associate {
+			it.source to LOADING
+		}
 		ioExecutor.execute {
-			try {
-				if (!telegramConnector.isAuthorized()) {
-					_telegramAvailabilityState.postValue(ACCOUNT_UNAVAILABLE)
-					_telegramThreadItems.postValue(emptyList())
-					return@execute
+			val items = ArrayList<ConnectorInboxThreadItem>()
+			val states = LinkedHashMap<ConnectorSource, ConnectorInboxAvailabilityState>()
+			connectors.forEach { connector ->
+				try {
+					if (!connector.isAuthorized()) {
+						states[connector.source] = ACCOUNT_UNAVAILABLE
+						return@forEach
+					}
+					val threads = connector.getRecentThreads(20)
+					states[connector.source] = if (threads.isEmpty()) EMPTY else NONE
+					threads.mapTo(items, ::GenericConnectorInboxThreadItem)
+				} catch (e: RuntimeException) {
+					states[connector.source] = LOAD_FAILED
+					items.addAll(previousItems[connector.source].orEmpty())
 				}
-				val threads = telegramConnector.getRecentThreads(20)
-				_telegramAvailabilityState.postValue(if (threads.isEmpty()) EMPTY else NONE)
-				_telegramThreadItems.postValue(threads.map(::TelegramInboxThreadItem))
-			} catch (e: RuntimeException) {
-				_telegramAvailabilityState.postValue(LOAD_FAILED)
 			}
+			_connectorThreadItems.postValue(items)
+			_connectorAvailabilityStates.postValue(states)
 		}
 	}
 }
