@@ -80,6 +80,7 @@ import org.briarproject.briar.api.privategroup.GroupMessageFactory;
 import org.briarproject.briar.api.privategroup.PrivateGroupFactory;
 import org.briarproject.briar.api.privategroup.PrivateGroupManager;
 import org.briarproject.briar.api.privategroup.invitation.GroupInvitationFactory;
+import org.briarproject.briar.api.matrix.MatrixAuthSession;
 import org.briarproject.briar.api.privategroup.invitation.GroupInvitationManager;
 import org.briarproject.briar.api.test.TestDataCreator;
 import org.briarproject.briar.api.telegram.TelegramConnector;
@@ -207,6 +208,8 @@ public interface AndroidComponent
 	FeatureFlags featureFlags();
 
 	TelegramConnector telegramConnector();
+
+	MatrixAuthSession matrixAuthSession();
 
 	AndroidWakeLockManager wakeLockManager();
 

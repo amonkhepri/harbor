@@ -162,6 +162,10 @@
 		</activity>
 
 		<activity
+			android:name="org.briarproject.briar.android.matrix.MatrixSetupActivity"
+			android:exported="false"
+			android:label="@string/matrix_setup_title" />
+		<activity
 			android:name="org.briarproject.briar.android.telegram.TelegramConversationActivity"
 			android:exported="false"
 			android:label="@string/telegram_conversation_title"

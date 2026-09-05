@@ -119,6 +119,8 @@ public interface ActivityComponent {
 
 	void inject(TelegramConversationActivity activity);
 
+	void inject(org.briarproject.briar.android.matrix.MatrixSetupActivity activity);
+
 	void inject(ImageActivity activity);
 
 	void inject(ForumInvitationActivity activity);
