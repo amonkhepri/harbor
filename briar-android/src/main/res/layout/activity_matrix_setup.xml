@@ -41,5 +41,11 @@
 			android:layout_width="match_parent"
 			android:layout_height="wrap_content"
 			android:text="@string/matrix_continue" />
+		<Button
+			android:id="@+id/matrixSignOut"
+			android:layout_width="match_parent"
+			android:layout_height="wrap_content"
+			android:visibility="gone"
+			android:text="@string/matrix_sign_out" />
 	</LinearLayout>
 </ScrollView>

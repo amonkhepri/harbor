@@ -6,6 +6,7 @@ import android.view.inputmethod.InputMethodManager
 import android.widget.Button
 import android.widget.EditText
 import android.widget.TextView
+import androidx.appcompat.app.AlertDialog
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import org.briarproject.bramble.PoliteExecutor
@@ -31,6 +32,7 @@ class MatrixSetupActivity : BriarActivity() {
 	private lateinit var password: EditText
 	private lateinit var submit: Button
 	private lateinit var status: TextView
+	private lateinit var signOut: Button
 
 	override fun injectActivity(component: ActivityComponent) {
 		component.inject(this)
@@ -48,6 +50,7 @@ class MatrixSetupActivity : BriarActivity() {
 		password = findViewById(R.id.matrixPassword)
 		submit = findViewById(R.id.matrixSubmit)
 		status = findViewById(R.id.matrixStatus)
+		signOut = findViewById(R.id.matrixSignOut)
 		model = ViewModelProvider(
 			this,
 			object : ViewModelProvider.Factory {
@@ -72,6 +75,15 @@ class MatrixSetupActivity : BriarActivity() {
 				else -> Unit
 			}
 		}
+		signOut.setOnClickListener {
+			if (model.state.value?.busy == true) return@setOnClickListener
+			AlertDialog.Builder(this)
+				.setTitle(R.string.matrix_sign_out)
+				.setMessage(R.string.matrix_sign_out_confirmation)
+				.setNegativeButton(R.string.cancel) { _, _ -> model.logout(false) }
+				.setPositiveButton(R.string.matrix_sign_out) { _, _ -> model.logout(true) }
+				.show()
+		}
 		model.start()
 	}
 
@@ -81,7 +93,12 @@ class MatrixSetupActivity : BriarActivity() {
 		val credentialsVisible = step == MatrixSetupStep.CREDENTIALS
 		username.visibility = if (credentialsVisible) View.VISIBLE else View.GONE
 		password.visibility = username.visibility
-		if (!credentialsVisible) password.text.clear()
+		if (!credentialsVisible) {
+			username.text.clear()
+			password.text.clear()
+		}
+		signOut.visibility = if (step == MatrixSetupStep.READY) View.VISIBLE else View.GONE
+		signOut.isEnabled = !state.busy
 		val canSubmit = step == MatrixSetupStep.HOMESERVER || credentialsVisible
 		submit.visibility = if (canSubmit) View.VISIBLE else View.GONE
 		submit.isEnabled = !state.busy
@@ -92,6 +109,7 @@ class MatrixSetupActivity : BriarActivity() {
 		val error = state.snapshot?.errorDetail
 		val message = when {
 			state.busy -> R.string.matrix_working
+			state.logoutFailed -> R.string.matrix_sign_out_failed
 			step == MatrixSetupStep.READY -> R.string.matrix_ready
 			error == RecoverableErrorDetail.UNSUPPORTED_AUTH_STEP -> R.string.matrix_unsupported
 			error == RecoverableErrorDetail.DEVICE_KEYSTORE_UNAVAILABLE ||

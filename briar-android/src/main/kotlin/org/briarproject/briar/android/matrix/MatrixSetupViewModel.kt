@@ -28,6 +28,7 @@ internal data class MatrixSetupState(
 	val snapshot: MatrixAuthSession.Snapshot? = null,
 	val busy: Boolean = false,
 	val actionFailed: Boolean = false,
+	val logoutFailed: Boolean = false,
 )
 
 internal class MatrixSetupViewModel(
@@ -56,12 +57,17 @@ internal class MatrixSetupViewModel(
 		runAction { session.submitCredentials(username.trim(), password) }
 	}
 
+	fun logout(confirmed: Boolean) {
+		if (!confirmed || currentStep() != MatrixSetupStep.READY) return
+		runAction(reconcileLogoutFailure = true) { session.logout() }
+	}
+
 	private fun currentStep(): MatrixSetupStep? = state.value?.snapshot?.let(::setupStep)
 
-	private fun runAction(action: () -> Unit) {
+	private fun runAction(reconcileLogoutFailure: Boolean = false, action: () -> Unit) {
 		if (!enabled || state.value?.busy == true) return
 		val previous = state.value ?: MatrixSetupState()
-		mutableState.value = previous.copy(busy = true, actionFailed = false)
+		mutableState.value = previous.copy(busy = true, actionFailed = false, logoutFailed = false)
 		try {
 			executor.execute {
 				val result = try {
@@ -69,12 +75,22 @@ internal class MatrixSetupViewModel(
 					MatrixSetupState(session.getSnapshot())
 				} catch (_: Exception) {
 					// SDK exceptions may contain credentials or server responses. Do not log them.
-					failureState(previous)
+					if (reconcileLogoutFailure) {
+						val snapshot = try {
+							session.getSnapshot()
+						} catch (_: Exception) {
+							// An unreadable session must not be presented as connected.
+							null
+						}
+						failureState(MatrixSetupState(snapshot)).copy(logoutFailed = true)
+					} else {
+						failureState(previous)
+					}
 				}
 				mutableState.postValue(result)
 			}
 		} catch (_: RuntimeException) {
-			mutableState.value = failureState(previous)
+			mutableState.value = failureState(previous).copy(logoutFailed = reconcileLogoutFailure)
 		}
 	}
 

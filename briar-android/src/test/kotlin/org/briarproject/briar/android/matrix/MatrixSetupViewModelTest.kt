@@ -29,7 +29,13 @@ class MatrixSetupViewModelTest {
 		var starts = 0
 		var submissions = 0
 		var failLogin = false
-		override fun getSnapshot() = current
+		var logouts = 0
+		var failLogout = false
+		var failSnapshot = false
+		override fun getSnapshot(): Snapshot {
+			if (failSnapshot) error("sensitive snapshot response")
+			return current
+		}
 		override fun start() {
 			starts++
 			current = Snapshot(
@@ -47,7 +53,12 @@ class MatrixSetupViewModelTest {
 			current = current.copy(authState = MatrixAuthState.READY)
 		}
 		override fun close() = error("UI must not close the shared session")
-		override fun logout() = error("UI must not log out the shared session")
+		override fun logout() {
+			logouts++
+			restored = false
+			current = Snapshot(MatrixAuthState.HOMESERVER_ENTRY, RecoverableErrorDetail.NONE)
+			if (failLogout) error("sensitive logout response")
+		}
 	}
 
 	@Test fun disabledSetupNeverStartsOrSubmits() {
@@ -55,6 +66,7 @@ class MatrixSetupViewModelTest {
 		val queue = QueueExecutor()
 		val model = MatrixSetupViewModel(session, queue, false)
 		model.start()
+		model.logout(true)
 		model.submitHomeserver("https://example.org")
 		model.submitCredentials("user", "test password")
 		assertTrue(queue.actions.isEmpty())
@@ -100,6 +112,60 @@ class MatrixSetupViewModelTest {
 		model.submitCredentials("user", "test password")
 		queue.runNext()
 		assertEquals(MatrixSetupStep.READY, setupStep(model.state.value!!.snapshot!!))
+	}
+
+	@Test fun signOutRequiresConfirmationAndReconcilesLocalRemovalOnFailure() {
+		for (failLogout in listOf(false, true)) {
+			val session = Session().apply {
+				restored = true
+				this.failLogout = failLogout
+			}
+			val queue = QueueExecutor()
+			val model = MatrixSetupViewModel(session, queue, true)
+			model.logout(true)
+			assertTrue(queue.actions.isEmpty())
+			model.start()
+			model.logout(true)
+			assertEquals(1, queue.actions.size)
+			queue.runNext()
+			assertEquals(MatrixSetupStep.READY, setupStep(model.state.value!!.snapshot!!))
+			model.logout(false)
+			assertTrue(queue.actions.isEmpty())
+			assertEquals(0, session.logouts)
+			assertEquals(MatrixSetupStep.READY, setupStep(model.state.value!!.snapshot!!))
+			model.logout(true)
+			model.logout(true)
+			assertTrue(model.state.value!!.busy)
+			assertEquals(1, queue.actions.size)
+			assertEquals(0, session.logouts)
+			queue.runNext()
+			assertEquals(1, session.logouts)
+			assertFalse(model.state.value!!.busy)
+			assertEquals(MatrixSetupStep.HOMESERVER, setupStep(model.state.value!!.snapshot!!))
+			assertEquals(failLogout, model.state.value!!.logoutFailed)
+			assertFalse(model.state.value.toString().contains("sensitive"))
+			model.logout(true)
+			assertTrue(queue.actions.isEmpty())
+			val reopened = MatrixSetupViewModel(session, queue, true)
+			reopened.start()
+			queue.runNext()
+			assertEquals(MatrixSetupStep.HOMESERVER, setupStep(reopened.state.value!!.snapshot!!))
+		}
+	}
+
+	@Test fun unreadableSessionAfterLogoutFailureIsUnavailable() {
+		val session = Session().apply { restored = true }
+		val queue = QueueExecutor()
+		val model = MatrixSetupViewModel(session, queue, true)
+		model.start()
+		queue.runNext()
+		session.failLogout = true
+		session.failSnapshot = true
+		model.logout(true)
+		queue.runNext()
+		assertTrue(model.state.value!!.logoutFailed)
+		assertEquals(MatrixSetupStep.UNAVAILABLE, setupStep(model.state.value!!.snapshot!!))
+		assertFalse(model.state.value.toString().contains("sensitive"))
 	}
 
 	@Test fun recoverableErrorsReturnToTheCorrectForm() {

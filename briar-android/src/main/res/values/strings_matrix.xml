@@ -12,4 +12,7 @@
 	<string name="matrix_unavailable">Matrix setup is unavailable. Return to Settings and try again.</string>
 	<string name="matrix_unsupported">This server requires a sign-in method that is not supported yet.</string>
 	<string name="matrix_store_failed">The saved Matrix session could not be opened securely.</string>
+	<string name="matrix_sign_out">Sign out of Matrix</string>
+	<string name="matrix_sign_out_confirmation">Sign out of Matrix and remove its saved session and local cache from this device? Your Briar account will remain unchanged.</string>
+	<string name="matrix_sign_out_failed">Matrix sign-out could not be completed. Local session data may have been removed, but sign-out on the server could not be confirmed.</string>
 </resources>
