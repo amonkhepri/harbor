@@ -22,6 +22,22 @@ import org.briarproject.briar.api.identity.AuthorManager
 import org.briarproject.briar.android.contact.ConnectorInboxAvailabilityState.ACCOUNT_UNAVAILABLE
 import org.briarproject.briar.android.contact.ConnectorInboxAvailabilityState.LOAD_FAILED
 import org.briarproject.briar.android.contact.ConnectorInboxAvailabilityState.NONE
+import org.briarproject.briar.api.matrix.MatrixAuthSession
+import org.briarproject.briar.api.matrix.MatrixAuthState
+import org.briarproject.briar.matrix.MatrixAuthSessionImpl
+import org.briarproject.briar.matrix.MatrixRoomConnector
+import org.briarproject.briar.matrix.MatrixStoreConfiguration
+import org.briarproject.briar.matrix.MatrixStoreConfigurationProvider
+import org.briarproject.briar.matrix.DirectMatrixClientSessionDelegateFactory
+import org.briarproject.briar.matrix.ReflectiveMatrixHomeserverDiscoveryClient
+import org.junit.After
+import org.junit.rules.TemporaryFolder
+import org.matrix.rustcomponents.sdk.FakeMatrixSdkState
+import org.matrix.rustcomponents.sdk.FakeRoomSpec
+import java.util.concurrent.Executor
+import java.util.concurrent.FutureTask
+import java.util.concurrent.TimeUnit
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -32,6 +48,204 @@ class ContactListViewModelTest {
 
 	@get:Rule
 	val testRule = InstantTaskExecutorRule()
+
+	@get:Rule
+	val testFolder = TemporaryFolder()
+
+	@After
+	fun resetSdk() = FakeMatrixSdkState.reset()
+
+	@Test
+	fun `inbox restores saved session on IO and refresh preserves READY and sign-out`() {
+		val fixture = MatrixInboxFixture()
+		fixture.saveSession()
+		val session = fixture.session()
+		val io = QueuedIoExecutor()
+		val viewModel = createViewModel(
+			fixture.connector(session),
+			matrixAuthSession = session,
+			ioExecutor = io,
+		)
+		val caller = Thread.currentThread()
+		assertEquals(MatrixAuthState.CLOSED, session.getSnapshot().authState)
+
+		viewModel.loadConnectorThreads()
+		assertEquals(0, fixture.storeReads)
+		assertEquals(MatrixAuthState.CLOSED, session.getSnapshot().authState)
+		assertEquals(
+			ConnectorInboxAvailabilityState.LOADING,
+			viewModel.connectorAvailabilityStates.value?.get(ConnectorSources.MATRIX),
+		)
+		io.runNext()
+
+		assertNotEquals(caller, fixture.storeThread)
+		assertEquals(MatrixAuthState.READY, session.getSnapshot().authState)
+		assertEquals("matrix:!room:example", viewModel.connectorThreadItems.value?.single()?.stableId)
+		assertEquals(NONE, viewModel.connectorAvailabilityStates.value?.get(ConnectorSources.MATRIX))
+		viewModel.loadConnectorThreads()
+		io.runNext()
+		assertEquals(1, fixture.storeReads)
+		assertEquals(1, FakeMatrixSdkState.restoreSessionCallCount)
+
+		// Sign-out wins even when an inbox refresh was queued while READY.
+		viewModel.loadConnectorThreads()
+		session.logout()
+		val readsAfterLogout = fixture.storeReads
+		io.runNext()
+		viewModel.loadConnectorThreads()
+		io.runNext()
+		assertEquals(readsAfterLogout, fixture.storeReads)
+		assertEquals(1, FakeMatrixSdkState.restoreSessionCallCount)
+		assertEquals(MatrixAuthState.HOMESERVER_ENTRY, session.getSnapshot().authState)
+		assertEquals(emptyList<ConnectorInboxThreadItem>(), viewModel.connectorThreadItems.value)
+		assertEquals(
+			ACCOUNT_UNAVAILABLE,
+			viewModel.connectorAvailabilityStates.value?.get(ConnectorSources.MATRIX),
+		)
+	}
+
+	@Test
+	fun `disabled Matrix never reads store or restores`() {
+		val fixture = MatrixInboxFixture()
+		val session = fixture.session()
+		val matrix = connector(ConnectorSources.MATRIX, connectorThread(ConnectorSources.MATRIX))
+		`when`(matrix.isEnabled()).thenReturn(false)
+		val telegram = connector(ConnectorSources.TELEGRAM, connectorThread())
+		val viewModel = createViewModel(matrix, telegram, matrixAuthSession = session)
+
+		viewModel.loadConnectorThreads()
+
+		assertEquals(0, fixture.storeReads)
+		assertEquals(MatrixAuthState.CLOSED, session.getSnapshot().authState)
+		assertEquals("telegram:7", viewModel.connectorThreadItems.value?.single()?.stableId)
+		assertEquals(
+			mapOf(ConnectorSources.TELEGRAM to NONE),
+			viewModel.connectorAvailabilityStates.value,
+		)
+	}
+
+	@Test
+	fun `missing saved session leaves setup available and refresh preserves credential entry`() {
+		val fixture = MatrixInboxFixture()
+		val session = fixture.session()
+		val viewModel = createViewModel(fixture.connector(session), matrixAuthSession = session)
+
+		viewModel.loadConnectorThreads()
+		assertEquals(MatrixAuthState.HOMESERVER_ENTRY, session.getSnapshot().authState)
+		session.submitHomeserver("matrix.invalid")
+		viewModel.loadConnectorThreads()
+
+		assertEquals(MatrixAuthState.CREDENTIAL_ENTRY, session.getSnapshot().authState)
+		assertEquals(1, fixture.storeReads)
+		assertEquals(emptyList<ConnectorInboxThreadItem>(), viewModel.connectorThreadItems.value)
+		assertEquals(
+			ACCOUNT_UNAVAILABLE,
+			viewModel.connectorAvailabilityStates.value?.get(ConnectorSources.MATRIX),
+		)
+	}
+
+	@Test
+	fun `invalid saved session reports unavailable and still loads Telegram`() {
+		val fixture = MatrixInboxFixture()
+		fixture.saveSession()
+		// A different protected-store key cannot decrypt the saved credentials.
+		fixture.configuration = MatrixStoreConfiguration(
+			fixture.configuration.directory,
+			"matrix-sdk",
+			ByteArray(32) { 42 },
+		)
+		val session = fixture.session()
+		val telegram = connector(ConnectorSources.TELEGRAM, connectorThread())
+		val viewModel = createViewModel(fixture.connector(session), telegram, matrixAuthSession = session)
+
+		viewModel.loadConnectorThreads()
+
+		assertEquals(MatrixAuthState.HOMESERVER_ENTRY, session.getSnapshot().authState)
+		assertEquals("telegram:7", viewModel.connectorThreadItems.value?.single()?.stableId)
+		assertEquals(
+			mapOf(ConnectorSources.MATRIX to ACCOUNT_UNAVAILABLE, ConnectorSources.TELEGRAM to NONE),
+			viewModel.connectorAvailabilityStates.value,
+		)
+	}
+
+	@Test
+	fun `store exception stays inside Matrix failure boundary and finishes other source loading`() {
+		val fixture = MatrixInboxFixture()
+		fixture.failStoreRead = true
+		val session = fixture.session()
+		val telegram = connector(ConnectorSources.TELEGRAM, connectorThread())
+		val io = QueuedIoExecutor()
+		val viewModel = createViewModel(
+			fixture.connector(session),
+			telegram,
+			matrixAuthSession = session,
+			ioExecutor = io,
+		)
+
+		viewModel.loadConnectorThreads()
+		io.runNext()
+
+		assertEquals("telegram:7", viewModel.connectorThreadItems.value?.single()?.stableId)
+		assertEquals(
+			mapOf(ConnectorSources.MATRIX to LOAD_FAILED, ConnectorSources.TELEGRAM to NONE),
+			viewModel.connectorAvailabilityStates.value,
+		)
+	}
+
+	private inner class MatrixInboxFixture : MatrixStoreConfigurationProvider {
+		var configuration = MatrixStoreConfiguration(
+			testFolder.newFolder(),
+			"matrix-sdk",
+			ByteArray(32) { it.toByte() },
+		)
+		var storeReads = 0
+		var storeThread: Thread? = null
+		var failStoreRead = false
+		private var client = newClient()
+
+		override fun getStoreConfiguration(): MatrixStoreConfiguration {
+			storeReads++
+			storeThread = Thread.currentThread()
+			check(!failStoreRead)
+			return configuration
+		}
+
+		fun saveSession() {
+			val saved = session()
+			saved.start()
+			saved.submitHomeserver("matrix.invalid")
+			saved.submitCredentials("fixture-user", "fixture-password")
+			assertEquals(MatrixAuthState.READY, saved.getSnapshot().authState)
+			saved.close()
+			storeReads = 0
+		}
+
+		fun session(): MatrixAuthSessionImpl {
+			client = newClient()
+			return MatrixAuthSessionImpl(client, client, this)
+		}
+
+		fun connector(session: MatrixAuthSession): MatrixRoomConnector {
+			FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec("!room:example", "Room"))
+			return MatrixRoomConnector(client, session, client)
+		}
+
+		private fun newClient() = ReflectiveMatrixHomeserverDiscoveryClient(
+			sessionDelegateFactory = DirectMatrixClientSessionDelegateFactory(),
+		)
+	}
+
+	private class QueuedIoExecutor : Executor {
+		private val tasks = ArrayDeque<Runnable>()
+		override fun execute(command: Runnable) {
+			tasks.addLast(command)
+		}
+		fun runNext() {
+			val task = FutureTask(tasks.removeFirst(), Unit)
+			Thread(task, "inbox-test-io").start()
+			task.get(10, TimeUnit.SECONDS)
+		}
+	}
 
 	@Test
 	fun testTransientFailurePreservesLoadedConnectorThreads() {
@@ -115,7 +329,11 @@ class ContactListViewModelTest {
 		ConnectorMessageType.TEXT,
 	)
 
-	private fun createViewModel(vararg registeredConnectors: ReadOnlyConnector) = ContactListViewModel(
+	private fun createViewModel(
+		vararg registeredConnectors: ReadOnlyConnector,
+		matrixAuthSession: MatrixAuthSession = mock(MatrixAuthSession::class.java),
+		ioExecutor: Executor = ImmediateExecutor(),
+	) = ContactListViewModel(
 		mock(Application::class.java),
 		ImmediateExecutor(),
 		mock(LifecycleManager::class.java),
@@ -130,6 +348,7 @@ class ContactListViewModelTest {
 		object : ConnectorRegistry {
 			override val connectors = registeredConnectors.toList()
 		},
-		ImmediateExecutor(),
+		ioExecutor,
+		matrixAuthSession,
 	)
 }
