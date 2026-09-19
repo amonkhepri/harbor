@@ -33,6 +33,87 @@ class ReflectiveMatrixHomeserverDiscoveryClientTest {
 	}
 
 	@Test
+	fun `refreshRooms triggers bounded sync and surfaces dynamically added room`() {
+		val storeConfiguration = fakeStoreConfiguration()
+		val client = newSessionClient()
+		client.login("https://matrix.example.org", "alice", "pass", storeConfiguration)
+
+		FakeMatrixSdkState.roomsToReturn = emptyList()
+		FakeMatrixSdkState.syncV2Manual = true
+		FakeMatrixSdkState.syncV2Action = {
+			FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec("!new:example.org", "New Room"))
+		}
+
+		var success = false
+		val thread = Thread { success = client.refreshRooms(5000L) }
+		thread.start()
+		
+		awaitCondition(timeoutMs = 1000L) { FakeMatrixSdkState.lastSyncListener != null }
+		FakeMatrixSdkState.syncV2Action?.invoke()
+		FakeMatrixSdkState.lastSyncListener?.onUpdate(
+			org.matrix.rustcomponents.sdk.SyncResponseV2(
+				"",
+				org.matrix.rustcomponents.sdk.SyncResponseRoomsV2(),
+			),
+		)
+		thread.join(2000L)
+
+		assertTrue(success)
+
+		val rooms = client.getJoinedRooms(10)
+		assertEquals(1, rooms.size)
+		assertEquals("!new:example.org", rooms[0].roomId)
+		assertEquals("New Room", rooms[0].displayName)
+	}
+
+	@Test
+	fun `refreshRooms timeout leaves handles released and returns false`() {
+		val storeConfiguration = fakeStoreConfiguration()
+		val client = newSessionClient()
+		client.login("https://matrix.example.org", "alice", "pass", storeConfiguration)
+
+		FakeMatrixSdkState.syncV2SuspendAsynchronously = true
+		val enteredLatch = java.util.concurrent.CountDownLatch(1)
+		val releaseLatch = java.util.concurrent.CountDownLatch(1)
+		FakeMatrixSdkState.syncV2EnteredLatch = enteredLatch
+		FakeMatrixSdkState.syncV2ReleaseLatch = releaseLatch
+
+		val success = client.refreshRooms(50L) // bounded local timeout
+		
+		releaseLatch.countDown()
+		assertFalse(success)
+		assertEquals(1, FakeMatrixSdkState.syncV2CallCount)
+		assertEquals(1, FakeMatrixSdkState.taskCancelCount)
+	}
+
+	@Test
+	fun `logout during pending sync releases handles and returns false`() {
+		val storeConfiguration = fakeStoreConfiguration()
+		val client = newSessionClient()
+		client.login("https://matrix.example.org", "alice", "pass", storeConfiguration)
+
+		FakeMatrixSdkState.syncV2SuspendAsynchronously = true
+		val enteredLatch = java.util.concurrent.CountDownLatch(1)
+		val releaseLatch = java.util.concurrent.CountDownLatch(1)
+		FakeMatrixSdkState.syncV2EnteredLatch = enteredLatch
+		FakeMatrixSdkState.syncV2ReleaseLatch = releaseLatch
+
+		var success = true
+		val thread = Thread {
+			success = client.refreshRooms(2000L)
+		}
+		thread.start()
+
+		assertTrue(enteredLatch.await(1000L, TimeUnit.MILLISECONDS))
+		client.logout()
+		releaseLatch.countDown()
+		
+		thread.join(2000L)
+		assertFalse(success)
+		assertEquals(1, FakeMatrixSdkState.taskCancelCount)
+	}
+
+	@Test
 	fun `login writes an encrypted atomic sidecar with no leftover temp file`() {
 		val storeConfiguration = fakeStoreConfiguration()
 		val client = newSessionClient()
@@ -252,6 +333,7 @@ class ReflectiveMatrixHomeserverDiscoveryClientTest {
 		).discover("example.org")
 
 		assertEquals(DiscoveryResult.Failed(HOMESERVER_DISCOVERY_FAILED), result)
+		awaitCondition(timeoutMs = 1_000L) { FakeMatrixSdkState.clientCloseCount == 1 }
 	}
 
 	@Test
