@@ -13,12 +13,6 @@ interface MatrixRoomSnapshotClient {
 	 * retained or room enumeration fails.
 	 */
 	fun getJoinedRooms(limit: Int): List<MatrixRoomSnapshot>
-
-	/**
-	 * Bounded foreground sync: awaits a successful SDK update or times out.
-	 * Returns true on success; false on timeout, error, or missing session.
-	 */
-	fun refreshRooms(timeoutMs: Long): Boolean
 }
 
 data class MatrixRoomSnapshot(val roomId: String, val displayName: String)

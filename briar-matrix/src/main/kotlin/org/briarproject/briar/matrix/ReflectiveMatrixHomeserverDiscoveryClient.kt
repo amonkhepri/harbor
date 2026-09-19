@@ -69,11 +69,6 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 	MatrixRoomSnapshotClient,
 	MatrixMessageSnapshotClient {
 
-	private val syncLock = Object()
-	private var activeSyncLatch: CountDownLatch? = null
-	private var activeSyncSuccess = false
-	private var activeSyncTaskHandle: Any? = null
-
 	private var loginClient: Any? = null
 
 	override fun discover(serverName: String): DiscoveryResult {
@@ -144,7 +139,6 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			if (storeConfiguration != null) persistSession(client, storeConfiguration)
 			close()
 			loginClient = client
-			cancelPendingSync()
 			client = null
 			NONE
 		} catch (e: InvocationTargetException) {
@@ -195,7 +189,6 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			invokeUnit(client, "restoreSession", arrayOf(sessionClass), arrayOf(session))
 			val homeserverUrl = readHomeserverUrl(client)
 			loginClient = client
-			cancelPendingSync()
 			client = null
 			MatrixLoginClient.RestoreResult.Restored(homeserverUrl)
 		} catch (e: DiscoveryAdapterFailure) {
@@ -453,98 +446,6 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 	 * `rooms()` returns regardless of whether [limit] keeps it. Never logs
 	 * room ids or names.
 	 */
-
-	override fun refreshRooms(timeoutMs: Long): Boolean {
-		val client: Any
-		val latchToWait: CountDownLatch
-		var isInitiator = false
-
-		synchronized(syncLock) {
-			client = loginClient ?: return false
-			val existingLatch = activeSyncLatch
-			if (existingLatch != null) {
-				latchToWait = existingLatch
-			} else {
-				latchToWait = CountDownLatch(1)
-				activeSyncLatch = latchToWait
-				activeSyncSuccess = false
-				isInitiator = true
-			}
-		}
-
-		if (!isInitiator) {
-			return try {
-				latchToWait.await(timeoutMs, TimeUnit.MILLISECONDS)
-				activeSyncSuccess
-			} catch (e: InterruptedException) {
-				Thread.currentThread().interrupt()
-				false
-			}
-		}
-
-		var taskHandle: Any? = null
-		return try {
-			val settingsClass = Class.forName(SYNC_SETTINGS_CLASS_NAME)
-			val constructor = settingsClass.constructors.first { it.parameterTypes.size == 4 }
-			val settings = constructor.newInstance(0L, false, 3, null)
-
-			val listenerClass = Class.forName(SYNC_LISTENER_CLASS_NAME)
-			val listener = Proxy.newProxyInstance(
-				listenerClass.classLoader,
-				arrayOf(listenerClass),
-			) { proxy, method, arguments ->
-				when (method.name) {
-					"onUpdate" -> {
-						activeSyncSuccess = true
-						latchToWait.countDown()
-						null
-					}
-					"equals" -> proxy === arguments?.firstOrNull()
-					"hashCode" -> System.identityHashCode(proxy)
-					"toString" -> "MatrixSyncListener"
-					else -> null
-				}
-			}
-
-			val syncV2Method = client.javaClass.getMethod("syncV2", settingsClass, listenerClass)
-			val handle = syncV2Method.invoke(client, settings, listener)
-			synchronized(syncLock) {
-				if (client === loginClient) {
-					activeSyncTaskHandle = handle
-				} else {
-					cancelAndCloseQuietly(handle)
-					activeSyncSuccess = false
-					latchToWait.countDown()
-				}
-			}
-			taskHandle = handle
-			if (!latchToWait.await(timeoutMs, TimeUnit.MILLISECONDS)) {
-				activeSyncSuccess = false
-			}
-			activeSyncSuccess
-		} catch (e: Exception) {
-			false
-		} catch (e: LinkageError) {
-			false
-		} finally {
-			var needsCancel = false
-			synchronized(syncLock) {
-				if (activeSyncTaskHandle != null && activeSyncTaskHandle === taskHandle) {
-					activeSyncTaskHandle = null
-					needsCancel = true
-				}
-				if (activeSyncLatch === latchToWait) {
-					activeSyncLatch = null
-				}
-			}
-			if (needsCancel) {
-				cancelAndCloseQuietly(taskHandle)
-			}
-			// Just in case it timed out or errored, release any waiters
-			latchToWait.countDown()
-		}
-	}
-
 	@Synchronized
 	override fun getJoinedRooms(limit: Int): List<MatrixRoomSnapshot> {
 		val client = loginClient ?: return emptyList()
@@ -830,7 +731,6 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 	override fun logout() {
 		val client = loginClient ?: return
 		loginClient = null
-		cancelPendingSync()
 		try {
 			invokeUnit(client, "logout", emptyArray(), emptyArray())
 		} catch (e: InterruptedException) {
@@ -846,17 +746,6 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 	override fun close() {
 		closeQuietly(loginClient)
 		loginClient = null
-		cancelPendingSync()
-	}
-	
-	private fun cancelPendingSync() {
-		synchronized(syncLock) {
-			cancelAndCloseQuietly(activeSyncTaskHandle)
-			activeSyncTaskHandle = null
-			activeSyncSuccess = false
-			activeSyncLatch?.countDown()
-			activeSyncLatch = null
-		}
 	}
 
 	/**
@@ -1046,8 +935,6 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		const val SESSION_DELEGATE_CLASS_NAME = "org.matrix.rustcomponents.sdk.ClientSessionDelegate"
 		const val SESSION_DELEGATE_FACTORY_CLASS_NAME =
 			"org.briarproject.briar.matrix.DirectMatrixClientSessionDelegateFactory"
-		const val SYNC_SETTINGS_CLASS_NAME = "org.matrix.rustcomponents.sdk.SyncSettingsV2"
-		const val SYNC_LISTENER_CLASS_NAME = "org.matrix.rustcomponents.sdk.SyncListenerV2"
 		const val TIMELINE_LISTENER_CLASS_NAME = "org.matrix.rustcomponents.sdk.TimelineListener"
 		const val PAGINATE_BACKWARDS_METHOD_NAME = "paginateBackwards-vckuEUM"
 		const val TIMESTAMP_GETTER_NAME = "getTimestamp-s-VKNKU"

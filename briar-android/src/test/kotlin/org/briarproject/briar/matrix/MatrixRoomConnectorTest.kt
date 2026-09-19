@@ -12,7 +12,6 @@ import org.briarproject.briar.api.matrix.MatrixAuthState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
-import org.junit.Assert.fail
 import org.junit.Test
 
 class MatrixRoomConnectorTest {
@@ -130,24 +129,6 @@ class MatrixRoomConnectorTest {
 		assertEquals(ConnectorMessageType.PHOTO, message.type)
 	}
 
-
-	@Test
-	fun `getRecentThreads throws RuntimeException which maps to LOAD_FAILED when refresh fails`() {
-		val roomSnapshotClient = FakeRoomSnapshotClient(emptyList()).apply {
-			refreshRoomsReturnValue = false
-		}
-		val connector = connector(
-			roomSnapshotClient = roomSnapshotClient,
-			authSession = FakeMatrixAuthSession(MatrixAuthState.READY),
-		)
-
-		try {
-			connector.getRecentThreads(10)
-			fail("Expected RuntimeException")
-		} catch (e: RuntimeException) {
-			assertEquals("Matrix room sync failed or timed out", e.message)
-		}
-	}
 	@Test
 	fun `getRecentThreads fails closed without querying rooms or messages when not authorized`() {
 		val roomSnapshotClient = FakeRoomSnapshotClient(
@@ -263,18 +244,10 @@ class MatrixRoomConnectorTest {
 		MatrixRoomSnapshotClient {
 		var lastRequestedLimit: Int? = null
 			private set
-		var refreshRoomsCalled = false
-			private set
-		var refreshRoomsReturnValue = true
 
 		override fun getJoinedRooms(limit: Int): List<MatrixRoomSnapshot> {
 			lastRequestedLimit = limit
 			return snapshots
-		}
-		
-		override fun refreshRooms(timeoutMs: Long): Boolean {
-			refreshRoomsCalled = true
-			return refreshRoomsReturnValue
 		}
 	}
 

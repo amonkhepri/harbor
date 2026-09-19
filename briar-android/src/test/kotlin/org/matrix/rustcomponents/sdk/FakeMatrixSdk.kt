@@ -304,16 +304,6 @@ sealed class TimelineDiff {
 	}
 }
 
-class SyncSettingsV2(val timeoutMs: ULong = 0u, val fullState: Boolean = false)
-
-interface SyncListenerV2 {
-	fun onUpdate(response: SyncResponseV2)
-}
-
-class SyncResponseV2(val nextBatch: String, val rooms: SyncResponseRoomsV2)
-
-class SyncResponseRoomsV2
-
 class Session(
 	val accessToken: String,
 	val refreshToken: String?,
@@ -356,31 +346,6 @@ class Client internal constructor(
 			Room(fake.roomId, fake.displayName, fake.isSpace, fake.membership)
 		}
 	} as List<Room>
-
-	fun syncV2(settings: SyncSettingsV2, listener: SyncListenerV2): TaskHandle {
-		FakeMatrixSdkState.syncV2CallCount++
-		FakeMatrixSdkState.lastSyncListener = listener
-		FakeMatrixSdkState.syncV2EnteredLatch?.countDown()
-		val task = TaskHandle()
-		val response = SyncResponseV2("", SyncResponseRoomsV2())
-		
-		if (FakeMatrixSdkState.syncV2SuspendAsynchronously) {
-			Thread {
-				FakeMatrixSdkState.syncV2ReleaseLatch?.await()
-				FakeMatrixSdkState.syncV2Action?.invoke()
-				if (!FakeMatrixSdkState.syncV2Failure) {
-					listener.onUpdate(response)
-				}
-			}.start()
-		} else if (!FakeMatrixSdkState.syncV2Manual) {
-			FakeMatrixSdkState.syncV2Action?.invoke()
-			if (!FakeMatrixSdkState.syncV2Failure) {
-				listener.onUpdate(response)
-			}
-		}
-		
-		return task
-	}
 
 	fun getRoom(roomId: String): Room? = FakeMatrixSdkState.roomsToReturn
 		.firstOrNull { it.roomId == roomId }
@@ -580,15 +545,6 @@ object FakeMatrixSdkState {
 	var roomsToReturn: List<FakeRoomSpec> = emptyList()
 	var roomCloseCount = 0
 	val closedRoomHandles = mutableListOf<String>()
-	var syncV2CallCount = 0
-	var syncV2DelayMs = 0L
-	var syncV2SuspendAsynchronously = false
-	var syncV2Manual = false
-	var syncV2EnteredLatch: java.util.concurrent.CountDownLatch? = null
-	var syncV2ReleaseLatch: java.util.concurrent.CountDownLatch? = null
-	var lastSyncListener: SyncListenerV2? = null
-	var syncV2Failure = false
-	var syncV2Action: (() -> Unit)? = null
 	var timelineCallCount = 0
 	var timelineSuspendAsynchronously = false
 	var timelineDelayMs = 0L
@@ -639,15 +595,6 @@ object FakeMatrixSdkState {
 		roomsToReturn = emptyList()
 		roomCloseCount = 0
 		closedRoomHandles.clear()
-		syncV2CallCount = 0
-		syncV2DelayMs = 0L
-		syncV2SuspendAsynchronously = false
-		syncV2Manual = false
-		syncV2EnteredLatch = null
-		syncV2ReleaseLatch = null
-		lastSyncListener = null
-		syncV2Failure = false
-		syncV2Action = null
 		timelineCallCount = 0
 		timelineSuspendAsynchronously = false
 		timelineDelayMs = 0L

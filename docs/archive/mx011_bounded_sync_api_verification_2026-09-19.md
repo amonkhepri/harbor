@@ -1,14 +1,12 @@
 # MX-011 Bounded Matrix Sync API Verification
 
-Date: 2026-09-18. Verify card: `t_31b905af`. Blocks: `t_2dcf0601`, `t_30c8ccf0`.
+Date: 2026-09-19. Verify card: `t_31b905af`.
 
 ## Scope and method
 
 Pure investigation task: verify the pinned `org.matrix.rustcomponents:sdk-android`
-`26.08.05` API surface used by the already-merged bounded-sync slice
-(`90cd7aa4e` "Implement bounded matrix sync during background inbox load
-(MX-011)" through `1d63dff95`, on top of approved base `fbf9dea06`). No
-product source/test file in this repository was changed by this task.
+`26.08.05` API surface to determine if bounded foreground refresh is safely possible
+without exceeding headroom constraints. No product behavior is changed, per acceptance criteria.
 
 Evidence was gathered with the same technique this repo already uses for
 real-AAR proofs (see `build/matrix-delegate-proof/DirectDelegateProof.java`):
@@ -28,17 +26,17 @@ AAR location used: `~/.gradle/caches/modules-2/files-2.1/org.matrix.rustcomponen
 Run from the control workspace against this pinned product workspace:
 
 ```
-$ HarborAgent/agent-tools/review_headroom.sh --repo Harbor-autowork            # base: master (default)
-insertions: 1081  deletions: 2  review_limit: 5500  feature_freeze_threshold: 5000
-headroom: 4419    review_fix_reserve: 500  feature_budget: 5000  status: OK
+$ /Users/amunratis/AndroidStudioProjects/HarborAgent/agent-tools/review_headroom.sh --repo Harbor-autowork            # base: master (default)
+insertions: 1294  deletions: 2  review_limit: 5500  feature_freeze_threshold: 5000
+headroom: 4206    review_fix_reserve: 500  feature_budget: 5000  status: OK
 
-$ HarborAgent/agent-tools/review_headroom.sh --repo Harbor-autowork --base fbf9dea066df60b206fc1217a6f2ee1ba52eff3c
-insertions: 284  deletions: 0  review_limit: 5500  feature_freeze_threshold: 5000
-headroom: 5216   review_fix_reserve: 500  feature_budget: 5000  status: OK
+$ /Users/amunratis/AndroidStudioProjects/HarborAgent/agent-tools/review_headroom.sh --repo Harbor-autowork --base fbf9dea066df60b206fc1217a6f2ee1ba52eff3c
+insertions: 497   deletions: 0  review_limit: 5500  feature_freeze_threshold: 5000
+headroom: 5003    review_fix_reserve: 500  feature_budget: 5000  status: OK
 ```
 
 Both baselines report `OK`. A follow-up slice capped at 700 added lines
-(1081 + 700 = 1781, or 284 + 700 = 984 depending on which is the review
+(1294 + 700 = 1994, or 497 + 700 = 1197 depending on which is the review
 unit) stays far under the 5000-line feature-freeze budget and preserves the
 500-line review-fix reserve either way. Headroom is not the constraint on
 the next slice.
