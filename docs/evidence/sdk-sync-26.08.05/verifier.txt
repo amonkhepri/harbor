@@ -1,0 +1,3 @@
+FAIL: expected exactly one dynamic Proxy for TimelineListener and SyncListenerV2
+FAIL: pinned sdk-android:26.08.05 does not match the API shape Matrix SDK boundaries target.
+Exit status: 1
