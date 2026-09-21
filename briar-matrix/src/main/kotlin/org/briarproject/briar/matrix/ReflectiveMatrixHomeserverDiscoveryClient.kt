@@ -70,6 +70,8 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 	MatrixMessageSnapshotClient {
 
 	private var loginClient: Any? = null
+	private val lifecycleLock = Any()
+	private var activeGeneration: Any? = null
 
 	override fun discover(serverName: String): DiscoveryResult {
 		// `serverName(...)` and `inMemoryStore()` each return their own
@@ -116,8 +118,11 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		password: String,
 		storeConfiguration: MatrixStoreConfiguration?,
 	): RecoverableErrorDetail {
+		val sessionGeneration = Any()
+		synchronized(lifecycleLock) { activeGeneration = sessionGeneration }
 		val builders = ArrayList<Any>(4)
 		var client: Any? = null
+		var success = false
 		return try {
 			val builderClass = Class.forName(CLIENT_BUILDER_CLASS_NAME)
 			var builder = track(builders, builderClass.getConstructor().newInstance())
@@ -127,7 +132,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			)
 			builder = track(builders, applyStore(builders, builder, builderClass, storeConfiguration))
 			if (storeConfiguration != null) {
-				builder = track(builders, installSessionDelegate(builder, builderClass, storeConfiguration))
+				builder = track(builders, installSessionDelegate(builder, builderClass, storeConfiguration, sessionGeneration))
 			}
 			client = buildClient(builder, builderClass)
 			invokeUnit(
@@ -137,9 +142,11 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 				arrayOf(username, password, DEVICE_NAME, null),
 			)
 			if (storeConfiguration != null) persistSession(client, storeConfiguration)
-			close()
+			val oldClient = loginClient
 			loginClient = client
 			client = null
+			closeQuietly(oldClient)
+			success = true
 			NONE
 		} catch (e: InvocationTargetException) {
 			mapLoginFailure(e.targetException ?: e)
@@ -153,6 +160,11 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		} catch (e: Exception) {
 			mapLoginFailure(e)
 		} finally {
+			if (!success) {
+				synchronized(lifecycleLock) {
+					if (activeGeneration === sessionGeneration) activeGeneration = null
+				}
+			}
 			closeQuietly(client)
 			for (i in builders.indices.reversed()) closeQuietly(builders[i])
 		}
@@ -173,6 +185,9 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		if (!file.isFile) return MatrixLoginClient.RestoreResult.NotFound
 		val builders = ArrayList<Any>(4)
 		var client: Any? = null
+		val sessionGeneration = Any()
+		synchronized(lifecycleLock) { activeGeneration = sessionGeneration }
+		var success = false
 		return try {
 			val sessionClass = Class.forName(SESSION_CLASS_NAME)
 			val session = readSessionFile(file, sessionClass, storeConfiguration)
@@ -184,12 +199,15 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 					.invoke(builder, sessionClass.getMethod("getHomeserverUrl").invoke(session)),
 			)
 			builder = track(builders, applyStore(builders, builder, builderClass, storeConfiguration))
-			builder = track(builders, installSessionDelegate(builder, builderClass, storeConfiguration))
+			builder = track(builders, installSessionDelegate(builder, builderClass, storeConfiguration, sessionGeneration))
 			client = buildClient(builder, builderClass)
 			invokeUnit(client, "restoreSession", arrayOf(sessionClass), arrayOf(session))
 			val homeserverUrl = readHomeserverUrl(client)
+			val oldClient = loginClient
 			loginClient = client
 			client = null
+			closeQuietly(oldClient)
+			success = true
 			MatrixLoginClient.RestoreResult.Restored(homeserverUrl)
 		} catch (e: DiscoveryAdapterFailure) {
 			MatrixLoginClient.RestoreResult.NotFound
@@ -205,6 +223,11 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		} catch (e: IOException) {
 			MatrixLoginClient.RestoreResult.NotFound
 		} finally {
+			if (!success) {
+				synchronized(lifecycleLock) {
+					if (activeGeneration === sessionGeneration) activeGeneration = null
+				}
+			}
 			closeQuietly(client)
 			for (i in builders.indices.reversed()) closeQuietly(builders[i])
 		}
@@ -262,6 +285,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		builder: Any,
 		builderClass: Class<*>,
 		storeConfiguration: MatrixStoreConfiguration,
+		generation: Any,
 	): Any {
 		val delegateClass = Class.forName(SESSION_DELEGATE_CLASS_NAME)
 		val factory = sessionDelegateFactory ?: Class.forName(SESSION_DELEGATE_FACTORY_CLASS_NAME)
@@ -269,9 +293,17 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			.newInstance() as MatrixClientSessionDelegateFactory
 		val delegate = factory.create(
 			saveSession = { session ->
-				writeSessionFile(sessionFile(storeConfiguration), session, storeConfiguration)
+				synchronized(lifecycleLock) {
+					if (activeGeneration !== generation) throw IOException("Stale delegate callback")
+					writeSessionFile(sessionFile(storeConfiguration), session, storeConfiguration)
+				}
 			},
-			retrieveSession = { readSessionFileOrThrow(storeConfiguration) },
+			retrieveSession = { 
+				synchronized(lifecycleLock) {
+					if (activeGeneration !== generation) throw IOException("Stale delegate callback")
+					readSessionFileOrThrow(storeConfiguration)
+				}
+			},
 		)
 		return builderClass.getMethod("setSessionDelegate", delegateClass).invoke(builder, delegate)
 	}
@@ -731,6 +763,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 	override fun logout() {
 		val client = loginClient ?: return
 		loginClient = null
+		synchronized(lifecycleLock) { activeGeneration = null }
 		try {
 			invokeUnit(client, "logout", emptyArray(), emptyArray())
 		} catch (e: InterruptedException) {
@@ -744,6 +777,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 
 	@Synchronized
 	override fun close() {
+		synchronized(lifecycleLock) { activeGeneration = null }
 		closeQuietly(loginClient)
 		loginClient = null
 	}

@@ -268,7 +268,6 @@ class ReflectiveMatrixHomeserverDiscoveryClientTest {
 		// The client has not arrived yet at the moment discover() gives up.
 		assertEquals(0, FakeMatrixSdkState.clientCloseCount)
 
-		awaitCondition(timeoutMs = 2_000L) { FakeMatrixSdkState.clientCloseCount == 1 }
 		assertEquals(1, FakeMatrixSdkState.clientCloseCount)
 	}
 

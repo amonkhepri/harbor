@@ -63,7 +63,7 @@ class MatrixAuthSessionImpl(
 		) {
 			return
 		}
-		val storeConfiguration = storeConfigurationProvider?.getStoreConfiguration()
+		val storeConfiguration = storeConfigurationProvider?.newStoreConfiguration()
 		val result = loginClient.login(homeserverUrl, username, password, storeConfiguration)
 		snapshot = if (result == NONE) {
 			Snapshot(MatrixAuthState.READY, NONE, homeserverUrl)
@@ -75,10 +75,10 @@ class MatrixAuthSessionImpl(
 	@Synchronized
 	override fun logout() {
 		try {
+			storeConfigurationProvider?.invalidateStore()
 			loginClient.logout()
 		} finally {
 			loginClient.close()
-			storeConfigurationProvider?.getStoreConfiguration()?.let { it.directory.deleteRecursively() }
 			snapshot = HOMESERVER_SNAPSHOT
 		}
 	}

@@ -151,9 +151,10 @@ class MatrixAuthSessionImplTest {
 			sessionDelegateFactory = DirectMatrixClientSessionDelegateFactory(),
 		)
 
-	private class FakeStoreConfigurationProvider(private val configuration: MatrixStoreConfiguration) :
+	private class FakeStoreConfigurationProvider(private var configuration: MatrixStoreConfiguration?) :
 		MatrixStoreConfigurationProvider {
-		override fun getStoreConfiguration(): MatrixStoreConfiguration = configuration
+		override fun getStoreConfiguration(): MatrixStoreConfiguration? = configuration
+		override fun invalidateStore() { configuration?.directory?.deleteRecursively() }
 	}
 
 	private class FakeDiscoveryClient(private val result: DiscoveryResult) :

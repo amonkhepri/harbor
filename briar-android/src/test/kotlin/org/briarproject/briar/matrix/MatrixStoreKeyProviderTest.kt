@@ -67,6 +67,8 @@ class MatrixStoreKeyProviderTest {
 		val expectedKey = ByteArray(SecretKey.LENGTH) { it.toByte() }
 		val sourceKey = expectedKey.copyOf()
 		var requestedStoreDirectory: File? = null
+		val legacyDir = File(databaseDirectory, "matrix-sdk").also { it.mkdirs() }
+		File(legacyDir, "session").writeText("legacy")
 		val provider = ProtectedMatrixStoreConfigurationProvider(
 			config(databaseDirectory = databaseDirectory),
 			fakeAccountManager(),
