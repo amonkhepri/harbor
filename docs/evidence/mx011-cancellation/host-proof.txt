@@ -1,0 +1,22 @@
+kotlin-compiler-embeddable-1.9.25.jar e39ee0b62f0ad79fd45e84334f34aaee99c7291f591ddf68e2cdcdd09b73a472
+kotlin-stdlib-1.9.25.jar f9cdcdbff1f5de85380ae526977e683726c2aa42db1ed6e6e50ae89e496e95fd
+kotlin-script-runtime-1.9.25.jar 9933edd6677b6aac46d1b5effda1adee9063fbb04c746e78b403398158abaf47
+kotlin-reflect-1.6.10.jar 3277ac102ae17aad10a55abec75ff5696c8d109790396434b496e75087854203
+trove4j-1.0.20200330.jar c5fd725bffab51846bf3c77db1383c60aaaebfe1b7fe2f00d23fe1b7df0a439d
+annotations-13.0.jar ace2a10dc8e2d5fd34925ecac03e4988b2c0f851650c94b8cef49ba1bd111478
+kotlinx-coroutines-core-jvm-1.7.3.jar 1ab3acc38f3e7355c4f9d1ec62107a46fa73c899f3070d055e5d4373dfe67e12
+PASS immediate completion
+PASS suspended completion and overlap rejection
+PASS failure suspended=false
+PASS failure suspended=true
+PASS cancellation before start
+PASS deadline race successFirst=false
+PASS deadline race successFirst=true
+PASS logout drains terminal unwind
+PASS close drains terminal unwind
+PASS login replacement drains terminal unwind
+PASS restore replacement drains terminal unwind
+PASS timeout drains terminal unwind
+PASS foreground timeout returns before cleanup; join still drains
+PASS thread interruption requests cancellation and preserves interrupt
+Host ownership proof only; no native library loaded.

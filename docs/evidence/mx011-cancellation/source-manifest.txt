@@ -1,0 +1,17 @@
+ef8b3cfd45d4b9055e3d7afad633ac7ad60bae3d2874922bdee7ca3a7240141c release.json https://api.github.com/repos/matrix-org/matrix-rust-components-kotlin/releases/tags/sdk-v26.08.05
+93c2be0fbf58b1060669c843aa1f0aafca6be1879f711efa529fffef648f1a20 sdk.pom https://repo.maven.apache.org/maven2/org/matrix/rustcomponents/sdk-android/26.08.05/sdk-android-26.08.05.pom
+e385cc95d3d582c328b36d1ff90feac061102b001894b555e6b465a2e0eaabbf deadpool-sync.crate https://static.crates.io/crates/deadpool-sync/deadpool-sync-0.2.0.crate
+2657f61fb1dd8bf37a8d51093cc7cee4e77125b22f7753f49b289f831bec2bae deadpool-runtime.crate https://static.crates.io/crates/deadpool-runtime/deadpool-runtime-0.3.1.crate
+202caea871b69668250d242070849eb495be178ed697a3e98aebce5bc81a0bed tokio.crate https://static.crates.io/crates/tokio/tokio-1.53.1.crate
+ccf6c179d9dd5bb75dc209af95c3a458f022eacaa1f64761dc6c5f1642b79bb6 Cargo.lock https://raw.githubusercontent.com/matrix-org/matrix-rust-sdk/b629ba1e689fc45f588e485ee7aec901726cc2a8/Cargo.lock
+a6a2154adb164c9971087241bd742ba8d59f1b65c38563b5a6a5df1bd0b9a1d4 bindings_matrix-sdk-ffi_src_client.rs https://raw.githubusercontent.com/matrix-org/matrix-rust-sdk/b629ba1e689fc45f588e485ee7aec901726cc2a8/bindings/matrix-sdk-ffi/src/client.rs
+539d729458f721bbf714e0e799367cfb072781d5fb64c7e40c2cc70a5a7f34f9 bindings_matrix-sdk-ffi_Cargo.toml https://raw.githubusercontent.com/matrix-org/matrix-rust-sdk/b629ba1e689fc45f588e485ee7aec901726cc2a8/bindings/matrix-sdk-ffi/Cargo.toml
+0428617c23e0cd2523be17d9d829a6e59483897b415fd4784adb6922f87686e2 crates_matrix-sdk_src_client_mod.rs https://raw.githubusercontent.com/matrix-org/matrix-rust-sdk/b629ba1e689fc45f588e485ee7aec901726cc2a8/crates/matrix-sdk/src/client/mod.rs
+51fc88f89deea07322206473c6ca4f5961e99f241572df6a6c2b64dc4aae8724 crates_matrix-sdk-sqlite_src_state_store.rs https://raw.githubusercontent.com/matrix-org/matrix-rust-sdk/b629ba1e689fc45f588e485ee7aec901726cc2a8/crates/matrix-sdk-sqlite/src/state_store.rs
+d02bdc6c23ccd1fec33fecab123787c029b5109a780ea8feb1a567ccf17b61a3 crates_matrix-sdk-sqlite_src_utils.rs https://raw.githubusercontent.com/matrix-org/matrix-rust-sdk/b629ba1e689fc45f588e485ee7aec901726cc2a8/crates/matrix-sdk-sqlite/src/utils.rs
+a3ccc86206950522bbe85b33e3f5c28b964aa01f3b45fca4de41764c746c1202 uniffi_core_src_ffi_rustfuture_future.rs https://raw.githubusercontent.com/mozilla/uniffi-rs/e5f4821410bea19e71984ea5e06a7bc8b11ed9e5/uniffi_core/src/ffi/rustfuture/future.rs
+49b90b2dc3732e9a6473b849b68f86fc0cd1cae502937c50a3208936231b229f uniffi_core_src_ffi_rustfuture_scheduler.rs https://raw.githubusercontent.com/mozilla/uniffi-rs/e5f4821410bea19e71984ea5e06a7bc8b11ed9e5/uniffi_core/src/ffi/rustfuture/scheduler.rs
+ee5bbf188ab11709635d326a2e26235bb84626db061f4f0f437b227340726999 uniffi_core_src_ffi_rustfuture_mod.rs https://raw.githubusercontent.com/mozilla/uniffi-rs/e5f4821410bea19e71984ea5e06a7bc8b11ed9e5/uniffi_core/src/ffi/rustfuture/mod.rs
+23852a396ae889ed914d989df477ffe2cf1f777a7dea1766fe311ce776e2289f uniffi_bindgen_src_bindings_kotlin_templates_Async.kt https://raw.githubusercontent.com/mozilla/uniffi-rs/e5f4821410bea19e71984ea5e06a7bc8b11ed9e5/uniffi_bindgen/src/bindings/kotlin/templates/Async.kt
+fb00cc5b06cd032b242a90d9e5c0fb2278bc26a4474be0d1ba7b1d6482309d0c uniffi_macros_src_export_scaffolding.rs https://raw.githubusercontent.com/mozilla/uniffi-rs/e5f4821410bea19e71984ea5e06a7bc8b11ed9e5/uniffi_macros/src/export/scaffolding.rs
+PASS release Cargo.lock registry checksums
