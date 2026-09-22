@@ -305,14 +305,23 @@ sealed class TimelineDiff {
 }
 
 class Session(
-	val accessToken: String,
+	accessToken: String,
 	val refreshToken: String?,
 	val userId: String,
 	val deviceId: String,
 	val homeserverUrl: String,
 	val oauthData: String?,
 	val slidingSyncVersion: SlidingSyncVersion,
-)
+) {
+	init {
+		FakeMatrixSdkState.onSessionConstruct?.invoke()
+	}
+	private val token = accessToken
+	val accessToken: String get() {
+		FakeMatrixSdkState.onSessionRead?.invoke()
+		return token
+	}
+}
 
 /**
  * Mirrors the pinned SDK's `ClientSessionDelegate`: the app-supplied keychain bridge the SDK
@@ -368,6 +377,7 @@ class Client internal constructor(
 			slidingSyncVersion = SlidingSyncVersion.NATIVE,
 		)
 		sessionDelegate?.saveSessionInKeychain(session!!)
+		FakeMatrixSdkState.onLogin?.invoke()
 	}
 
 	suspend fun restoreSession(session: Session) {
@@ -376,11 +386,13 @@ class Client internal constructor(
 	}
 
 	suspend fun logout() {
+		FakeMatrixSdkState.onDispose?.invoke()
 		FakeMatrixSdkState.logoutCallCount++
 		session = null
 	}
 
 	fun close() {
+		FakeMatrixSdkState.onDispose?.invoke()
 		FakeMatrixSdkState.clientCloseCount++
 	}
 
@@ -463,7 +475,10 @@ class ClientBuilder : AutoCloseable {
 				} else {
 					continuation.resume(newClient())
 				}
-			}.start()
+			}.also {
+				FakeMatrixSdkState.builds.add(it)
+				it.start()
+			}
 		}
 	}
 
@@ -520,6 +535,14 @@ class MalformedRoom(
 }
 
 object FakeMatrixSdkState {
+	val builds = mutableListOf<Thread>()
+	fun awaitBuilds() {
+		builds.forEach {
+			it.join(3000)
+			check(!it.isAlive)
+		}
+		builds.clear()
+	}
 	var lastServerName: String? = null
 	var inMemoryStoreCalled = false
 	var sqliteStoreCalled = false
@@ -541,6 +564,10 @@ object FakeMatrixSdkState {
 	var logoutCallCount = 0
 	var tokenRefreshCallCount = 0
 	var lastSessionDelegate: ClientSessionDelegate? = null
+	var onSessionConstruct: (() -> Unit)? = null
+	var onSessionRead: (() -> Unit)? = null
+	var onLogin: (() -> Unit)? = null
+	var onDispose: (() -> Unit)? = null
 	var lastBuiltClient: Client? = null
 	var roomsToReturn: List<FakeRoomSpec> = emptyList()
 	var roomCloseCount = 0
@@ -570,6 +597,11 @@ object FakeMatrixSdkState {
 	var inReplyToDetailsDestroyCount = 0
 
 	fun reset() {
+		awaitBuilds()
+		onSessionConstruct = null
+		onSessionRead = null
+		onLogin = null
+		onDispose = null
 		lastServerName = null
 		inMemoryStoreCalled = false
 		sqliteStoreCalled = false

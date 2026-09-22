@@ -71,8 +71,16 @@ class ReflectiveMatrixHomeserverDiscoveryClientTest {
 		loggedInClient.simulateTokenRefresh("refreshed-access-token")
 		assertEquals(1, FakeMatrixSdkState.tokenRefreshCallCount)
 
+		// Model a cold-process fixture in a path that has never been opened here.
+		client.close()
+		val coldStore = MatrixStoreConfiguration(
+			testFolder.newFolder("cold"),
+			storeConfiguration.databaseName,
+			storeConfiguration.copyEncryptionKey(),
+		)
+		storeConfiguration.directory.copyRecursively(coldStore.directory, overwrite = true)
 		val freshClient = newSessionClient()
-		val restoreResult = freshClient.restore(storeConfiguration)
+		val restoreResult = freshClient.restore(coldStore)
 
 		assertEquals(RestoreResult.Restored("https://matrix.example.org"), restoreResult)
 		assertEquals("refreshed-access-token", FakeMatrixSdkState.lastBuiltClient!!.session().accessToken)
@@ -267,7 +275,7 @@ class ReflectiveMatrixHomeserverDiscoveryClientTest {
 		assertEquals(DiscoveryResult.Failed(HOMESERVER_DISCOVERY_FAILED), result)
 		// The client has not arrived yet at the moment discover() gives up.
 		assertEquals(0, FakeMatrixSdkState.clientCloseCount)
-
+		FakeMatrixSdkState.awaitBuilds()
 		assertEquals(1, FakeMatrixSdkState.clientCloseCount)
 	}
 

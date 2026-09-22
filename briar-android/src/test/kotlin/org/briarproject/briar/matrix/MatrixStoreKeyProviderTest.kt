@@ -98,6 +98,66 @@ class MatrixStoreKeyProviderTest {
 		assertEquals(null, provider.getStoreConfiguration())
 	}
 
+	@Test
+	fun testSelectionSurvivesProviderRecreationAndLogoutNeverFallsBackToLegacy() {
+		val database = testFolder.newFolder("selection")
+		val key = ByteArray(32) { it.toByte() }
+		fun provider() = ProtectedMatrixStoreConfigurationProvider(
+			config(databaseDirectory = database),
+			fakeAccountManager(),
+			keyProvider(key),
+		)
+		val legacy = File(database, "matrix-sdk").also { it.mkdirs() }
+		File(legacy, "session").writeText("encrypted legacy session")
+		val migrated = checkNotNull(provider().getStoreConfiguration())
+		assertEquals(legacy, migrated.directory)
+		assertArrayEquals(key, migrated.copyEncryptionKey())
+		assertEquals(legacy, provider().getStoreConfiguration()!!.directory)
+		provider().invalidateStore()
+		assertNull(provider().getStoreConfiguration())
+		assertEquals(true, File(legacy, "session").isFile)
+		val replacement = provider().newStoreConfiguration()!!
+		assertNotEquals(legacy, replacement.directory)
+		assertEquals(replacement.directory, provider().getStoreConfiguration()!!.directory)
+		val next = provider().newStoreConfiguration()!!
+		assertNotEquals(replacement.directory, next.directory)
+		assertArrayEquals(key, next.copyEncryptionKey())
+	}
+
+	@Test
+	fun testLegacyMigrationKeepsProtectedKeyAndEncryptedSessionRestorable() {
+		val database = testFolder.newFolder("migration")
+		val keys = testFolder.newFolder("migration-keys")
+		val config = config(keyDirectory = keys, databaseDirectory = database)
+		val account = fakeAccountManager()
+		val legacy = File(database, "matrix-sdk")
+		val key = ProtectedMatrixStoreKeyProvider(config, account).getStoreEncryptionKey(legacy)!!
+		// Generate an encrypted fixture elsewhere so the legacy path models a cold process.
+		val fixture = MatrixStoreConfiguration(testFolder.newFolder("fixture"), "matrix-sdk", key)
+		val client = ReflectiveMatrixHomeserverDiscoveryClient(
+			sessionDelegateFactory = DirectMatrixClientSessionDelegateFactory(),
+		)
+		assertEquals(
+			org.briarproject.briar.api.matrix.MatrixAuthSession.RecoverableErrorDetail.NONE,
+			client.login("https://matrix.example.org", "alice", "password", fixture),
+		)
+		client.close()
+		legacy.mkdirs()
+		File(fixture.directory, "session").copyTo(File(legacy, "session"))
+		val provider = ProtectedMatrixStoreConfigurationProvider(config, account)
+		val migrated = provider.getStoreConfiguration()!!
+		assertArrayEquals(key, migrated.copyEncryptionKey())
+		assertEquals(
+			MatrixLoginClient.RestoreResult.Restored("https://matrix.example.org"),
+			client.restore(migrated),
+		)
+		client.logout()
+		provider.invalidateStore()
+		assertNull(ProtectedMatrixStoreConfigurationProvider(config, account).getStoreConfiguration())
+		assertEquals(false, File(legacy, "session").exists())
+		org.matrix.rustcomponents.sdk.FakeMatrixSdkState.reset()
+	}
+
 	private fun config(
 		keyDirectory: File = testFolder.root,
 		strengthener: KeyStrengthener = FakeKeyStrengthener(),

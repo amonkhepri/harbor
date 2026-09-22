@@ -82,7 +82,7 @@ class MatrixAuthSessionImplTest {
 	}
 
 	@Test
-	fun `successful login persists so a fresh session instance restores without re-authenticating`() {
+	fun `successful login persists for restoration in a cold process`() {
 		val storeConfiguration = fakeStoreConfiguration()
 		val provider = FakeStoreConfigurationProvider(storeConfiguration)
 		val client = newSessionClient()
@@ -96,7 +96,15 @@ class MatrixAuthSessionImplTest {
 		assertEquals(MatrixAuthState.CLOSED, session.getSnapshot().authState)
 
 		val freshClient = newSessionClient()
-		val freshSession = MatrixAuthSessionImpl(freshClient, freshClient, provider)
+		// Isolated fixture models a new process; a retired live path cannot be reopened.
+		val coldStore = MatrixStoreConfiguration(
+			testFolder.newFolder("cold"),
+			storeConfiguration.databaseName,
+			storeConfiguration.copyEncryptionKey(),
+		)
+		storeConfiguration.directory.copyRecursively(coldStore.directory, overwrite = true)
+		val freshSession =
+			MatrixAuthSessionImpl(freshClient, freshClient, FakeStoreConfigurationProvider(coldStore))
 		freshSession.start()
 
 		val snapshot = freshSession.getSnapshot()
@@ -151,10 +159,13 @@ class MatrixAuthSessionImplTest {
 			sessionDelegateFactory = DirectMatrixClientSessionDelegateFactory(),
 		)
 
-	private class FakeStoreConfigurationProvider(private var configuration: MatrixStoreConfiguration?) :
-		MatrixStoreConfigurationProvider {
+	private class FakeStoreConfigurationProvider(
+		private var configuration: MatrixStoreConfiguration?,
+	) : MatrixStoreConfigurationProvider {
 		override fun getStoreConfiguration(): MatrixStoreConfiguration? = configuration
-		override fun invalidateStore() { configuration?.directory?.deleteRecursively() }
+		override fun invalidateStore() {
+			configuration = null
+		}
 	}
 
 	private class FakeDiscoveryClient(private val result: DiscoveryResult) :

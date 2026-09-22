@@ -13,6 +13,7 @@ import org.briarproject.briar.matrix.MatrixLoginClient.RestoreResult
  * [MatrixStoreConfiguration], a successful login persists to that store's directory so
  * [start] on a fresh instance resumes without re-authenticating; logout invalidates it.
  * `close()` is process/session teardown only and never touches the persisted store.
+ * Reopening a retired native store requires a cold process; native work may outlive close.
  */
 class MatrixAuthSessionImpl(
 	private val discoveryClient: MatrixHomeserverDiscoveryClient,
@@ -68,6 +69,7 @@ class MatrixAuthSessionImpl(
 		snapshot = if (result == NONE) {
 			Snapshot(MatrixAuthState.READY, NONE, homeserverUrl)
 		} else {
+			storeConfigurationProvider?.invalidateStore()
 			Snapshot(MatrixAuthState.RECOVERABLE_ERROR, result, homeserverUrl)
 		}
 	}
@@ -75,11 +77,14 @@ class MatrixAuthSessionImpl(
 	@Synchronized
 	override fun logout() {
 		try {
-			storeConfigurationProvider?.invalidateStore()
 			loginClient.logout()
 		} finally {
-			loginClient.close()
-			snapshot = HOMESERVER_SNAPSHOT
+			try {
+				storeConfigurationProvider?.invalidateStore()
+			} finally {
+				loginClient.close()
+				snapshot = HOMESERVER_SNAPSHOT
+			}
 		}
 	}
 

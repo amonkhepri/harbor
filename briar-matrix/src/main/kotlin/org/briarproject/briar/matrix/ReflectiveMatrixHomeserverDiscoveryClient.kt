@@ -72,6 +72,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 	private var loginClient: Any? = null
 	private val lifecycleLock = Any()
 	private var activeGeneration: Any? = null
+	private var activeStore: MatrixStoreConfiguration? = null
 
 	override fun discover(serverName: String): DiscoveryResult {
 		// `serverName(...)` and `inMemoryStore()` each return their own
@@ -119,11 +120,16 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		storeConfiguration: MatrixStoreConfiguration?,
 	): RecoverableErrorDetail {
 		val sessionGeneration = Any()
-		synchronized(lifecycleLock) { activeGeneration = sessionGeneration }
+		beginGeneration(sessionGeneration)
 		val builders = ArrayList<Any>(4)
 		var client: Any? = null
 		var success = false
+		var claimedStore = false
 		return try {
+			if (storeConfiguration != null) {
+				claimStore(storeConfiguration)
+				claimedStore = true
+			}
 			val builderClass = Class.forName(CLIENT_BUILDER_CLASS_NAME)
 			var builder = track(builders, builderClass.getConstructor().newInstance())
 			builder = track(
@@ -132,7 +138,11 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			)
 			builder = track(builders, applyStore(builders, builder, builderClass, storeConfiguration))
 			if (storeConfiguration != null) {
-				builder = track(builders, installSessionDelegate(builder, builderClass, storeConfiguration, sessionGeneration))
+				builder =
+					track(
+						builders,
+						installSessionDelegate(builder, builderClass, storeConfiguration, sessionGeneration),
+					)
 			}
 			client = buildClient(builder, builderClass)
 			invokeUnit(
@@ -141,11 +151,10 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 				arrayOf(String::class.java, String::class.java, String::class.java, String::class.java),
 				arrayOf(username, password, DEVICE_NAME, null),
 			)
-			if (storeConfiguration != null) persistSession(client, storeConfiguration)
-			val oldClient = loginClient
+			if (storeConfiguration != null) persistSession(client, storeConfiguration, sessionGeneration)
+			activeStore = storeConfiguration
 			loginClient = client
 			client = null
-			closeQuietly(oldClient)
 			success = true
 			NONE
 		} catch (e: InvocationTargetException) {
@@ -163,6 +172,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			if (!success) {
 				synchronized(lifecycleLock) {
 					if (activeGeneration === sessionGeneration) activeGeneration = null
+					if (claimedStore && storeConfiguration != null) sessionFile(storeConfiguration).delete()
 				}
 			}
 			closeQuietly(client)
@@ -175,22 +185,29 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 	 * sidecar file and feeds it back through `Client.restoreSession(Session,
 	 * Continuation)` on a client freshly built against the same store. A missing
 	 * sidecar file yields [MatrixLoginClient.RestoreResult.NotFound], not a
-	 * failure; the store itself is not opened in that case.
+	 * failure; the store itself is not opened in that case. A store already opened in
+	 * this process is quarantined until process exit, since close cannot prove quiescence.
 	 */
 	@Synchronized
 	override fun restore(
 		storeConfiguration: MatrixStoreConfiguration,
 	): MatrixLoginClient.RestoreResult {
+		val sessionGeneration = Any()
+		beginGeneration(sessionGeneration)
 		val file = sessionFile(storeConfiguration)
-		if (!file.isFile) return MatrixLoginClient.RestoreResult.NotFound
+		if (!file.isFile) {
+			synchronized(lifecycleLock) { activeGeneration = null }
+			return MatrixLoginClient.RestoreResult.NotFound
+		}
 		val builders = ArrayList<Any>(4)
 		var client: Any? = null
-		val sessionGeneration = Any()
-		synchronized(lifecycleLock) { activeGeneration = sessionGeneration }
 		var success = false
+		var claimedStore = false
 		return try {
 			val sessionClass = Class.forName(SESSION_CLASS_NAME)
 			val session = readSessionFile(file, sessionClass, storeConfiguration)
+			claimStore(storeConfiguration)
+			claimedStore = true
 			val builderClass = Class.forName(CLIENT_BUILDER_CLASS_NAME)
 			var builder = track(builders, builderClass.getConstructor().newInstance())
 			builder = track(
@@ -199,14 +216,17 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 					.invoke(builder, sessionClass.getMethod("getHomeserverUrl").invoke(session)),
 			)
 			builder = track(builders, applyStore(builders, builder, builderClass, storeConfiguration))
-			builder = track(builders, installSessionDelegate(builder, builderClass, storeConfiguration, sessionGeneration))
+			builder =
+				track(
+					builders,
+					installSessionDelegate(builder, builderClass, storeConfiguration, sessionGeneration),
+				)
 			client = buildClient(builder, builderClass)
 			invokeUnit(client, "restoreSession", arrayOf(sessionClass), arrayOf(session))
 			val homeserverUrl = readHomeserverUrl(client)
-			val oldClient = loginClient
+			activeStore = storeConfiguration
 			loginClient = client
 			client = null
-			closeQuietly(oldClient)
 			success = true
 			MatrixLoginClient.RestoreResult.Restored(homeserverUrl)
 		} catch (e: DiscoveryAdapterFailure) {
@@ -226,6 +246,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			if (!success) {
 				synchronized(lifecycleLock) {
 					if (activeGeneration === sessionGeneration) activeGeneration = null
+					if (claimedStore) file.delete()
 				}
 			}
 			closeQuietly(client)
@@ -269,10 +290,45 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 
 	private fun encodeHex(bytes: ByteArray): String = bytes.joinToString("") { "%02x".format(it) }
 
-	/** Reads [client]'s post-login `Session` and persists it to [storeConfiguration]'s sidecar file. */
-	private fun persistSession(client: Any, storeConfiguration: MatrixStoreConfiguration) {
+	/** Reads [client]'s post-login `Session` and persists it to [store]'s sidecar file. */
+	private fun persistSession(client: Any, store: MatrixStoreConfiguration, generation: Any) {
 		val session = client.javaClass.getMethod("session").invoke(client)
-		writeSessionFile(sessionFile(storeConfiguration), session, storeConfiguration)
+		saveSession(session, store, generation)
+	}
+
+	// SDK getters may block or re-enter lifecycle methods. Only local I/O and generation
+	// validation run under this lock; never call native code while holding it.
+	private fun saveSession(session: Any, store: MatrixStoreConfiguration, generation: Any) {
+		synchronized(lifecycleLock) { requireGeneration(generation) }
+		val bytes = serializeSession(session)
+		try {
+			synchronized(lifecycleLock) {
+				requireGeneration(generation)
+				writeEncryptedAtomic(sessionFile(store), bytes, store)
+			}
+		} finally {
+			bytes.fill(0)
+		}
+	}
+
+	private fun requireGeneration(generation: Any) {
+		if (activeGeneration !== generation) throw IOException("Stale delegate callback")
+	}
+
+	private fun beginGeneration(generation: Any) {
+		synchronized(lifecycleLock) { activeGeneration = generation }
+		val previous = loginClient
+		loginClient = null
+		activeStore = null
+		closeQuietly(previous)
+	}
+
+	private fun claimStore(store: MatrixStoreConfiguration) = synchronized(openedStores) {
+		// A wrapper's close does not establish native quiescence. Keep the directory
+		// quarantined until process exit, including failed builds and failed restores.
+		if (!openedStores.add(store.directory.canonicalPath)) {
+			throw IOException("Matrix store already opened in this process")
+		}
 	}
 
 	/**
@@ -292,46 +348,28 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			.getConstructor()
 			.newInstance() as MatrixClientSessionDelegateFactory
 		val delegate = factory.create(
-			saveSession = { session ->
-				synchronized(lifecycleLock) {
-					if (activeGeneration !== generation) throw IOException("Stale delegate callback")
-					writeSessionFile(sessionFile(storeConfiguration), session, storeConfiguration)
+			saveSession = { session -> saveSession(session, storeConfiguration, generation) },
+			retrieveSession = {
+				val bytes = synchronized(lifecycleLock) {
+					requireGeneration(generation)
+					readDecrypted(sessionFile(storeConfiguration), storeConfiguration)
 				}
-			},
-			retrieveSession = { 
-				synchronized(lifecycleLock) {
-					if (activeGeneration !== generation) throw IOException("Stale delegate callback")
-					readSessionFileOrThrow(storeConfiguration)
+				try {
+					val session = deserializeSession(bytes, Class.forName(SESSION_CLASS_NAME))
+					synchronized(lifecycleLock) {
+						requireGeneration(generation)
+						session
+					}
+				} finally {
+					bytes.fill(0)
 				}
 			},
 		)
 		return builderClass.getMethod("setSessionDelegate", delegateClass).invoke(builder, delegate)
 	}
 
-	private fun readSessionFileOrThrow(storeConfiguration: MatrixStoreConfiguration): Any {
-		val file = sessionFile(storeConfiguration)
-		if (!file.isFile) throw IOException("no persisted Matrix session")
-		return try {
-			readSessionFile(file, Class.forName(SESSION_CLASS_NAME), storeConfiguration)
-		} catch (e: IOException) {
-			throw IOException("persisted Matrix session sidecar could not be read", e)
-		} catch (e: ReflectiveOperationException) {
-			throw IOException("persisted Matrix session sidecar could not be reconstructed", e)
-		}
-	}
-
-	/**
-	 * Serializes an SDK `Session`'s fields via its public getters, AES-256-GCM-encrypts them
-	 * under [storeConfiguration]'s own encryption key, and writes the result atomically (temp
-	 * file in the same directory + [File.renameTo]) so a crash or concurrent
-	 * `saveSessionInKeychain` callback can never observe a partially written or plaintext file.
-	 * Never logs field values.
-	 */
-	private fun writeSessionFile(
-		file: File,
-		session: Any,
-		storeConfiguration: MatrixStoreConfiguration,
-	) {
+	/** Copies SDK fields outside the lifecycle lock; [saveSession] fences the encrypted commit. */
+	private fun serializeSession(session: Any): ByteArray {
 		val sessionClass = session.javaClass
 		val accessToken = sessionClass.getMethod("getAccessToken").invoke(session) as String
 		val refreshToken = sessionClass.getMethod("getRefreshToken").invoke(session) as String?
@@ -353,7 +391,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 				out.writeUTF(slidingSyncVersionName)
 			}
 		}.toByteArray()
-		writeEncryptedAtomic(file, plaintext, storeConfiguration)
+		return plaintext
 	}
 
 	private fun writeNullableUtf(out: DataOutputStream, value: String?) {
@@ -402,14 +440,22 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		}
 	}
 
-	/** Reconstructs an SDK `Session` reflectively from [file], matching [writeSessionFile]'s layout. */
+	/** Reconstructs an SDK `Session` reflectively from [file], matching [serializeSession]'s layout. */
 	private fun readSessionFile(
 		file: File,
 		sessionClass: Class<*>,
 		storeConfiguration: MatrixStoreConfiguration,
 	): Any {
 		val plaintext = readDecrypted(file, storeConfiguration)
-		return DataInputStream(ByteArrayInputStream(plaintext)).use { input ->
+		return try {
+			deserializeSession(plaintext, sessionClass)
+		} finally {
+			plaintext.fill(0)
+		}
+	}
+
+	private fun deserializeSession(plaintext: ByteArray, sessionClass: Class<*>): Any =
+		DataInputStream(ByteArrayInputStream(plaintext)).use { input ->
 			val accessToken = input.readUTF()
 			val refreshToken = readNullableUtf(input)
 			val userId = input.readUTF()
@@ -438,7 +484,6 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 				slidingSyncVersion,
 			)
 		}
-	}
 
 	private fun readDecrypted(file: File, storeConfiguration: MatrixStoreConfiguration): ByteArray {
 		val bytes = file.readBytes()
@@ -761,9 +806,13 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 
 	@Synchronized
 	override fun logout() {
+		synchronized(lifecycleLock) {
+			activeGeneration = null
+			activeStore?.let { sessionFile(it).delete() }
+		}
+		activeStore = null
 		val client = loginClient ?: return
 		loginClient = null
-		synchronized(lifecycleLock) { activeGeneration = null }
 		try {
 			invokeUnit(client, "logout", emptyArray(), emptyArray())
 		} catch (e: InterruptedException) {
@@ -778,8 +827,10 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 	@Synchronized
 	override fun close() {
 		synchronized(lifecycleLock) { activeGeneration = null }
-		closeQuietly(loginClient)
+		val client = loginClient
 		loginClient = null
+		activeStore = null
+		closeQuietly(client)
 	}
 
 	/**
@@ -963,6 +1014,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 	private class SnapshotAdapterFailure : Exception()
 
 	private companion object {
+		val openedStores = HashSet<String>()
 		const val CLIENT_BUILDER_CLASS_NAME = "org.matrix.rustcomponents.sdk.ClientBuilder"
 		const val SQLITE_STORE_BUILDER_CLASS_NAME = "org.matrix.rustcomponents.sdk.SqliteStoreBuilder"
 		const val SESSION_CLASS_NAME = "org.matrix.rustcomponents.sdk.Session"

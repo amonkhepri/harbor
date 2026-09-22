@@ -40,7 +40,9 @@ class ProtectedMatrixStoreConfigurationProvider @JvmOverloads constructor(
 
 	override fun getStoreConfiguration(): MatrixStoreConfiguration? = synchronized(ownershipLock) {
 		try {
-			val name = if (selection.exists()) selection.readText() else {
+			val name = if (selection.exists()) {
+				selection.readText()
+			} else {
 				val legacy = File(databaseConfig.databaseDirectory, STORE_NAME)
 				val initial = if (File(legacy, "session").isFile) STORE_NAME else freshName()
 				select(initial)
@@ -81,7 +83,10 @@ class ProtectedMatrixStoreConfigurationProvider @JvmOverloads constructor(
 		selection.parentFile?.mkdirs()
 		val temp = File.createTempFile("matrix-selection-", ".tmp", selection.parentFile)
 		try {
-			FileOutputStream(temp).use { it.write(name.toByteArray()); it.fd.sync() }
+			FileOutputStream(temp).use {
+				it.write(name.toByteArray())
+				it.fd.sync()
+			}
 			if (!temp.renameTo(selection)) throw IOException("Cannot persist Matrix store selection")
 		} finally {
 			temp.delete()
