@@ -127,6 +127,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		var client: Any? = null
 		var success = false
 		var claimedStore = false
+		var failureDetail: RecoverableErrorDetail? = null
 		return try {
 			if (storeConfiguration != null) {
 				claimStore(storeConfiguration)
@@ -160,7 +161,9 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			success = true
 			NONE
 		} catch (e: InvocationTargetException) {
-			mapLoginFailure(e.targetException ?: e)
+			val mapped = mapLoginFailure(e.targetException ?: e)
+			failureDetail = mapped
+			mapped
 		} catch (e: InterruptedException) {
 			Thread.currentThread().interrupt()
 			LOGIN_FAILED
@@ -169,12 +172,14 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		} catch (e: LinkageError) {
 			LOGIN_FAILED
 		} catch (e: Exception) {
-			mapLoginFailure(e)
+			val mapped = mapLoginFailure(e)
+			failureDetail = mapped
+			mapped
 		} finally {
 			if (!success) {
 				synchronized(lifecycleLock) {
 					if (activeGeneration === sessionGeneration) activeGeneration = null
-					if (claimedStore && storeConfiguration != null) sessionFile(storeConfiguration).delete()
+					if (claimedStore && storeConfiguration != null && failureDetail == INVALID_CREDENTIALS) sessionFile(storeConfiguration).delete()
 				}
 			}
 			closeQuietly(client)
@@ -205,6 +210,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		var client: Any? = null
 		var success = false
 		var claimedStore = false
+		var failureDetail: RecoverableErrorDetail? = null
 		return try {
 			val sessionClass = Class.forName(SESSION_CLASS_NAME)
 			val session = readSessionFile(file, sessionClass, storeConfiguration)
@@ -234,7 +240,9 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		} catch (e: DiscoveryAdapterFailure) {
 			MatrixLoginClient.RestoreResult.NotFound
 		} catch (e: InvocationTargetException) {
-			MatrixLoginClient.RestoreResult.Failed(mapThrowable(e.targetException ?: e))
+			val mapped = mapThrowable(e.targetException ?: e)
+			failureDetail = mapped
+			MatrixLoginClient.RestoreResult.Failed(mapped)
 		} catch (e: ReflectiveOperationException) {
 			MatrixLoginClient.RestoreResult.NotFound
 		} catch (e: LinkageError) {
@@ -248,7 +256,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			if (!success) {
 				synchronized(lifecycleLock) {
 					if (activeGeneration === sessionGeneration) activeGeneration = null
-					if (claimedStore) file.delete()
+					if (claimedStore && failureDetail == INVALID_CREDENTIALS) file.delete()
 				}
 			}
 			closeQuietly(client)
@@ -318,7 +326,13 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 	}
 
 	private fun beginGeneration(generation: Any) {
-		synchronized(lifecycleLock) { activeGeneration = generation }
+		val handle: Any?
+		synchronized(lifecycleLock) { 
+			activeGeneration = generation 
+			handle = activeSyncHandle
+			activeSyncHandle = null
+		}
+		cancelAndCloseQuietly(handle)
 		val previous = loginClient
 		loginClient = null
 		activeStore = null
@@ -569,19 +583,25 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		null
 	}
 
+	private var activeSyncSuccess: java.util.concurrent.atomic.AtomicBoolean? = null
+
 	override fun refreshJoinedRooms(timeoutMs: Long): Boolean {
 		val client = synchronized(lifecycleLock) { loginClient } ?: return false
 		
 		val latch: CountDownLatch
+		val successFlag: java.util.concurrent.atomic.AtomicBoolean
 		var initiator = false
 		
 		synchronized(lifecycleLock) {
 			if (loginClient !== client) return false
 			if (activeSyncLatch != null) {
 				latch = activeSyncLatch!!
+				successFlag = activeSyncSuccess!!
 			} else {
 				latch = CountDownLatch(1)
 				activeSyncLatch = latch
+				successFlag = java.util.concurrent.atomic.AtomicBoolean(false)
+				activeSyncSuccess = successFlag
 				initiator = true
 			}
 		}
@@ -589,6 +609,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		if (!initiator) {
 			return try {
 				latch.await(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
+				successFlag.get()
 			} catch (e: InterruptedException) {
 				false
 			}
@@ -607,6 +628,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 				arrayOf(listenerClass),
 			) { _, method, _ ->
 				if (method.name == "onUpdate") {
+					successFlag.set(true)
 					latch.countDown()
 				}
 				null
@@ -624,11 +646,10 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 				}
 			}
 			
-			return if (handle != null) {
+			if (handle != null) {
 				latch.await(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
-			} else {
-				false
 			}
+			return successFlag.get()
 		} catch (e: Exception) {
 			return false
 		} catch (e: LinkageError) {
@@ -638,6 +659,9 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			synchronized(lifecycleLock) {
 				if (activeSyncLatch === latch) {
 					activeSyncLatch = null
+				}
+				if (activeSyncSuccess === successFlag) {
+					activeSyncSuccess = null
 				}
 				if (activeSyncHandle === handle) {
 					activeSyncHandle = null
@@ -886,11 +910,15 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 
 	@Synchronized
 	override fun logout() {
+		val handle: Any?
 		synchronized(lifecycleLock) {
 			activeGeneration = null
 			activeStore?.let { sessionFile(it).delete() }
+			activeStore = null
+			handle = activeSyncHandle
+			activeSyncHandle = null
 		}
-		activeStore = null
+		cancelAndCloseQuietly(handle)
 		val client = loginClient ?: return
 		loginClient = null
 		try {

@@ -233,6 +233,7 @@ class MatrixRoomConnectorTest {
 		assertEquals(null, messageSnapshotClient.lastRequestedRoomId)
 	}
 
+
 	private fun connector(
 		roomSnapshotClient: MatrixRoomSnapshotClient = FakeRoomSnapshotClient(emptyList()),
 		messageSnapshotClient: MatrixMessageSnapshotClient = FakeMessageSnapshotClient(emptyList()),

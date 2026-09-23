@@ -1,4 +1,0 @@
-AAR: /Users/amunratis/.gradle/caches/modules-2/files-2.1/org.matrix.rustcomponents/sdk-android/26.08.05/a061eb68cfaf0aeca4bc356ed7bb0add4c8aad5b/sdk-android-26.08.05.aar
-SHA256: 89e78c7d457e522367f06d3145b58b67fb29ceffaa22d088e94240489a50ccd1
-Verifier SHA256: a1fe8804eea9764ed8906df4156b5e1631ecbe27a8f44dcf359cc371d26b0b62
-21.0.8

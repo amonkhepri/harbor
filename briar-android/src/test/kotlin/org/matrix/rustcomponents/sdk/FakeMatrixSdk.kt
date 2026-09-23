@@ -389,6 +389,7 @@ class Client internal constructor(
 	}
 
 	fun syncV2(settings: SyncSettingsV2, listener: SyncListenerV2): TaskHandle {
+		FakeMatrixSdkState.syncV2Callback?.let { it(listener); return TaskHandle() }
 		Thread {
 			Thread.sleep(5)
 			listener.onUpdate(SyncResponseV2())
@@ -398,6 +399,7 @@ class Client internal constructor(
 
 	suspend fun restoreSession(session: Session) {
 		FakeMatrixSdkState.restoreSessionCallCount++
+		FakeMatrixSdkState.restoreSessionException?.let { throw it }
 		this.session = session
 	}
 
@@ -577,6 +579,7 @@ object FakeMatrixSdkState {
 	var lastPassphrase: String? = null
 	var loginCallCount = 0
 	var restoreSessionCallCount = 0
+	var restoreSessionException: Exception? = null
 	var logoutCallCount = 0
 	var tokenRefreshCallCount = 0
 	var lastSessionDelegate: ClientSessionDelegate? = null
@@ -604,6 +607,7 @@ object FakeMatrixSdkState {
 	var paginationFailureToThrow: Exception? = null
 	var timelineCloseCount = 0
 	var taskCancelCount = 0
+	var syncV2Callback: ((SyncListenerV2) -> Unit)? = null
 	var taskCloseCount = 0
 	var timelineDiffDestroyCount = 0
 	var timelineItemCloseCount = 0
@@ -636,6 +640,7 @@ object FakeMatrixSdkState {
 		lastPassphrase = null
 		loginCallCount = 0
 		restoreSessionCallCount = 0
+		restoreSessionException = null
 		logoutCallCount = 0
 		tokenRefreshCallCount = 0
 		lastSessionDelegate = null
@@ -659,6 +664,7 @@ object FakeMatrixSdkState {
 		paginationFailureToThrow = null
 		timelineCloseCount = 0
 		taskCancelCount = 0
+		syncV2Callback = null
 		taskCloseCount = 0
 		timelineDiffDestroyCount = 0
 		timelineItemCloseCount = 0

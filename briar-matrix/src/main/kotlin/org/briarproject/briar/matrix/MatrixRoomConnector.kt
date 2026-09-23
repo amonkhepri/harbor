@@ -40,10 +40,11 @@ class MatrixRoomConnector(
 
 	override fun getRecentThreads(limit: Int): List<ConnectorThread> {
 		if (!isAuthorized()) return emptyList()
-
-		if (!roomSnapshotClient.refreshJoinedRooms(10000L)) {
-			throw RuntimeException("Matrix bounded sync failed")
+		
+		if (MatrixConnector.SUPPORTS_BOUNDED_REFRESH) {
+			roomSnapshotClient.refreshJoinedRooms(10000L)
 		}
+		
 		return roomSnapshotClient.getJoinedRooms(limit).map { snapshot ->
 			val latest = messageSnapshotClient.getRecentMessages(snapshot.roomId, 1)?.lastOrNull()
 			ConnectorThread(

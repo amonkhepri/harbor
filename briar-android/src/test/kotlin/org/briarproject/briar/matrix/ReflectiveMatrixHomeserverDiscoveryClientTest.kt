@@ -31,7 +31,6 @@ class ReflectiveMatrixHomeserverDiscoveryClientTest {
 	fun tearDown() {
 		FakeMatrixSdkState.reset()
 	}
-
 	@Test
 	fun `login writes an encrypted atomic sidecar with no leftover temp file`() {
 		val storeConfiguration = fakeStoreConfiguration()
@@ -368,4 +367,96 @@ class ReflectiveMatrixHomeserverDiscoveryClientTest {
 		val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs)
 		while (!condition() && System.nanoTime() < deadline) Thread.sleep(10L)
 	}
+
+	@Test
+	fun `refreshJoinedRooms fails coalesced refresh when initiator times out`() {
+		val client = newSessionClient()
+		client.login("https://matrix.example.org", "alice", "swordfish")
+
+		FakeMatrixSdkState.syncV2Callback = { listener ->
+			// Do not call onUpdate so it times out
+		}
+
+		val executor = java.util.concurrent.Executors.newFixedThreadPool(2)
+		try {
+			val future1 = executor.submit(java.util.concurrent.Callable { client.refreshJoinedRooms(100) })
+			Thread.sleep(20)
+			val future2 = executor.submit(java.util.concurrent.Callable { client.refreshJoinedRooms(100) })
+
+			assertFalse("Initiator should time out and return false", future1.get())
+			assertFalse("Coalesced joiner should return false when initiator fails", future2.get())
+		} finally {
+			executor.shutdownNow()
+		}
+	}
+
+	@Test
+	fun `logout cancels active sync handle and releases it`() {
+		val client = newSessionClient()
+		client.login("https://matrix.example.org", "alice", "swordfish")
+
+		val latch = java.util.concurrent.CountDownLatch(1)
+		FakeMatrixSdkState.syncV2Callback = { listener ->
+			Thread {
+				latch.countDown()
+				// Block indefinitely to simulate pending sync
+				Thread.sleep(10000)
+			}.start()
+		}
+
+		val executor = java.util.concurrent.Executors.newSingleThreadExecutor()
+		try {
+			executor.submit(java.util.concurrent.Callable { client.refreshJoinedRooms(5000) })
+			assertTrue("Sync did not start", latch.await(2, java.util.concurrent.TimeUnit.SECONDS))
+
+			// Logout while sync is pending
+			client.logout()
+
+			// Sync handle should be cancelled
+			assertTrue("Sync handle should be cancelled on logout", FakeMatrixSdkState.taskCancelCount > 0)
+		} finally {
+			executor.shutdownNow()
+		}
+	}
+
+	@Test
+	fun `restore does not delete session file on transient failure`() {
+		val storeConfiguration = fakeStoreConfiguration()
+		val client = newSessionClient()
+		client.login("https://matrix.example.org", "alice", "swordfish", storeConfiguration)
+		client.close()
+
+		FakeMatrixSdkState.restoreSessionException = RuntimeException("Timeout")
+
+		val coldStore = MatrixStoreConfiguration(
+			testFolder.newFolder("cold-transient"),
+			storeConfiguration.databaseName,
+			storeConfiguration.copyEncryptionKey(),
+		)
+		storeConfiguration.directory.copyRecursively(coldStore.directory, overwrite = true)
+
+		val freshClient = newSessionClient()
+		val restoreResult = freshClient.restore(coldStore)
+
+		assertTrue("Expected Failed result for transient error, got $restoreResult", restoreResult is MatrixLoginClient.RestoreResult.Failed)
+		val file = java.io.File(coldStore.directory, "session")
+		assertTrue("Session file should NOT be deleted on transient error", file.exists())
+	}
+
+	@Test
+	fun `sync ordering via a room that appears only from the callback`() {
+		val client = newSessionClient()
+		client.login("https://matrix.example.org", "alice", "swordfish")
+
+		FakeMatrixSdkState.syncV2Callback = { listener ->
+			FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec(roomId = "!new:example.org", membership = Membership.JOINED))
+			listener.onUpdate(org.matrix.rustcomponents.sdk.SyncResponseV2())
+		}
+
+		assertTrue("Refresh should succeed", client.refreshJoinedRooms(1000))
+		val rooms = client.getJoinedRooms(10)
+		assertEquals(1, rooms.size)
+		assertEquals("!new:example.org", rooms[0].roomId)
+	}
+
 }

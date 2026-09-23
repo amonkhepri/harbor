@@ -85,7 +85,8 @@ class MatrixDelegateFencingTest {
 								LOGIN_FAILED,
 								client.login("https://matrix.example.org", "bob", "bad", replacement),
 							)
-							assertFalse(File(replacement.directory, "session").exists())
+							// Per MX-011, transient failures do not delete the session sidecar.
+							assertTrue(File(replacement.directory, "session").exists())
 						}
 					}
 				}.get(3, SECONDS) // Must finish while the old SDK getter is still blocked.
@@ -98,7 +99,7 @@ class MatrixDelegateFencingTest {
 				write.get(3, SECONDS)
 				rejected(delegate, session)
 				assertFalse(old.directory.exists())
-				if (replacementBytes != null) {
+				if (replacementBytes != null && transition != "failed") {
 					assertArrayEquals(replacementBytes, File(replacement.directory, "session").readBytes())
 					assertEquals(
 						session.userId,
@@ -154,7 +155,7 @@ class MatrixDelegateFencingTest {
 		}
 	}
 
-	@Test fun `failed login fences its own delayed writer and removes early sidecar`() {
+	@Test fun `failed login fences its own delayed writer and retains early sidecar`() {
 		val client = client()
 		val store = store()
 		val entered = CountDownLatch(1)
@@ -177,10 +178,10 @@ class MatrixDelegateFencingTest {
 				throw ClientException.Generic("failed", "failed")
 			}
 			assertEquals(LOGIN_FAILED, client.login("https://matrix.example.org", "alice", "bad", store))
-			assertFalse(File(store.directory, "session").exists())
+			assertTrue(File(store.directory, "session").exists())
 			release.countDown()
 			write!!.get(3, SECONDS)
-			assertFalse(File(store.directory, "session").exists())
+			assertTrue(File(store.directory, "session").exists())
 		} finally {
 			release.countDown()
 			pool.shutdownNow()
