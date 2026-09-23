@@ -38,6 +38,14 @@ sealed class ClientException(message: String) : Exception(message) {
 
 enum class SlidingSyncVersion { NONE, NATIVE }
 
+class SyncResponseV2
+
+interface SyncListenerV2 {
+	fun onUpdate(response: SyncResponseV2)
+}
+
+class SyncSettingsV2(val timeoutMs: ULong? = null, val fullState: Boolean = false)
+
 enum class Membership { INVITED, JOINED, LEFT, KNOCKED, BANNED }
 
 /** Mirrors the pinned AAR's real shape: synchronous `id()`/`displayName()`/`isSpace()`/`membership()`. */
@@ -378,6 +386,14 @@ class Client internal constructor(
 		)
 		sessionDelegate?.saveSessionInKeychain(session!!)
 		FakeMatrixSdkState.onLogin?.invoke()
+	}
+
+	fun syncV2(settings: SyncSettingsV2, listener: SyncListenerV2): TaskHandle {
+		Thread {
+			Thread.sleep(5)
+			listener.onUpdate(SyncResponseV2())
+		}.start()
+		return TaskHandle()
 	}
 
 	suspend fun restoreSession(session: Session) {

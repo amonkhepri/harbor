@@ -73,6 +73,8 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 	private val lifecycleLock = Any()
 	private var activeGeneration: Any? = null
 	private var activeStore: MatrixStoreConfiguration? = null
+	private var activeSyncLatch: CountDownLatch? = null
+	private var activeSyncHandle: Any? = null
 
 	override fun discover(serverName: String): DiscoveryResult {
 		// `serverName(...)` and `inMemoryStore()` each return their own
@@ -567,6 +569,84 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		null
 	}
 
+	override fun refreshJoinedRooms(timeoutMs: Long): Boolean {
+		val client = synchronized(lifecycleLock) { loginClient } ?: return false
+		
+		val latch: CountDownLatch
+		var initiator = false
+		
+		synchronized(lifecycleLock) {
+			if (loginClient !== client) return false
+			if (activeSyncLatch != null) {
+				latch = activeSyncLatch!!
+			} else {
+				latch = CountDownLatch(1)
+				activeSyncLatch = latch
+				initiator = true
+			}
+		}
+		
+		if (!initiator) {
+			return try {
+				latch.await(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
+			} catch (e: InterruptedException) {
+				false
+			}
+		}
+		
+		var handle: Any? = null
+		try {
+			val syncSettingsClass = Class.forName("org.matrix.rustcomponents.sdk.SyncSettingsV2")
+			val settings = syncSettingsClass.constructors.first {
+				it.parameterCount == 4
+			}.newInstance(null, false, 3, null)
+			
+			val listenerClass = Class.forName("org.matrix.rustcomponents.sdk.SyncListenerV2")
+			val listener = java.lang.reflect.Proxy.newProxyInstance(
+				listenerClass.classLoader,
+				arrayOf(listenerClass),
+			) { _, method, _ ->
+				if (method.name == "onUpdate") {
+					latch.countDown()
+				}
+				null
+			}
+			
+			handle = client.javaClass.getMethod("syncV2", syncSettingsClass, listenerClass)
+				.invoke(client, settings, listener)
+				
+			synchronized(lifecycleLock) {
+				if (loginClient === client) {
+					activeSyncHandle = handle
+				} else {
+					cancelAndCloseQuietly(handle)
+					handle = null
+				}
+			}
+			
+			return if (handle != null) {
+				latch.await(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
+			} else {
+				false
+			}
+		} catch (e: Exception) {
+			return false
+		} catch (e: LinkageError) {
+			return false
+		} finally {
+			cancelAndCloseQuietly(handle)
+			synchronized(lifecycleLock) {
+				if (activeSyncLatch === latch) {
+					activeSyncLatch = null
+				}
+				if (activeSyncHandle === handle) {
+					activeSyncHandle = null
+				}
+			}
+			latch.countDown()
+		}
+	}
+
 	/**
 	 * Reads a bounded timeline snapshot from the retained client, requesting at most one backward
 	 * page when the initial mapped snapshot is shorter than [limit]. Timeline listeners own the
@@ -826,7 +906,13 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 
 	@Synchronized
 	override fun close() {
-		synchronized(lifecycleLock) { activeGeneration = null }
+		val handle: Any?
+		synchronized(lifecycleLock) {
+			activeGeneration = null
+			handle = activeSyncHandle
+			activeSyncHandle = null
+		}
+		cancelAndCloseQuietly(handle)
 		val client = loginClient
 		loginClient = null
 		activeStore = null

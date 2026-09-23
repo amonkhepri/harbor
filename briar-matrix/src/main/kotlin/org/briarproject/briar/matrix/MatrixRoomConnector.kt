@@ -41,9 +41,9 @@ class MatrixRoomConnector(
 	override fun getRecentThreads(limit: Int): List<ConnectorThread> {
 		if (!isAuthorized()) return emptyList()
 
-		// Refreshes are disabled: MatrixConnector.SUPPORTS_BOUNDED_REFRESH is false.
-		// No bounded SDK refresh exists using the verified sdk-android 26.08.05 call sequence.
-		// Stopping here for scope splitting instead of inventing Fake/V2 Sync APIs.
+		if (!roomSnapshotClient.refreshJoinedRooms(10000L)) {
+			throw RuntimeException("Matrix bounded sync failed")
+		}
 		return roomSnapshotClient.getJoinedRooms(limit).map { snapshot ->
 			val latest = messageSnapshotClient.getRecentMessages(snapshot.roomId, 1)?.lastOrNull()
 			ConnectorThread(
