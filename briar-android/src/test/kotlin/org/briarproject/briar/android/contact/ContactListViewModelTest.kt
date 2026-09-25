@@ -59,6 +59,11 @@ class ContactListViewModelTest {
 	fun `inbox restores saved session on IO and refresh preserves READY and sign-out`() {
 		val fixture = MatrixInboxFixture()
 		fixture.saveSession()
+		// saveSession()'s login() quarantines the store directory in the discovery
+		// client's process-lifetime openedStores guard (real double-open protection).
+		// A fresh app process would start with an empty guard; this in-process test
+		// simulates that restart boundary by resetting it before the restore below.
+		clearOpenedStoresGuard()
 		val session = fixture.session()
 		val io = QueuedIoExecutor()
 		val viewModel = createViewModel(
@@ -306,6 +311,25 @@ class ContactListViewModelTest {
 			mapOf(ConnectorSources.TELEGRAM to NONE, ConnectorSources.MATRIX to NONE),
 			getOrAwaitValue(viewModel.connectorAvailabilityStates),
 		)
+	}
+
+	/**
+	 * Resets [ReflectiveMatrixHomeserverDiscoveryClient]'s private, process-lifetime
+	 * `openedStores` double-open guard. The guard has no in-module test seam since it
+	 * lives in a different Gradle module; reflection is the only way to simulate the
+	 * fresh-process boundary this in-process test otherwise can't cross.
+	 */
+	private fun clearOpenedStoresGuard() {
+		try {
+			val field = ReflectiveMatrixHomeserverDiscoveryClient::class.java.getDeclaredField(
+				"openedStores",
+			)
+			field.isAccessible = true
+			(field.get(null) as java.util.HashSet<*>).clear()
+		} catch (e: ReflectiveOperationException) {
+			// Best-effort: if the guard's storage shape changes, the affected test fails
+			// loudly on its own assertions instead of here.
+		}
 	}
 
 	private fun connector(source: ConnectorSource, thread: ConnectorThread) =
