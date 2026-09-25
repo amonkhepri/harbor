@@ -38,6 +38,15 @@ class ProtectedMatrixStoreConfigurationProvider @JvmOverloads constructor(
 	// tombstone, including for legacy stores. Never delete a possibly live native store.
 	private val selection get() = File(databaseConfig.databaseDirectory, "matrix-active-store")
 
+	init {
+		// Safe only here: this constructor runs once per process, before this process has
+		// claimed (opened a native client against) any store directory, so no directory this
+		// process could see is a possibly-live native store yet. A directory left behind by a
+		// prior process (superseded login attempt, or a logout that only cleared the
+		// selection) is guaranteed quiescent because that process has since exited.
+		pruneOrphanedStores()
+	}
+
 	override fun getStoreConfiguration(): MatrixStoreConfiguration? = synchronized(ownershipLock) {
 		try {
 			val name = if (selection.exists()) {
@@ -49,7 +58,7 @@ class ProtectedMatrixStoreConfigurationProvider @JvmOverloads constructor(
 				initial
 			}
 			if (name.isEmpty()) return@synchronized null
-			if (name != STORE_NAME && !name.matches(Regex("matrix-sdk-[0-9a-f-]{36}"))) {
+			if (name != STORE_NAME && !name.matches(FRESH_STORE_NAME_REGEX)) {
 				return@synchronized null
 			}
 			configuration(name)
@@ -79,6 +88,17 @@ class ProtectedMatrixStoreConfigurationProvider @JvmOverloads constructor(
 
 	private fun freshName() = "matrix-sdk-${UUID.randomUUID()}"
 
+	private fun pruneOrphanedStores() = synchronized(ownershipLock) {
+		try {
+			val keep = if (selection.exists()) selection.readText() else null
+			databaseConfig.databaseDirectory.listFiles { file ->
+				file.isDirectory && file.name != keep && file.name.matches(FRESH_STORE_NAME_REGEX)
+			}?.forEach { it.deleteRecursively() }
+		} catch (_: Exception) {
+			// Best-effort disk reclamation; a directory left behind is retried on next start.
+		}
+	}
+
 	private fun select(name: String) {
 		selection.parentFile?.mkdirs()
 		val temp = File.createTempFile("matrix-selection-", ".tmp", selection.parentFile)
@@ -96,6 +116,7 @@ class ProtectedMatrixStoreConfigurationProvider @JvmOverloads constructor(
 	private companion object {
 		const val STORE_NAME = "matrix-sdk"
 		val ownershipLock = Any()
+		val FRESH_STORE_NAME_REGEX = Regex("matrix-sdk-[0-9a-f-]{36}")
 	}
 }
 
