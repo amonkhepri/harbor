@@ -196,7 +196,11 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 	 * Continuation)` on a client freshly built against the same store. A missing
 	 * sidecar file yields [MatrixLoginClient.RestoreResult.NotFound], not a
 	 * failure; the store itself is not opened in that case. A store already opened in
-	 * this process is quarantined until process exit, since close cannot prove quiescence.
+	 * this process is quarantined until process exit, since close cannot prove quiescence;
+	 * that surfaces as [MatrixLoginClient.RestoreResult.Failed] with `LOGIN_FAILED` (the
+	 * same detail [login] reports for the identical collision), never [NotFound], so an
+	 * intact on-disk session already claimed by this process is never mistaken for one
+	 * that never existed.
 	 */
 	@Synchronized
 	override fun restore(
@@ -240,6 +244,9 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			client = null
 			success = true
 			MatrixLoginClient.RestoreResult.Restored(homeserverUrl)
+		} catch (e: StoreAlreadyClaimedException) {
+			failureDetail = LOGIN_FAILED
+			MatrixLoginClient.RestoreResult.Failed(LOGIN_FAILED)
 		} catch (e: DiscoveryAdapterFailure) {
 			MatrixLoginClient.RestoreResult.NotFound
 		} catch (e: InvocationTargetException) {
@@ -343,7 +350,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		// A wrapper's close does not establish native quiescence. Keep the directory
 		// quarantined until process exit, including failed builds and failed restores.
 		if (!openedStores.add(store.directory.canonicalPath)) {
-			throw IOException("Matrix store already opened in this process")
+			throw StoreAlreadyClaimedException()
 		}
 	}
 
@@ -1028,6 +1035,15 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 	/** Adapter-side failure (timeout, missing/blank result) with no SDK exception to map. */
 	private class DiscoveryAdapterFailure : Exception()
 	private class SnapshotAdapterFailure : Exception()
+
+	/**
+	 * [claimStore] found its directory already in [openedStores]. Kept distinct from a
+	 * generic [IOException] so [restore] can report it as a recoverable [LOGIN_FAILED]
+	 * failure instead of folding it into the same catch clause that maps a genuinely
+	 * missing or unreadable sidecar to [MatrixLoginClient.RestoreResult.NotFound].
+	 */
+	private class StoreAlreadyClaimedException :
+		IOException("Matrix store already opened in this process")
 
 	private companion object {
 		val openedStores = HashSet<String>()

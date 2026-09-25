@@ -252,7 +252,14 @@ class MatrixDelegateFencingTest {
 		login(client, store)
 		client.close()
 		val bytes = File(store.directory, "session").readBytes()
-		assertEquals(MatrixLoginClient.RestoreResult.NotFound, client().restore(store))
+		// Same root cause (this process already claimed the directory) as the login()
+		// collision below, so restore() must report it the same recoverable way instead of
+		// NotFound, which would make an intact on-disk session look like one that never
+		// existed.
+		assertEquals(
+			MatrixLoginClient.RestoreResult.Failed(LOGIN_FAILED),
+			client().restore(store),
+		)
 		assertEquals(LOGIN_FAILED, client().login("https://matrix.example.org", "bob", "password", store))
 		assertArrayEquals(bytes, File(store.directory, "session").readBytes())
 		assertEquals(1, FakeMatrixSdkState.loginCallCount)
