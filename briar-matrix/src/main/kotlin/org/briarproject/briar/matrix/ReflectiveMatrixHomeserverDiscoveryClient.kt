@@ -73,8 +73,6 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 	private val lifecycleLock = Any()
 	private var activeGeneration: Any? = null
 	private var activeStore: MatrixStoreConfiguration? = null
-	private var activeSyncLatch: CountDownLatch? = null
-	private var activeSyncHandle: Any? = null
 
 	override fun discover(serverName: String): DiscoveryResult {
 		// `serverName(...)` and `inMemoryStore()` each return their own
@@ -179,7 +177,12 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			if (!success) {
 				synchronized(lifecycleLock) {
 					if (activeGeneration === sessionGeneration) activeGeneration = null
-					if (claimedStore && storeConfiguration != null && failureDetail == INVALID_CREDENTIALS) sessionFile(storeConfiguration).delete()
+					// Per Class D scope decision (MX-011): only a proven invalid/revoked
+					// credential result deletes the sidecar. A transient/generic failure
+					// (network, server error) must retain it rather than sign the user out.
+					if (claimedStore && storeConfiguration != null && failureDetail == INVALID_CREDENTIALS) {
+						sessionFile(storeConfiguration).delete()
+					}
 				}
 			}
 			closeQuietly(client)
@@ -256,6 +259,9 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			if (!success) {
 				synchronized(lifecycleLock) {
 					if (activeGeneration === sessionGeneration) activeGeneration = null
+					// Per Class D scope decision (MX-011): only a proven invalid/revoked
+					// credential result deletes the sidecar. A transient/generic failure
+					// (network, server error) must retain it rather than sign the user out.
 					if (claimedStore && failureDetail == INVALID_CREDENTIALS) file.delete()
 				}
 			}
@@ -326,13 +332,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 	}
 
 	private fun beginGeneration(generation: Any) {
-		val handle: Any?
-		synchronized(lifecycleLock) { 
-			activeGeneration = generation 
-			handle = activeSyncHandle
-			activeSyncHandle = null
-		}
-		cancelAndCloseQuietly(handle)
+		synchronized(lifecycleLock) { activeGeneration = generation }
 		val previous = loginClient
 		loginClient = null
 		activeStore = null
@@ -583,94 +583,6 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		null
 	}
 
-	private var activeSyncSuccess: java.util.concurrent.atomic.AtomicBoolean? = null
-
-	override fun refreshJoinedRooms(timeoutMs: Long): Boolean {
-		val client = synchronized(lifecycleLock) { loginClient } ?: return false
-		
-		val latch: CountDownLatch
-		val successFlag: java.util.concurrent.atomic.AtomicBoolean
-		var initiator = false
-		
-		synchronized(lifecycleLock) {
-			if (loginClient !== client) return false
-			if (activeSyncLatch != null) {
-				latch = activeSyncLatch!!
-				successFlag = activeSyncSuccess!!
-			} else {
-				latch = CountDownLatch(1)
-				activeSyncLatch = latch
-				successFlag = java.util.concurrent.atomic.AtomicBoolean(false)
-				activeSyncSuccess = successFlag
-				initiator = true
-			}
-		}
-		
-		if (!initiator) {
-			return try {
-				latch.await(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
-				successFlag.get()
-			} catch (e: InterruptedException) {
-				false
-			}
-		}
-		
-		var handle: Any? = null
-		try {
-			val syncSettingsClass = Class.forName("org.matrix.rustcomponents.sdk.SyncSettingsV2")
-			val settings = syncSettingsClass.constructors.first {
-				it.parameterCount == 4
-			}.newInstance(null, false, 3, null)
-			
-			val listenerClass = Class.forName("org.matrix.rustcomponents.sdk.SyncListenerV2")
-			val listener = java.lang.reflect.Proxy.newProxyInstance(
-				listenerClass.classLoader,
-				arrayOf(listenerClass),
-			) { _, method, _ ->
-				if (method.name == "onUpdate") {
-					successFlag.set(true)
-					latch.countDown()
-				}
-				null
-			}
-			
-			handle = client.javaClass.getMethod("syncV2", syncSettingsClass, listenerClass)
-				.invoke(client, settings, listener)
-				
-			synchronized(lifecycleLock) {
-				if (loginClient === client) {
-					activeSyncHandle = handle
-				} else {
-					cancelAndCloseQuietly(handle)
-					handle = null
-				}
-			}
-			
-			if (handle != null) {
-				latch.await(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
-			}
-			return successFlag.get()
-		} catch (e: Exception) {
-			return false
-		} catch (e: LinkageError) {
-			return false
-		} finally {
-			cancelAndCloseQuietly(handle)
-			synchronized(lifecycleLock) {
-				if (activeSyncLatch === latch) {
-					activeSyncLatch = null
-				}
-				if (activeSyncSuccess === successFlag) {
-					activeSyncSuccess = null
-				}
-				if (activeSyncHandle === handle) {
-					activeSyncHandle = null
-				}
-			}
-			latch.countDown()
-		}
-	}
-
 	/**
 	 * Reads a bounded timeline snapshot from the retained client, requesting at most one backward
 	 * page when the initial mapped snapshot is shorter than [limit]. Timeline listeners own the
@@ -910,15 +822,11 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 
 	@Synchronized
 	override fun logout() {
-		val handle: Any?
 		synchronized(lifecycleLock) {
 			activeGeneration = null
 			activeStore?.let { sessionFile(it).delete() }
-			activeStore = null
-			handle = activeSyncHandle
-			activeSyncHandle = null
 		}
-		cancelAndCloseQuietly(handle)
+		activeStore = null
 		val client = loginClient ?: return
 		loginClient = null
 		try {
@@ -934,13 +842,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 
 	@Synchronized
 	override fun close() {
-		val handle: Any?
-		synchronized(lifecycleLock) {
-			activeGeneration = null
-			handle = activeSyncHandle
-			activeSyncHandle = null
-		}
-		cancelAndCloseQuietly(handle)
+		synchronized(lifecycleLock) { activeGeneration = null }
 		val client = loginClient
 		loginClient = null
 		activeStore = null

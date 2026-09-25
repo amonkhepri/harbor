@@ -59,16 +59,6 @@ class ContactListViewModelTest {
 	fun `inbox restores saved session on IO and refresh preserves READY and sign-out`() {
 		val fixture = MatrixInboxFixture()
 		fixture.saveSession()
-
-		try {
-			val field = Class.forName(
-				"org.briarproject.briar.matrix.ReflectiveMatrixHomeserverDiscoveryClient",
-			).getDeclaredField(
-				"openedStores",
-			)
-			field.isAccessible = true
-			(field.get(null) as java.util.HashSet<*>).clear()
-		} catch (e: Exception) {}
 		val session = fixture.session()
 		val io = QueuedIoExecutor()
 		val viewModel = createViewModel(
@@ -89,10 +79,6 @@ class ContactListViewModelTest {
 		io.runNext()
 
 		assertNotEquals(caller, fixture.storeThread)
-		println(
-			"AUTH STATE IS: " + session.getSnapshot().authState + " file exists: " +
-				java.io.File(fixture.configuration.directory, "session").exists(),
-		)
 		assertEquals(MatrixAuthState.READY, session.getSnapshot().authState)
 		assertEquals("matrix:!room:example", viewModel.connectorThreadItems.value?.single()?.stableId)
 		assertEquals(NONE, viewModel.connectorAvailabilityStates.value?.get(ConnectorSources.MATRIX))
@@ -162,16 +148,6 @@ class ContactListViewModelTest {
 	fun `invalid saved session reports unavailable and still loads Telegram`() {
 		val fixture = MatrixInboxFixture()
 		fixture.saveSession()
-
-		try {
-			val field = Class.forName(
-				"org.briarproject.briar.matrix.ReflectiveMatrixHomeserverDiscoveryClient",
-			).getDeclaredField(
-				"openedStores",
-			)
-			field.isAccessible = true
-			(field.get(null) as java.util.HashSet<*>).clear()
-		} catch (e: Exception) {}
 		// A different protected-store key cannot decrypt the saved credentials.
 		fixture.configuration = MatrixStoreConfiguration(
 			fixture.configuration.directory,

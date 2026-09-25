@@ -233,7 +233,6 @@ class MatrixRoomConnectorTest {
 		assertEquals(null, messageSnapshotClient.lastRequestedRoomId)
 	}
 
-
 	private fun connector(
 		roomSnapshotClient: MatrixRoomSnapshotClient = FakeRoomSnapshotClient(emptyList()),
 		messageSnapshotClient: MatrixMessageSnapshotClient = FakeMessageSnapshotClient(emptyList()),
@@ -250,8 +249,6 @@ class MatrixRoomConnectorTest {
 			lastRequestedLimit = limit
 			return snapshots
 		}
-
-		override fun refreshJoinedRooms(timeoutMs: Long): Boolean = true
 	}
 
 	private class FakeMessageSnapshotClient(private val snapshots: List<MatrixMessageSnapshot>?) :

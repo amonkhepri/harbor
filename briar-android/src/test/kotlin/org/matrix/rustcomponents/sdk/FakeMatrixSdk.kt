@@ -38,14 +38,6 @@ sealed class ClientException(message: String) : Exception(message) {
 
 enum class SlidingSyncVersion { NONE, NATIVE }
 
-class SyncResponseV2
-
-interface SyncListenerV2 {
-	fun onUpdate(response: SyncResponseV2)
-}
-
-class SyncSettingsV2(val timeoutMs: ULong? = null, val fullState: Boolean = false)
-
 enum class Membership { INVITED, JOINED, LEFT, KNOCKED, BANNED }
 
 /** Mirrors the pinned AAR's real shape: synchronous `id()`/`displayName()`/`isSpace()`/`membership()`. */
@@ -388,15 +380,6 @@ class Client internal constructor(
 		FakeMatrixSdkState.onLogin?.invoke()
 	}
 
-	fun syncV2(settings: SyncSettingsV2, listener: SyncListenerV2): TaskHandle {
-		FakeMatrixSdkState.syncV2Callback?.let { it(listener); return TaskHandle() }
-		Thread {
-			Thread.sleep(5)
-			listener.onUpdate(SyncResponseV2())
-		}.start()
-		return TaskHandle()
-	}
-
 	suspend fun restoreSession(session: Session) {
 		FakeMatrixSdkState.restoreSessionCallCount++
 		FakeMatrixSdkState.restoreSessionException?.let { throw it }
@@ -607,7 +590,6 @@ object FakeMatrixSdkState {
 	var paginationFailureToThrow: Exception? = null
 	var timelineCloseCount = 0
 	var taskCancelCount = 0
-	var syncV2Callback: ((SyncListenerV2) -> Unit)? = null
 	var taskCloseCount = 0
 	var timelineDiffDestroyCount = 0
 	var timelineItemCloseCount = 0
@@ -664,7 +646,6 @@ object FakeMatrixSdkState {
 		paginationFailureToThrow = null
 		timelineCloseCount = 0
 		taskCancelCount = 0
-		syncV2Callback = null
 		taskCloseCount = 0
 		timelineDiffDestroyCount = 0
 		timelineItemCloseCount = 0
