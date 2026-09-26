@@ -53,9 +53,10 @@ internal class ConnectorConversationLoadOwner {
 }
 
 /**
- * Read-only timeline for one connector-neutral thread (MX-012). The Telegram
- * source built this screen first; it is now chosen at runtime via [SOURCE_ID]
- * so a Matrix inbox row reuses the same rendering, pagination and
+ * Timeline for one connector-neutral thread (MX-012), read-only unless the connector also
+ * implements [ConnectorTextSender] (MX-013), in which case a compose bar is shown for sending
+ * into the open thread. The Telegram source built this screen first; it is now chosen at runtime
+ * via [SOURCE_ID] so a Matrix inbox row reuses the same rendering, pagination and
  * availability-state handling instead of duplicating a Matrix-only Activity.
  */
 @MethodsNotNullByDefault
