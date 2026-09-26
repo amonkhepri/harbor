@@ -144,6 +144,38 @@ class ConnectorImageUploadTest {
 		assertEquals(0, FakeMatrixSdkState.sendImageCallCount)
 	}
 
+	@Test fun acknowledgeResetsSentStatusSoRotationDoesNotReplayIt() {
+		val state = ConnectorImageUploadState()
+		state.begin(selection)
+		state.complete(true)
+		assertEquals(ConnectorImageUploadState.Status.SENT, state.status.value)
+
+		state.acknowledge()
+
+		assertEquals(ConnectorImageUploadState.Status.IDLE, state.status.value)
+		assertNull(state.pendingImage)
+	}
+
+	@Test fun acknowledgeResetsFailedStatusButKeepsSelectionForRetry() {
+		val state = ConnectorImageUploadState()
+		state.begin(selection)
+		state.complete(false)
+
+		state.acknowledge()
+
+		assertEquals(ConnectorImageUploadState.Status.IDLE, state.status.value)
+		assertEquals(selection, state.pendingImage)
+	}
+
+	@Test fun acknowledgeIsANoOpWhileSendingSoAnInFlightUploadSurvivesRecreation() {
+		val state = ConnectorImageUploadState()
+		state.begin(selection)
+
+		state.acknowledge()
+
+		assertEquals(ConnectorImageUploadState.Status.SENDING, state.status.value)
+	}
+
 	private fun connector(): MatrixRoomConnector {
 		val client = ReflectiveMatrixHomeserverDiscoveryClient()
 		assertEquals(

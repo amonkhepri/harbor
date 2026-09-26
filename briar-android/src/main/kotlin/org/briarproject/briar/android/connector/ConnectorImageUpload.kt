@@ -49,6 +49,15 @@ internal class ConnectorImageUploadState : ViewModel() {
 		status.value = if (sent) Status.SENT else Status.FAILED
 	}
 
+	/**
+	 * Consumes a delivered [Status.SENT] or [Status.FAILED] so it is not replayed as sticky
+	 * [androidx.lifecycle.LiveData] to the next observer registered after activity recreation
+	 * (e.g. a rotation happening after the send already finished).
+	 */
+	fun acknowledge() {
+		if (status.value != Status.SENDING) status.value = Status.IDLE
+	}
+
 	fun restore(selection: String?) {
 		if (status.value != Status.IDLE || selection == null) return
 		pendingImage = selection

@@ -208,8 +208,14 @@ class ConnectorConversationActivity : BriarActivity() {
 					sendInFlight = true
 					setComposeEnabled(false)
 				}
-				ConnectorImageUploadState.Status.SENT -> onSendCompleted(true, false)
-				ConnectorImageUploadState.Status.FAILED -> onSendCompleted(false, false)
+				ConnectorImageUploadState.Status.SENT -> {
+					onSendCompleted(true, false)
+					imageUpload.acknowledge()
+				}
+				ConnectorImageUploadState.Status.FAILED -> {
+					onSendCompleted(false, false)
+					imageUpload.acknowledge()
+				}
 				else -> Unit
 			}
 		}
