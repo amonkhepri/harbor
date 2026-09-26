@@ -1,5 +1,6 @@
 package org.briarproject.briar.android.contact;
 
+import android.content.Context;
 import android.content.Intent;
 import android.os.Bundle;
 import android.view.LayoutInflater;
@@ -16,12 +17,12 @@ import com.google.android.material.snackbar.Snackbar;
 import org.briarproject.bramble.api.contact.ContactId;
 import org.briarproject.briar.R;
 import org.briarproject.briar.android.activity.ActivityComponent;
+import org.briarproject.briar.android.connector.ConnectorConversationActivity;
 import org.briarproject.briar.android.contact.add.nearby.AddNearbyContactActivity;
 import org.briarproject.briar.android.contact.add.remote.AddContactActivity;
 import org.briarproject.briar.android.contact.add.remote.PendingContactListActivity;
 import org.briarproject.briar.android.conversation.ConversationActivity;
 import org.briarproject.briar.android.fragment.BaseFragment;
-import org.briarproject.briar.android.telegram.TelegramConversationActivity;
 import org.briarproject.briar.android.util.BriarSnackbarBuilder;
 import org.briarproject.briar.android.view.BriarRecyclerView;
 import org.briarproject.briar.api.connector.ConnectorSources;
@@ -150,12 +151,18 @@ public class ContactListFragment extends BaseFragment
 
 	@Override
 	public void onConnectorItemClick(View view, ConnectorInboxThreadItem item) {
-		if (!item.getConnectorSource().equals(ConnectorSources.TELEGRAM)) return;
-		Intent i = new Intent(getActivity(), TelegramConversationActivity.class);
-		i.putExtra(TelegramConversationActivity.CHAT_ID,
-				Long.parseLong(item.getConnectorThreadId()));
-		i.putExtra(TelegramConversationActivity.CHAT_TITLE, item.getTitle());
-		startActivity(i);
+		startActivity(createConnectorConversationIntent(getActivity(), item));
+	}
+
+	static Intent createConnectorConversationIntent(Context context,
+			ConnectorInboxThreadItem item) {
+		Intent i = new Intent(context, ConnectorConversationActivity.class);
+		i.putExtra(ConnectorConversationActivity.SOURCE_ID,
+				item.getConnectorSource().getId());
+		i.putExtra(ConnectorConversationActivity.THREAD_ID,
+				item.getConnectorThreadId());
+		i.putExtra(ConnectorConversationActivity.THREAD_TITLE, item.getTitle());
+		return i;
 	}
 
 	@Override

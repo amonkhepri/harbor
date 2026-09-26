@@ -1,14 +1,22 @@
 package org.briarproject.briar.android.contact
 
 import org.briarproject.briar.R
+import org.briarproject.briar.android.connector.ConnectorConversationActivity
 import org.briarproject.briar.android.contact.ConnectorInboxAvailabilityState.ACCOUNT_UNAVAILABLE
 import org.briarproject.briar.android.contact.ConnectorInboxAvailabilityState.EMPTY
 import org.briarproject.briar.android.contact.ConnectorInboxAvailabilityState.LOAD_FAILED
 import org.briarproject.briar.android.contact.ConnectorInboxAvailabilityState.LOADING
 import org.briarproject.briar.android.contact.ConnectorInboxAvailabilityState.NONE
+import org.briarproject.briar.api.connector.ConnectorSources
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
+import org.robolectric.annotation.Config
 
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [21], application = android.app.Application::class)
 class ContactListFragmentTest {
 
 	@Test
@@ -67,5 +75,52 @@ class ContactListFragmentTest {
 			val expected = if (state == NONE) R.string.no_contacts_action else 0
 			assertEquals(expected, ContactListFragment.emptyActionTextForState(state))
 		}
+	}
+
+	@Test
+	fun routesMatrixInboxClickToConnectorConversationActivityWithRoomExtras() {
+		val item = FakeConnectorInboxThreadItem(
+			connectorSource = ConnectorSources.MATRIX,
+			connectorThreadId = "!room:example.org",
+			title = "Room title",
+		)
+
+		val intent = ContactListFragment.createConnectorConversationIntent(
+			RuntimeEnvironment.getApplication(),
+			item,
+		)
+
+		assertEquals(
+			ConnectorConversationActivity::class.java.name,
+			intent.component?.className,
+		)
+		assertEquals("matrix", intent.getStringExtra(ConnectorConversationActivity.SOURCE_ID))
+		assertEquals(
+			"!room:example.org",
+			intent.getStringExtra(ConnectorConversationActivity.THREAD_ID),
+		)
+		assertEquals("Room title", intent.getStringExtra(ConnectorConversationActivity.THREAD_TITLE))
+	}
+
+	@Test
+	fun routesTelegramInboxClickToConnectorConversationActivityWithChatExtras() {
+		val item = FakeConnectorInboxThreadItem(
+			connectorSource = ConnectorSources.TELEGRAM,
+			connectorThreadId = "555",
+			title = "Chat title",
+		)
+
+		val intent = ContactListFragment.createConnectorConversationIntent(
+			RuntimeEnvironment.getApplication(),
+			item,
+		)
+
+		assertEquals(
+			ConnectorConversationActivity::class.java.name,
+			intent.component?.className,
+		)
+		assertEquals("telegram", intent.getStringExtra(ConnectorConversationActivity.SOURCE_ID))
+		assertEquals("555", intent.getStringExtra(ConnectorConversationActivity.THREAD_ID))
+		assertEquals("Chat title", intent.getStringExtra(ConnectorConversationActivity.THREAD_TITLE))
 	}
 }

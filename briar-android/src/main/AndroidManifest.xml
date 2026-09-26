@@ -166,9 +166,9 @@
 			android:exported="false"
 			android:label="@string/matrix_setup_title" />
 		<activity
-			android:name="org.briarproject.briar.android.telegram.TelegramConversationActivity"
+			android:name="org.briarproject.briar.android.connector.ConnectorConversationActivity"
 			android:exported="false"
-			android:label="@string/telegram_conversation_title"
+			android:label="@string/connector_conversation_label"
 			android:parentActivityName="org.briarproject.briar.android.navdrawer.NavDrawerActivity">
 			<meta-data
 				android:name="android.support.PARENT_ACTIVITY"

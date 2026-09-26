@@ -1,4 +1,4 @@
-package org.briarproject.briar.android.telegram
+package org.briarproject.briar.android.connector
 
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue

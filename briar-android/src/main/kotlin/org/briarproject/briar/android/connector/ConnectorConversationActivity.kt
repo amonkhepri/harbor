@@ -1,4 +1,4 @@
-package org.briarproject.briar.android.telegram
+package org.briarproject.briar.android.connector
 
 import android.os.Bundle
 import android.os.Parcelable
@@ -10,21 +10,16 @@ import org.briarproject.bramble.api.lifecycle.IoExecutor
 import org.briarproject.briar.R
 import org.briarproject.briar.android.activity.ActivityComponent
 import org.briarproject.briar.android.activity.BriarActivity
-import org.briarproject.briar.android.connector.ConnectorConversationAvailabilityState
 import org.briarproject.briar.android.connector.ConnectorConversationAvailabilityState.ACCOUNT_UNAVAILABLE
 import org.briarproject.briar.android.connector.ConnectorConversationAvailabilityState.DISABLED
 import org.briarproject.briar.android.connector.ConnectorConversationAvailabilityState.EMPTY
 import org.briarproject.briar.android.connector.ConnectorConversationAvailabilityState.LOAD_FAILED
 import org.briarproject.briar.android.connector.ConnectorConversationAvailabilityState.LOADING
-import org.briarproject.briar.android.connector.ConnectorConversationAdapter
-import org.briarproject.briar.android.connector.ConnectorConversationMessageItem
-import org.briarproject.briar.android.connector.ConnectorConversationMessageListState
-import org.briarproject.briar.android.connector.withAvailabilityState
 import org.briarproject.briar.android.util.BriarSnackbarBuilder
 import org.briarproject.briar.android.view.BriarRecyclerView
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult
+import org.briarproject.briar.api.connector.ConnectorRegistry
 import org.briarproject.briar.api.connector.ReadOnlyConnector
-import org.briarproject.briar.api.telegram.TelegramConnector
 import org.briarproject.nullsafety.MethodsNotNullByDefault
 import org.briarproject.nullsafety.ParametersNotNullByDefault
 import java.util.concurrent.Executor
@@ -53,29 +48,36 @@ internal class ConnectorConversationLoadOwner {
 	}
 }
 
+/**
+ * Read-only timeline for one connector-neutral thread (MX-012). The Telegram
+ * source built this screen first; it is now chosen at runtime via [SOURCE_ID]
+ * so a Matrix inbox row reuses the same rendering, pagination and
+ * availability-state handling instead of duplicating a Matrix-only Activity.
+ */
 @MethodsNotNullByDefault
 @ParametersNotNullByDefault
-class TelegramConversationActivity : BriarActivity() {
+class ConnectorConversationActivity : BriarActivity() {
 
 	companion object {
-		const val CHAT_ID = "telegram.CHAT_ID"
-		const val CHAT_TITLE = "telegram.CHAT_TITLE"
+		const val SOURCE_ID = "connector.SOURCE_ID"
+		const val THREAD_ID = "connector.THREAD_ID"
+		const val THREAD_TITLE = "connector.THREAD_TITLE"
 
 		private const val MESSAGE_LIMIT = 50
-		private const val TELEGRAM_REFRESH_INTERVAL_MS = 15_000L
+		private const val REFRESH_INTERVAL_MS = 15_000L
 		private const val STATE_LAYOUT_MANAGER = "layoutManager"
 
 		private fun emptyTextForState(state: ConnectorConversationAvailabilityState): Int = when (state) {
 			LOADING ->
-				R.string.telegram_conversation_loading
+				R.string.connector_conversation_loading
 			DISABLED ->
-				R.string.telegram_conversation_disabled
+				R.string.connector_conversation_disabled
 			ACCOUNT_UNAVAILABLE ->
-				R.string.telegram_conversation_account_unavailable
+				R.string.connector_conversation_account_unavailable
 			LOAD_FAILED ->
-				R.string.telegram_conversation_load_failed
+				R.string.connector_conversation_load_failed
 			EMPTY ->
-				R.string.telegram_conversation_empty
+				R.string.connector_conversation_empty
 		}
 
 		private fun isManualRefreshAction(itemId: Int): Boolean =
@@ -83,11 +85,11 @@ class TelegramConversationActivity : BriarActivity() {
 
 		private fun shouldShowManualRefreshAction(
 			connectorEnabled: Boolean,
-			chatId: Long,
+			threadId: String,
 			state: ConnectorConversationMessageListState,
-		): Boolean = connectorEnabled && hasValidChatId(chatId) && !state.isLoading
+		): Boolean = connectorEnabled && hasValidThreadId(threadId) && !state.isLoading
 
-		private fun hasValidChatId(chatId: Long): Boolean = chatId != 0L
+		private fun hasValidThreadId(threadId: String): Boolean = threadId.isNotEmpty()
 
 		private fun titleText(title: String?, fallback: String): String =
 			if (title == null || title.trim().isEmpty()) fallback else title
@@ -96,10 +98,7 @@ class TelegramConversationActivity : BriarActivity() {
 	private val adapter = ConnectorConversationAdapter()
 
 	@Inject
-	lateinit var telegramConnector: TelegramConnector
-
-	private val readOnlyConnector: ReadOnlyConnector
-		get() = telegramConnector
+	lateinit var connectorRegistry: ConnectorRegistry
 
 	@Inject
 	@field:IoExecutor
@@ -108,7 +107,9 @@ class TelegramConversationActivity : BriarActivity() {
 	private lateinit var list: BriarRecyclerView
 	private lateinit var layoutManager: LinearLayoutManager
 	private var layoutManagerState: Parcelable? = null
-	private var chatId = 0L
+	private var connector: ReadOnlyConnector? = null
+	private lateinit var sourceName: String
+	private var threadId = ""
 	private var messageState = ConnectorConversationMessageListState()
 	private var automaticRefreshRunning = false
 	private val automaticRefresh = Runnable {
@@ -124,16 +125,20 @@ class TelegramConversationActivity : BriarActivity() {
 		super.onCreate(state)
 		setContentView(R.layout.activity_connector_conversation)
 
-		chatId = intent.getLongExtra(CHAT_ID, 0L)
+		val sourceId = intent.getStringExtra(SOURCE_ID)
+		threadId = intent.getStringExtra(THREAD_ID) ?: ""
+		connector = connectorRegistry.connectors.firstOrNull { it.source.id == sourceId }
+		sourceName = connector?.source?.displayName
+			?: getString(R.string.connector_conversation_label)
 		val title = titleText(
-			intent.getStringExtra(CHAT_TITLE),
-			getString(R.string.telegram_conversation_title),
+			intent.getStringExtra(THREAD_TITLE),
+			getString(R.string.connector_conversation_title, sourceName),
 		)
 
 		supportActionBar?.apply {
 			setDisplayHomeAsUpEnabled(true)
 			this.title = title
-			setSubtitle(R.string.telegram_origin_label)
+			subtitle = sourceName
 		}
 
 		list = findViewById(R.id.connectorConversationList)
@@ -162,7 +167,7 @@ class TelegramConversationActivity : BriarActivity() {
 
 	override fun onStart() {
 		super.onStart()
-		list.startPeriodicUpdate(TELEGRAM_REFRESH_INTERVAL_MS, automaticRefresh)
+		list.startPeriodicUpdate(REFRESH_INTERVAL_MS, automaticRefresh)
 	}
 
 	override fun onStop() {
@@ -173,8 +178,8 @@ class TelegramConversationActivity : BriarActivity() {
 	override fun onPrepareOptionsMenu(menu: Menu): Boolean {
 		menu.findItem(R.id.action_refresh_connector_conversation)?.isVisible =
 			shouldShowManualRefreshAction(
-				readOnlyConnector.isEnabled(),
-				chatId,
+				connector?.isEnabled() == true,
+				threadId,
 				messageState,
 			)
 		return super.onPrepareOptionsMenu(menu)
@@ -200,7 +205,8 @@ class TelegramConversationActivity : BriarActivity() {
 	private fun loadMessages(showLoading: Boolean = true) {
 		automaticRefreshRunning = !showLoading
 		val loadGeneration = loadOwner.begin()
-		if (!hasValidChatId(chatId)) {
+		val activeConnector = connector
+		if (activeConnector == null || !hasValidThreadId(threadId)) {
 			showMessages(loadGeneration, ConnectorConversationMessageListState(), LOAD_FAILED)
 			return
 		}
@@ -208,7 +214,7 @@ class TelegramConversationActivity : BriarActivity() {
 			submitMessageState(
 				ConnectorConversationMessageListState(
 					messageState.messages,
-					getString(emptyTextForState(LOADING)),
+					getString(emptyTextForState(LOADING), sourceName),
 					isLoading = true,
 				),
 			)
@@ -216,11 +222,11 @@ class TelegramConversationActivity : BriarActivity() {
 		ioExecutor.execute {
 			if (!loadOwner.owns(loadGeneration)) return@execute
 			try {
-				if (!readOnlyConnector.isEnabled()) {
+				if (!activeConnector.isEnabled()) {
 					showMessages(loadGeneration, ConnectorConversationMessageListState(), DISABLED)
 					return@execute
 				}
-				if (!readOnlyConnector.isAuthorized()) {
+				if (!activeConnector.isAuthorized()) {
 					showMessages(
 						loadGeneration,
 						ConnectorConversationMessageListState(),
@@ -229,8 +235,8 @@ class TelegramConversationActivity : BriarActivity() {
 					return@execute
 				}
 				if (!loadOwner.owns(loadGeneration)) return@execute
-				val result = readOnlyConnector.getRecentMessageReadResult(
-					chatId.toString(),
+				val result = activeConnector.getRecentMessageReadResult(
+					threadId,
 					MESSAGE_LIMIT,
 				)
 				when (result) {
@@ -270,7 +276,7 @@ class TelegramConversationActivity : BriarActivity() {
 				state.withAvailabilityState(
 					availabilityState,
 					messageState,
-					getString(emptyTextForState(availabilityState)),
+					getString(emptyTextForState(availabilityState), sourceName),
 				),
 			)
 		}

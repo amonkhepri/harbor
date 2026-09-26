@@ -68,6 +68,7 @@ import org.briarproject.briar.api.blog.BlogManager;
 import org.briarproject.briar.api.blog.BlogPostFactory;
 import org.briarproject.briar.api.blog.BlogSharingManager;
 import org.briarproject.briar.api.client.MessageTracker;
+import org.briarproject.briar.api.connector.ConnectorRegistry;
 import org.briarproject.briar.api.conversation.ConversationManager;
 import org.briarproject.briar.api.feed.FeedManager;
 import org.briarproject.briar.api.forum.ForumManager;
@@ -210,6 +211,8 @@ public interface AndroidComponent
 	TelegramConnector telegramConnector();
 
 	MatrixAuthSession matrixAuthSession();
+
+	ConnectorRegistry connectorRegistry();
 
 	AndroidWakeLockManager wakeLockManager();
 
