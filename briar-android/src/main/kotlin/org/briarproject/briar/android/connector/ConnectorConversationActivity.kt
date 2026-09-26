@@ -165,6 +165,7 @@ class ConnectorConversationActivity : BriarActivity() {
 
 		composeBar = findViewById(R.id.connectorConversationComposeBar)
 		composeText = findViewById(R.id.connectorConversationComposeText)
+		composeText.hint = getString(R.string.connector_conversation_compose_hint, sourceName)
 		sendButton = findViewById(R.id.connectorConversationSendButton)
 		sendButton.setOnClickListener { onSendClicked() }
 		updateComposeBarVisibility()
