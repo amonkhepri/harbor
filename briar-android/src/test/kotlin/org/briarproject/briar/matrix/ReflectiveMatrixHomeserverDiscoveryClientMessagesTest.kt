@@ -366,7 +366,7 @@ class ReflectiveMatrixHomeserverDiscoveryClientMessagesTest {
 		body: String,
 		timestamp: ULong,
 		own: Boolean = false,
-		messageType: MessageType = MessageType.Text,
+		messageType: MessageType = MessageType.Text(),
 		edited: Boolean = false,
 		isReply: Boolean = false,
 		reactions: List<Reaction> = emptyList(),

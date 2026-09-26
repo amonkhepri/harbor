@@ -166,6 +166,9 @@
 	<string name="connector_conversation_refresh">Refresh messages</string>
 	<string name="connector_conversation_direction_incoming">Incoming</string>
 	<string name="connector_conversation_direction_outgoing">Outgoing</string>
+	<string name="connector_conversation_compose_hint">Message %1$s</string>
+	<string name="connector_conversation_send">Send</string>
+	<string name="connector_conversation_send_failed">Message could not be sent</string>
 	<string name="telegram_inbox_refresh">Refresh Telegram inbox</string>
 
 	<!-- Notifications -->

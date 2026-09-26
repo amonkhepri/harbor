@@ -104,6 +104,27 @@ class Timeline {
 		return FakeMatrixSdkState.paginationHitTimelineStart
 	}
 
+	/** Mirrors the pinned AAR's real shape: synchronous, builds an owned closeable value. */
+	fun createMessageContent(messageType: MessageType): RoomMessageEventContentWithoutRelation {
+		FakeMatrixSdkState.createMessageContentCallCount++
+		FakeMatrixSdkState.lastCreatedMessageType = messageType
+		return RoomMessageEventContentWithoutRelation(messageType)
+	}
+
+	suspend fun send(content: RoomMessageEventContentWithoutRelation): SendHandle {
+		FakeMatrixSdkState.sendCallCount++
+		FakeMatrixSdkState.lastSentContent = content
+		FakeMatrixSdkState.sendFailureToThrow?.let { throw it }
+		val handle = SendHandle()
+		if (!FakeMatrixSdkState.sendSuspendAsynchronously) return handle
+		return suspendCoroutine { continuation ->
+			Thread {
+				if (FakeMatrixSdkState.sendDelayMs > 0) Thread.sleep(FakeMatrixSdkState.sendDelayMs)
+				continuation.resume(handle)
+			}.start()
+		}
+	}
+
 	fun close() {
 		FakeMatrixSdkState.timelineCloseCount++
 	}
@@ -151,7 +172,7 @@ data class FakeTimelineEventSpec(
 	val body: String?,
 	val timestamp: ULong,
 	val own: Boolean = false,
-	val messageType: MessageType = MessageType.Text,
+	val messageType: MessageType = MessageType.Text(),
 	val edited: Boolean = false,
 	val isReply: Boolean = false,
 	val reactions: List<Reaction> = emptyList(),
@@ -238,16 +259,43 @@ sealed class MsgLikeKind {
 }
 
 sealed class MessageType {
-	object Text : MessageType()
+	/**
+	 * Mirrors the pinned AAR's real shape (MX-013): a class carrying a [TextMessageContent], not
+	 * a parameterless singleton, since `Timeline.createMessageContent` requires building one from
+	 * plain text to send. The default keeps every pre-existing `MessageType.Text` incoming-message
+	 * fixture usage compiling unchanged.
+	 */
+	class Text(val content: TextMessageContent = TextMessageContent("", null)) : MessageType()
 	object Image : MessageType()
 	object Video : MessageType()
 	object Audio : MessageType()
 	object File : MessageType()
 }
 
+/** Mirrors the pinned AAR's real shape: `TextMessageContent(String body, FormattedBody formatted)`. */
+class TextMessageContent(val body: String, val formatted: FormattedBody?)
+
+/** Mirrors the pinned AAR's real shape: `FormattedBody(MessageFormat format, String body)`. Not
+ * exercised by any current send path, which always passes a null `formatted` body. */
+class FormattedBody(val format: Any? = null, val body: String = "")
+
 class MessageContent(val msgType: MessageType, val body: String, val isEdited: Boolean) {
 	fun destroy() {
 		FakeMatrixSdkState.messageContentDestroyCount++
+	}
+}
+
+/** Mirrors the pinned AAR's real shape: an owned closeable value `Timeline.send` consumes. */
+class RoomMessageEventContentWithoutRelation(val messageType: MessageType) {
+	fun close() {
+		FakeMatrixSdkState.roomMessageEventContentCloseCount++
+	}
+}
+
+/** Mirrors the pinned AAR's real shape: an owned closeable value `Timeline.send` returns. */
+class SendHandle {
+	fun close() {
+		FakeMatrixSdkState.sendHandleCloseCount++
 	}
 }
 
@@ -597,6 +645,15 @@ object FakeMatrixSdkState {
 	var messageContentDestroyCount = 0
 	var otherContentDestroyCount = 0
 	var inReplyToDetailsDestroyCount = 0
+	var createMessageContentCallCount = 0
+	var lastCreatedMessageType: MessageType? = null
+	var sendCallCount = 0
+	var lastSentContent: RoomMessageEventContentWithoutRelation? = null
+	var sendFailureToThrow: ClientException? = null
+	var sendSuspendAsynchronously = false
+	var sendDelayMs = 0L
+	var roomMessageEventContentCloseCount = 0
+	var sendHandleCloseCount = 0
 
 	fun reset() {
 		awaitBuilds()
@@ -653,5 +710,14 @@ object FakeMatrixSdkState {
 		messageContentDestroyCount = 0
 		otherContentDestroyCount = 0
 		inReplyToDetailsDestroyCount = 0
+		createMessageContentCallCount = 0
+		lastCreatedMessageType = null
+		sendCallCount = 0
+		lastSentContent = null
+		sendFailureToThrow = null
+		sendSuspendAsynchronously = false
+		sendDelayMs = 0L
+		roomMessageEventContentCloseCount = 0
+		sendHandleCloseCount = 0
 	}
 }

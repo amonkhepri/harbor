@@ -4,6 +4,9 @@ import android.os.Bundle
 import android.os.Parcelable
 import android.view.Menu
 import android.view.MenuItem
+import android.view.View
+import android.widget.Button
+import android.widget.EditText
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.google.android.material.snackbar.Snackbar
 import org.briarproject.bramble.api.lifecycle.IoExecutor
@@ -19,6 +22,7 @@ import org.briarproject.briar.android.util.BriarSnackbarBuilder
 import org.briarproject.briar.android.view.BriarRecyclerView
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult
 import org.briarproject.briar.api.connector.ConnectorRegistry
+import org.briarproject.briar.api.connector.ConnectorTextSender
 import org.briarproject.briar.api.connector.ReadOnlyConnector
 import org.briarproject.nullsafety.MethodsNotNullByDefault
 import org.briarproject.nullsafety.ParametersNotNullByDefault
@@ -91,6 +95,13 @@ class ConnectorConversationActivity : BriarActivity() {
 
 		private fun hasValidThreadId(threadId: String): Boolean = threadId.isNotEmpty()
 
+		private fun shouldShowComposeBar(
+			connectorEnabled: Boolean,
+			authorized: Boolean,
+			threadId: String,
+			textSender: ConnectorTextSender?,
+		): Boolean = textSender != null && connectorEnabled && authorized && hasValidThreadId(threadId)
+
 		private fun titleText(title: String?, fallback: String): String =
 			if (title == null || title.trim().isEmpty()) fallback else title
 	}
@@ -108,8 +119,13 @@ class ConnectorConversationActivity : BriarActivity() {
 	private lateinit var layoutManager: LinearLayoutManager
 	private var layoutManagerState: Parcelable? = null
 	private var connector: ReadOnlyConnector? = null
+	private var textSender: ConnectorTextSender? = null
 	private lateinit var sourceName: String
 	private var threadId = ""
+	private lateinit var composeBar: View
+	private lateinit var composeText: EditText
+	private lateinit var sendButton: Button
+	private var sendInFlight = false
 	private var messageState = ConnectorConversationMessageListState()
 	private var automaticRefreshRunning = false
 	private val automaticRefresh = Runnable {
@@ -128,6 +144,7 @@ class ConnectorConversationActivity : BriarActivity() {
 		val sourceId = intent.getStringExtra(SOURCE_ID)
 		threadId = intent.getStringExtra(THREAD_ID) ?: ""
 		connector = connectorRegistry.connectors.firstOrNull { it.source.id == sourceId }
+		textSender = connector as? ConnectorTextSender
 		sourceName = connector?.source?.displayName
 			?: getString(R.string.connector_conversation_label)
 		val title = titleText(
@@ -145,6 +162,13 @@ class ConnectorConversationActivity : BriarActivity() {
 		layoutManager = LinearLayoutManager(this).apply { stackFromEnd = true }
 		list.setLayoutManager(layoutManager)
 		list.setAdapter(adapter)
+
+		composeBar = findViewById(R.id.connectorConversationComposeBar)
+		composeText = findViewById(R.id.connectorConversationComposeText)
+		sendButton = findViewById(R.id.connectorConversationSendButton)
+		sendButton.setOnClickListener { onSendClicked() }
+		updateComposeBarVisibility()
+
 		loadMessages()
 	}
 
@@ -304,5 +328,53 @@ class ConnectorConversationActivity : BriarActivity() {
 		}
 		messageState = state
 		invalidateOptionsMenu()
+		updateComposeBarVisibility()
+	}
+
+	private fun updateComposeBarVisibility() {
+		val visible = shouldShowComposeBar(
+			connector?.isEnabled() == true,
+			connector?.isAuthorized() == true,
+			threadId,
+			textSender,
+		)
+		composeBar.visibility = if (visible) View.VISIBLE else View.GONE
+	}
+
+	private fun onSendClicked() {
+		val sender = textSender ?: return
+		if (sendInFlight) return
+		val text = composeText.text?.toString()?.trim().orEmpty()
+		if (text.isEmpty()) return
+		sendInFlight = true
+		setComposeEnabled(false)
+		val activeThreadId = threadId
+		ioExecutor.execute {
+			val sent = try {
+				sender.sendText(activeThreadId, text)
+			} catch (e: RuntimeException) {
+				false
+			}
+			runOnUiThread { onSendCompleted(sent) }
+		}
+	}
+
+	private fun onSendCompleted(sent: Boolean) {
+		if (isFinishing || isDestroyed) return
+		sendInFlight = false
+		setComposeEnabled(true)
+		if (sent) {
+			composeText.setText("")
+			loadMessages(showLoading = false)
+		} else {
+			BriarSnackbarBuilder()
+				.make(list, getString(R.string.connector_conversation_send_failed), Snackbar.LENGTH_LONG)
+				.show()
+		}
+	}
+
+	private fun setComposeEnabled(enabled: Boolean) {
+		composeText.isEnabled = enabled
+		sendButton.isEnabled = enabled
 	}
 }

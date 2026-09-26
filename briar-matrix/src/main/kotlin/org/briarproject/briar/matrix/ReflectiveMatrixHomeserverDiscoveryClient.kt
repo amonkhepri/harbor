@@ -33,7 +33,7 @@ import kotlin.coroutines.intrinsics.COROUTINE_SUSPENDED
 
 /**
  * Production [MatrixHomeserverDiscoveryClient], [MatrixLoginClient], [MatrixRoomSnapshotClient],
- * and [MatrixMessageSnapshotClient] that invoke the pinned
+ * [MatrixMessageSnapshotClient], and [MatrixMessageSendClient] that invoke the pinned
  * `org.matrix.rustcomponents:sdk-android` `ClientBuilder.serverName(...).build()`
  * discovery path entirely over reflection, so `:briar-matrix` keeps zero
  * compile-time dependency on the SDK (see this module's `build.gradle` and
@@ -67,7 +67,8 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 ) : MatrixHomeserverDiscoveryClient,
 	MatrixLoginClient,
 	MatrixRoomSnapshotClient,
-	MatrixMessageSnapshotClient {
+	MatrixMessageSnapshotClient,
+	MatrixMessageSendClient {
 
 	private var loginClient: Any? = null
 	private val lifecycleLock = Any()
@@ -633,6 +634,63 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		}
 	}
 
+	/**
+	 * Sends [text] as a plain-text message into [roomId] (MX-013). `Timeline
+	 * .createMessageContent` is a synchronous call that builds a
+	 * `RoomMessageEventContentWithoutRelation` from `MessageType.Text(TextMessageContent(body,
+	 * formatted))`; the suspend `Timeline.send(content)` then fires it, returning an owned
+	 * `SendHandle` bridged the same way [getRecentMessages] bridges `Room.timeline()`. Returns
+	 * false, never throwing, when no session is retained, [roomId] cannot be found, or any step
+	 * fails.
+	 */
+	@Synchronized
+	override fun sendTextMessage(roomId: String, text: String): Boolean {
+		val client = loginClient ?: return false
+		var room: Any? = null
+		var timeline: Any? = null
+		var content: Any? = null
+		var sendHandle: Any? = null
+		return try {
+			room = client.javaClass.getMethod("getRoom", String::class.java).invoke(client, roomId)
+				?: throw SnapshotAdapterFailure()
+			val loadedTimeline =
+				invokeCloseableValue(room, "timeline", emptyArray(), emptyArray(), ::closeQuietly)
+			timeline = loadedTimeline
+			val formattedBodyClass = Class.forName(FORMATTED_BODY_CLASS_NAME)
+			val textContent = Class.forName(TEXT_MESSAGE_CONTENT_CLASS_NAME)
+				.getConstructor(String::class.java, formattedBodyClass)
+				.newInstance(text, null)
+			val messageType = Class.forName(MESSAGE_TYPE_TEXT_CLASS_NAME)
+				.getConstructor(textContent.javaClass)
+				.newInstance(textContent)
+			val createdContent = loadedTimeline.javaClass
+				.getMethod("createMessageContent", Class.forName(MESSAGE_TYPE_CLASS_NAME))
+				.invoke(loadedTimeline, messageType)
+				?: throw SnapshotAdapterFailure()
+			content = createdContent
+			sendHandle = invokeCloseableValue(
+				loadedTimeline,
+				"send",
+				arrayOf(Class.forName(ROOM_MESSAGE_EVENT_CONTENT_CLASS_NAME)),
+				arrayOf(createdContent),
+				::closeQuietly,
+			)
+			true
+		} catch (e: InterruptedException) {
+			Thread.currentThread().interrupt()
+			false
+		} catch (e: Exception) {
+			false
+		} catch (e: LinkageError) {
+			false
+		} finally {
+			closeQuietly(sendHandle)
+			closeQuietly(content)
+			closeQuietly(timeline)
+			closeQuietly(room)
+		}
+	}
+
 	private fun readTimelineSnapshot(
 		timeline: Any,
 		listenerClass: Class<*>,
@@ -1054,6 +1112,12 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		const val SESSION_DELEGATE_FACTORY_CLASS_NAME =
 			"org.briarproject.briar.matrix.DirectMatrixClientSessionDelegateFactory"
 		const val TIMELINE_LISTENER_CLASS_NAME = "org.matrix.rustcomponents.sdk.TimelineListener"
+		const val FORMATTED_BODY_CLASS_NAME = "org.matrix.rustcomponents.sdk.FormattedBody"
+		const val TEXT_MESSAGE_CONTENT_CLASS_NAME = "org.matrix.rustcomponents.sdk.TextMessageContent"
+		const val MESSAGE_TYPE_CLASS_NAME = "org.matrix.rustcomponents.sdk.MessageType"
+		const val MESSAGE_TYPE_TEXT_CLASS_NAME = "org.matrix.rustcomponents.sdk.MessageType\$Text"
+		const val ROOM_MESSAGE_EVENT_CONTENT_CLASS_NAME =
+			"org.matrix.rustcomponents.sdk.RoomMessageEventContentWithoutRelation"
 		const val PAGINATE_BACKWARDS_METHOD_NAME = "paginateBackwards-vckuEUM"
 		const val TIMESTAMP_GETTER_NAME = "getTimestamp-s-VKNKU"
 		const val MAX_UNSIGNED_SHORT = 0xFFFF

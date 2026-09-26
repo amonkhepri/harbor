@@ -1,7 +1,42 @@
 <?xml version="1.0" encoding="utf-8"?>
-<org.briarproject.briar.android.view.BriarRecyclerView xmlns:android="http://schemas.android.com/apk/res/android"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
 	xmlns:app="http://schemas.android.com/apk/res-auto"
-	android:id="@+id/connectorConversationList"
 	android:layout_width="match_parent"
 	android:layout_height="match_parent"
-	app:scrollToEnd="false" />
+	android:orientation="vertical">
+
+	<org.briarproject.briar.android.view.BriarRecyclerView
+		android:id="@+id/connectorConversationList"
+		android:layout_width="match_parent"
+		android:layout_height="0dp"
+		android:layout_weight="1"
+		app:scrollToEnd="false" />
+
+	<LinearLayout
+		android:id="@+id/connectorConversationComposeBar"
+		android:layout_width="match_parent"
+		android:layout_height="wrap_content"
+		android:background="@color/card_background"
+		android:orientation="horizontal"
+		android:padding="8dp"
+		android:visibility="gone">
+
+		<EditText
+			android:id="@+id/connectorConversationComposeText"
+			android:layout_width="0dp"
+			android:layout_height="wrap_content"
+			android:layout_weight="1"
+			android:hint="@string/connector_conversation_compose_hint"
+			android:inputType="textCapSentences|textMultiLine"
+			android:maxLines="4" />
+
+		<Button
+			android:id="@+id/connectorConversationSendButton"
+			android:layout_width="wrap_content"
+			android:layout_height="wrap_content"
+			android:layout_gravity="bottom"
+			android:text="@string/connector_conversation_send" />
+
+	</LinearLayout>
+
+</LinearLayout>

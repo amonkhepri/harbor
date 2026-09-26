@@ -232,7 +232,7 @@ class ContactListViewModelTest {
 
 		fun connector(session: MatrixAuthSession): MatrixRoomConnector {
 			FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec("!room:example", "Room"))
-			return MatrixRoomConnector(client, session, client)
+			return MatrixRoomConnector(client, session, client, client)
 		}
 
 		private fun newClient() = ReflectiveMatrixHomeserverDiscoveryClient(

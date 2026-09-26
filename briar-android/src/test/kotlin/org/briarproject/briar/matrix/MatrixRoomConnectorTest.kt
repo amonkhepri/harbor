@@ -233,12 +233,52 @@ class MatrixRoomConnectorTest {
 		assertEquals(null, messageSnapshotClient.lastRequestedRoomId)
 	}
 
+	@Test
+	fun `sendText fails closed without invoking the send client when not authorized`() {
+		val messageSendClient = FakeMessageSendClient(true)
+		val connector = connector(
+			messageSendClient = messageSendClient,
+			authSession = FakeMatrixAuthSession(MatrixAuthState.HOMESERVER_ENTRY),
+		)
+
+		val sent = connector.sendText("!a:example.org", "hello")
+
+		assertFalse(sent)
+		assertEquals(null, messageSendClient.lastRequestedRoomId)
+	}
+
+	@Test
+	fun `sendText delegates to the send client and returns its result when authorized`() {
+		val messageSendClient = FakeMessageSendClient(true)
+		val connector = connector(
+			messageSendClient = messageSendClient,
+			authSession = FakeMatrixAuthSession(MatrixAuthState.READY),
+		)
+
+		val sent = connector.sendText("!a:example.org", "hello")
+
+		assertTrue(sent)
+		assertEquals("!a:example.org", messageSendClient.lastRequestedRoomId)
+		assertEquals("hello", messageSendClient.lastRequestedText)
+	}
+
+	@Test
+	fun `sendText reports the send client's failure`() {
+		val connector = connector(
+			messageSendClient = FakeMessageSendClient(false),
+			authSession = FakeMatrixAuthSession(MatrixAuthState.READY),
+		)
+
+		assertFalse(connector.sendText("!a:example.org", "hello"))
+	}
+
 	private fun connector(
 		roomSnapshotClient: MatrixRoomSnapshotClient = FakeRoomSnapshotClient(emptyList()),
 		messageSnapshotClient: MatrixMessageSnapshotClient = FakeMessageSnapshotClient(emptyList()),
+		messageSendClient: MatrixMessageSendClient = FakeMessageSendClient(true),
 		authSession: MatrixAuthSession,
 	): MatrixRoomConnector =
-		MatrixRoomConnector(roomSnapshotClient, authSession, messageSnapshotClient)
+		MatrixRoomConnector(roomSnapshotClient, authSession, messageSnapshotClient, messageSendClient)
 
 	private class FakeRoomSnapshotClient(private val snapshots: List<MatrixRoomSnapshot>) :
 		MatrixRoomSnapshotClient {
@@ -262,6 +302,19 @@ class MatrixRoomConnectorTest {
 			lastRequestedRoomId = roomId
 			lastRequestedLimit = limit
 			return snapshots
+		}
+	}
+
+	private class FakeMessageSendClient(private val result: Boolean) : MatrixMessageSendClient {
+		var lastRequestedRoomId: String? = null
+			private set
+		var lastRequestedText: String? = null
+			private set
+
+		override fun sendTextMessage(roomId: String, text: String): Boolean {
+			lastRequestedRoomId = roomId
+			lastRequestedText = text
+			return result
 		}
 	}
 
