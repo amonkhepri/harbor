@@ -7,6 +7,7 @@ import org.briarproject.briar.api.matrix.MatrixAuthSession.RecoverableErrorDetai
 import org.briarproject.briar.api.matrix.MatrixAuthSession.RecoverableErrorDetail.NONE
 import org.briarproject.briar.api.matrix.MatrixHomeserverDiscoveryClient
 import org.briarproject.briar.api.matrix.MatrixHomeserverDiscoveryClient.DiscoveryResult
+import org.briarproject.briar.api.connector.ConnectorImageSender
 import org.briarproject.briar.api.connector.ConnectorMessageType
 import org.briarproject.briar.api.connector.ConnectorReactionSummary
 import java.io.ByteArrayInputStream
@@ -33,7 +34,8 @@ import kotlin.coroutines.intrinsics.COROUTINE_SUSPENDED
 
 /**
  * Production [MatrixHomeserverDiscoveryClient], [MatrixLoginClient], [MatrixRoomSnapshotClient],
- * [MatrixMessageSnapshotClient], and [MatrixMessageSendClient] that invoke the pinned
+ * [MatrixMessageSnapshotClient], and [MatrixMessageSendClient] (text send MX-013, image send
+ * MX-014) that invoke the pinned
  * `org.matrix.rustcomponents:sdk-android` `ClientBuilder.serverName(...).build()`
  * discovery path entirely over reflection, so `:briar-matrix` keeps zero
  * compile-time dependency on the SDK (see this module's `build.gradle` and
@@ -691,6 +693,100 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		}
 	}
 
+	/** Uploads one image and awaits SDK completion; cancels an abandoned join before closing it. */
+	@Synchronized
+	override fun sendImageMessage(
+		roomId: String,
+		imageBytes: ByteArray,
+		fileName: String,
+		mimeType: String,
+	): Boolean {
+		if (imageBytes.isEmpty() ||
+			imageBytes.size > ConnectorImageSender.MAX_IMAGE_BYTES ||
+			!mimeType.startsWith("image/") ||
+			fileName.isBlank() ||
+			roomId.isBlank()
+		) {
+			return false
+		}
+		val client = loginClient ?: return false
+		var room: Any? = null
+		var timeline: Any? = null
+		var imageInfo: Any? = null
+		var joinHandle: Any? = null
+		var completed = false
+		return try {
+			room = client.javaClass.getMethod("getRoom", String::class.java).invoke(client, roomId)
+				?: throw SnapshotAdapterFailure()
+			val membership = room.javaClass.getMethod("membership").invoke(room) as? Enum<*>
+			val encryption = room.javaClass.getMethod("encryptionState").invoke(room) as? Enum<*>
+			if (membership?.name != "JOINED" || encryption?.name != "NOT_ENCRYPTED") return false
+			val loadedTimeline =
+				invokeCloseableValue(room, "timeline", emptyArray(), emptyArray(), ::closeQuietly)
+			timeline = loadedTimeline
+			val uploadSourceClass = Class.forName(UPLOAD_SOURCE_CLASS_NAME)
+			val uploadSource = Class.forName(UPLOAD_SOURCE_DATA_CLASS_NAME)
+				.getConstructor(ByteArray::class.java, String::class.java)
+				.newInstance(imageBytes, fileName)
+			val uploadParameters = Class.forName(UPLOAD_PARAMETERS_CLASS_NAME)
+				.getConstructor(
+					uploadSourceClass,
+					String::class.java,
+					Class.forName(FORMATTED_BODY_CLASS_NAME),
+					Class.forName(MENTIONS_CLASS_NAME),
+					String::class.java,
+					String::class.java,
+				)
+				.newInstance(uploadSource, null, null, null, null, null)
+			val uLongClass = Class.forName(ULONG_CLASS_NAME)
+			val createdImageInfo = Class.forName(IMAGE_INFO_CLASS_NAME)
+				.getConstructor(
+					uLongClass,
+					uLongClass,
+					String::class.java,
+					uLongClass,
+					Class.forName(THUMBNAIL_INFO_CLASS_NAME),
+					Class.forName(MEDIA_SOURCE_CLASS_NAME),
+					String::class.java,
+					java.lang.Boolean::class.java,
+					Class.forName(DEFAULT_CONSTRUCTOR_MARKER_CLASS_NAME),
+				)
+				.newInstance(null, null, mimeType, imageBytes.size.toULong(), null, null, null, null, null)
+			imageInfo = createdImageInfo
+			val createdJoinHandle = loadedTimeline.javaClass
+				.getMethod(
+					"sendImage",
+					Class.forName(UPLOAD_PARAMETERS_CLASS_NAME),
+					uploadSourceClass,
+					Class.forName(IMAGE_INFO_CLASS_NAME),
+				)
+				.invoke(loadedTimeline, uploadParameters, null, createdImageInfo)
+				?: throw SnapshotAdapterFailure()
+			joinHandle = createdJoinHandle
+			invokeUnit(createdJoinHandle, "join", emptyArray(), emptyArray())
+			completed = true
+			true
+		} catch (e: InterruptedException) {
+			Thread.currentThread().interrupt()
+			false
+		} catch (e: Exception) {
+			false
+		} catch (e: LinkageError) {
+			false
+		} finally {
+			if (!completed && joinHandle != null) {
+				try {
+					joinHandle.javaClass.getMethod("cancel").invoke(joinHandle)
+				} catch (ignored: Exception) {
+				}
+			}
+			closeQuietly(joinHandle)
+			destroyQuietly(imageInfo)
+			closeQuietly(timeline)
+			closeQuietly(room)
+		}
+	}
+
 	private fun readTimelineSnapshot(
 		timeline: Any,
 		listenerClass: Class<*>,
@@ -1118,6 +1214,15 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		const val MESSAGE_TYPE_TEXT_CLASS_NAME = "org.matrix.rustcomponents.sdk.MessageType\$Text"
 		const val ROOM_MESSAGE_EVENT_CONTENT_CLASS_NAME =
 			"org.matrix.rustcomponents.sdk.RoomMessageEventContentWithoutRelation"
+		const val UPLOAD_SOURCE_CLASS_NAME = "org.matrix.rustcomponents.sdk.UploadSource"
+		const val UPLOAD_SOURCE_DATA_CLASS_NAME = "org.matrix.rustcomponents.sdk.UploadSource\$Data"
+		const val UPLOAD_PARAMETERS_CLASS_NAME = "org.matrix.rustcomponents.sdk.UploadParameters"
+		const val MENTIONS_CLASS_NAME = "org.matrix.rustcomponents.sdk.Mentions"
+		const val IMAGE_INFO_CLASS_NAME = "org.matrix.rustcomponents.sdk.ImageInfo"
+		const val THUMBNAIL_INFO_CLASS_NAME = "org.matrix.rustcomponents.sdk.ThumbnailInfo"
+		const val MEDIA_SOURCE_CLASS_NAME = "org.matrix.rustcomponents.sdk.MediaSource"
+		const val ULONG_CLASS_NAME = "kotlin.ULong"
+		const val DEFAULT_CONSTRUCTOR_MARKER_CLASS_NAME = "kotlin.jvm.internal.DefaultConstructorMarker"
 		const val PAGINATE_BACKWARDS_METHOD_NAME = "paginateBackwards-vckuEUM"
 		const val TIMESTAMP_GETTER_NAME = "getTimestamp-s-VKNKU"
 		const val MAX_UNSIGNED_SHORT = 0xFFFF

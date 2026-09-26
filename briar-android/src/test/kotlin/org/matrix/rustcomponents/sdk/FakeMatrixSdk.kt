@@ -38,6 +38,8 @@ sealed class ClientException(message: String) : Exception(message) {
 
 enum class SlidingSyncVersion { NONE, NATIVE }
 
+enum class EncryptionState { NOT_ENCRYPTED, ENCRYPTED, UNKNOWN }
+
 enum class Membership { INVITED, JOINED, LEFT, KNOCKED, BANNED }
 
 /** Mirrors the pinned AAR's real shape: synchronous `id()`/`displayName()`/`isSpace()`/`membership()`. */
@@ -51,6 +53,7 @@ class Room(
 	fun displayName(): String? = roomDisplayName
 	fun isSpace(): Boolean = space
 	fun membership(): Membership = roomMembership
+	fun encryptionState(): EncryptionState = FakeMatrixSdkState.encryptionState
 
 	suspend fun timeline(): Timeline {
 		FakeMatrixSdkState.timelineCallCount++
@@ -123,6 +126,19 @@ class Timeline {
 				continuation.resume(handle)
 			}.start()
 		}
+	}
+
+	/** Mirrors the pinned AAR's real shape: synchronous, returns an owned join handle (MX-014). */
+	fun sendImage(
+		params: UploadParameters,
+		thumbnailSource: UploadSource?,
+		imageInfo: ImageInfo,
+	): SendAttachmentJoinHandle {
+		FakeMatrixSdkState.sendImageCallCount++
+		FakeMatrixSdkState.lastSendImageParams = params
+		FakeMatrixSdkState.lastSendImageThumbnailSource = thumbnailSource
+		FakeMatrixSdkState.lastSendImageInfo = imageInfo
+		return SendAttachmentJoinHandle()
 	}
 
 	fun close() {
@@ -296,6 +312,97 @@ class RoomMessageEventContentWithoutRelation(val messageType: MessageType) {
 class SendHandle {
 	fun close() {
 		FakeMatrixSdkState.sendHandleCloseCount++
+	}
+}
+
+/**
+ * Mirrors the pinned AAR's real shape (MX-014): `UploadSource.Data(bytes, filename)` is the only
+ * variant any current send path constructs.
+ */
+sealed class UploadSource {
+	class Data(val bytes: ByteArray, val filename: String) : UploadSource()
+}
+
+/**
+ * Mirrors the pinned AAR's real shape (MX-014): `UploadParameters(source, caption,
+ * formattedCaption, mentions, inReplyTo, extraContentJson)`; only [source] is non-nullable.
+ * [caption], [mentions], [inReplyTo], and [extraContentJson] are not exercised by any current send
+ * path, which always passes null for them.
+ */
+class UploadParameters(
+	val source: UploadSource,
+	val caption: String?,
+	val formattedCaption: FormattedBody?,
+	val mentions: Mentions?,
+	val inReplyTo: String?,
+	val extraContentJson: String?,
+)
+
+/** Unconstructed stand-in for the pinned AAR's `Mentions`; no current send path sends mentions. */
+class Mentions
+
+/** Unconstructed stand-in for the pinned AAR's `ThumbnailInfo`; MX-014 sends no thumbnail. */
+class ThumbnailInfo
+
+/** Unconstructed stand-in for the pinned AAR's `MediaSource`; MX-014 sends no thumbnail source. */
+class MediaSource
+
+/**
+ * Mirrors the pinned AAR's real shape (MX-014): `ImageInfo`'s public constructor takes an unused
+ * `DefaultConstructorMarker` parameter after every real field, verified over javap against the
+ * pinned AAR -- not a normal Kotlin default-argument bitmask constructor, so the reflective
+ * production caller passes `null` positionally for it, the same as every other nullable field.
+ */
+class ImageInfo(
+	val height: ULong?,
+	val width: ULong?,
+	val mimetype: String?,
+	val size: ULong?,
+	val thumbnailInfo: ThumbnailInfo?,
+	val thumbnailSource: MediaSource?,
+	val blurhash: String?,
+	val isAnimated: Boolean?,
+) {
+	fun destroy() {
+		FakeMatrixSdkState.imageInfoDestroyCount++
+	}
+}
+
+/**
+ * Mirrors the pinned AAR's real shape (MX-014): `RoomException` is an abstract sealed base with no
+ * public constructor; `Generic` is the concrete variant this fake exercises.
+ */
+sealed class RoomException(message: String) : Exception(message) {
+	class Generic(val msg: String) : RoomException(msg)
+}
+
+/**
+ * Mirrors the pinned AAR's real shape (MX-014): an owned closeable value `Timeline.sendImage`
+ * returns, whose suspend `join()` throws [RoomException] on failure instead of returning one.
+ */
+class SendAttachmentJoinHandle {
+	fun cancel() {
+		FakeMatrixSdkState.imageCancelCount++
+	}
+
+	suspend fun join() {
+		FakeMatrixSdkState.joinCallCount++
+		FakeMatrixSdkState.joinFailureToThrow?.let { throw it }
+		if (!FakeMatrixSdkState.joinSuspendAsynchronously) {
+			FakeMatrixSdkState.onImageJoined?.invoke()
+			return
+		}
+		return suspendCoroutine { continuation ->
+			Thread {
+				if (FakeMatrixSdkState.joinDelayMs > 0) Thread.sleep(FakeMatrixSdkState.joinDelayMs)
+				continuation.resume(Unit)
+				FakeMatrixSdkState.joinFinished.countDown()
+			}.start()
+		}
+	}
+
+	fun close() {
+		FakeMatrixSdkState.sendAttachmentJoinHandleCloseCount++
 	}
 }
 
@@ -654,6 +761,20 @@ object FakeMatrixSdkState {
 	var sendDelayMs = 0L
 	var roomMessageEventContentCloseCount = 0
 	var sendHandleCloseCount = 0
+	var encryptionState = EncryptionState.NOT_ENCRYPTED
+	var onImageJoined: (() -> Unit)? = null
+	var joinFinished = java.util.concurrent.CountDownLatch(1)
+	var imageCancelCount = 0
+	var sendImageCallCount = 0
+	var lastSendImageParams: UploadParameters? = null
+	var lastSendImageThumbnailSource: UploadSource? = null
+	var lastSendImageInfo: ImageInfo? = null
+	var imageInfoDestroyCount = 0
+	var joinCallCount = 0
+	var joinFailureToThrow: RoomException? = null
+	var joinSuspendAsynchronously = false
+	var joinDelayMs = 0L
+	var sendAttachmentJoinHandleCloseCount = 0
 
 	fun reset() {
 		awaitBuilds()
@@ -719,5 +840,19 @@ object FakeMatrixSdkState {
 		sendDelayMs = 0L
 		roomMessageEventContentCloseCount = 0
 		sendHandleCloseCount = 0
+		encryptionState = EncryptionState.NOT_ENCRYPTED
+		onImageJoined = null
+		joinFinished = java.util.concurrent.CountDownLatch(1)
+		imageCancelCount = 0
+		sendImageCallCount = 0
+		lastSendImageParams = null
+		lastSendImageThumbnailSource = null
+		lastSendImageInfo = null
+		imageInfoDestroyCount = 0
+		joinCallCount = 0
+		joinFailureToThrow = null
+		joinSuspendAsynchronously = false
+		joinDelayMs = 0L
+		sendAttachmentJoinHandleCloseCount = 0
 	}
 }

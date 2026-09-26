@@ -1,12 +1,16 @@
 package org.briarproject.briar.android.connector
 
+import android.net.Uri
 import android.os.Bundle
 import android.os.Parcelable
 import android.view.Menu
 import android.view.MenuItem
 import android.view.View
+import android.webkit.MimeTypeMap
 import android.widget.Button
 import android.widget.EditText
+import android.widget.ImageButton
+import androidx.lifecycle.ViewModelProvider
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.google.android.material.snackbar.Snackbar
 import org.briarproject.bramble.api.lifecycle.IoExecutor
@@ -18,14 +22,19 @@ import org.briarproject.briar.android.connector.ConnectorConversationAvailabilit
 import org.briarproject.briar.android.connector.ConnectorConversationAvailabilityState.EMPTY
 import org.briarproject.briar.android.connector.ConnectorConversationAvailabilityState.LOAD_FAILED
 import org.briarproject.briar.android.connector.ConnectorConversationAvailabilityState.LOADING
+import org.briarproject.briar.android.util.ActivityLaunchers.GetImageAdvanced
+import org.briarproject.briar.android.util.ActivityLaunchers.OpenImageDocumentAdvanced
 import org.briarproject.briar.android.util.BriarSnackbarBuilder
+import org.briarproject.briar.android.util.UiUtils.launchActivityToOpenFile
 import org.briarproject.briar.android.view.BriarRecyclerView
+import org.briarproject.briar.api.connector.ConnectorImageSender
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult
 import org.briarproject.briar.api.connector.ConnectorRegistry
 import org.briarproject.briar.api.connector.ConnectorTextSender
 import org.briarproject.briar.api.connector.ReadOnlyConnector
 import org.briarproject.nullsafety.MethodsNotNullByDefault
 import org.briarproject.nullsafety.ParametersNotNullByDefault
+import java.io.IOException
 import java.util.concurrent.Executor
 import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
@@ -55,9 +64,11 @@ internal class ConnectorConversationLoadOwner {
 /**
  * Timeline for one connector-neutral thread (MX-012), read-only unless the connector also
  * implements [ConnectorTextSender] (MX-013), in which case a compose bar is shown for sending
- * into the open thread. The Telegram source built this screen first; it is now chosen at runtime
- * via [SOURCE_ID] so a Matrix inbox row reuses the same rendering, pagination and
- * availability-state handling instead of duplicating a Matrix-only Activity.
+ * into the open thread, and/or [ConnectorImageSender] (MX-014), in which case an attach-image
+ * button next to the compose bar launches the system image picker and sends the chosen image. The
+ * Telegram source built this screen first; it is now chosen at runtime via [SOURCE_ID] so a Matrix
+ * inbox row reuses the same rendering, pagination and availability-state handling instead of
+ * duplicating a Matrix-only Activity.
  */
 @MethodsNotNullByDefault
 @ParametersNotNullByDefault
@@ -71,6 +82,8 @@ class ConnectorConversationActivity : BriarActivity() {
 		private const val MESSAGE_LIMIT = 50
 		private const val REFRESH_INTERVAL_MS = 15_000L
 		private const val STATE_LAYOUT_MANAGER = "layoutManager"
+		private const val DEFAULT_IMAGE_FILE_EXTENSION = "jpg"
+		private const val STATE_PENDING_IMAGE = "pendingImage"
 
 		private fun emptyTextForState(state: ConnectorConversationAvailabilityState): Int = when (state) {
 			LOADING ->
@@ -103,6 +116,13 @@ class ConnectorConversationActivity : BriarActivity() {
 			textSender: ConnectorTextSender?,
 		): Boolean = textSender != null && connectorEnabled && authorized && hasValidThreadId(threadId)
 
+		private fun shouldShowAttachButton(
+			connectorEnabled: Boolean,
+			authorized: Boolean,
+			threadId: String,
+			imageSender: ConnectorImageSender?,
+		): Boolean = imageSender != null && connectorEnabled && authorized && hasValidThreadId(threadId)
+
 		private fun titleText(title: String?, fallback: String): String =
 			if (title == null || title.trim().isEmpty()) fallback else title
 	}
@@ -121,12 +141,19 @@ class ConnectorConversationActivity : BriarActivity() {
 	private var layoutManagerState: Parcelable? = null
 	private var connector: ReadOnlyConnector? = null
 	private var textSender: ConnectorTextSender? = null
+	private var imageSender: ConnectorImageSender? = null
 	private lateinit var sourceName: String
 	private var threadId = ""
 	private lateinit var composeBar: View
 	private lateinit var composeText: EditText
 	private lateinit var sendButton: Button
+	private lateinit var attachButton: ImageButton
 	private var sendInFlight = false
+	private lateinit var imageUpload: ConnectorImageUploadState
+
+	private val imageContentLauncher = registerForActivityResult(GetImageAdvanced(), ::onImageChosen)
+	private val imageDocumentLauncher =
+		registerForActivityResult(OpenImageDocumentAdvanced(), ::onImageChosen)
 	private var messageState = ConnectorConversationMessageListState()
 	private var automaticRefreshRunning = false
 	private val automaticRefresh = Runnable {
@@ -144,8 +171,11 @@ class ConnectorConversationActivity : BriarActivity() {
 
 		val sourceId = intent.getStringExtra(SOURCE_ID)
 		threadId = intent.getStringExtra(THREAD_ID) ?: ""
+		imageUpload = ViewModelProvider(this)[ConnectorImageUploadState::class.java]
+		imageUpload.restore(state?.getString(STATE_PENDING_IMAGE))
 		connector = connectorRegistry.connectors.firstOrNull { it.source.id == sourceId }
 		textSender = connector as? ConnectorTextSender
+		imageSender = connector as? ConnectorImageSender
 		sourceName = connector?.source?.displayName
 			?: getString(R.string.connector_conversation_label)
 		val title = titleText(
@@ -169,7 +199,20 @@ class ConnectorConversationActivity : BriarActivity() {
 		composeText.hint = getString(R.string.connector_conversation_compose_hint, sourceName)
 		sendButton = findViewById(R.id.connectorConversationSendButton)
 		sendButton.setOnClickListener { onSendClicked() }
+		attachButton = findViewById(R.id.connectorConversationAttachButton)
+		attachButton.setOnClickListener { onAttachImageClicked() }
 		updateComposeBarVisibility()
+		imageUpload.status.observe(this) { status ->
+			when (status) {
+				ConnectorImageUploadState.Status.SENDING -> {
+					sendInFlight = true
+					setComposeEnabled(false)
+				}
+				ConnectorImageUploadState.Status.SENT -> onSendCompleted(true, false)
+				ConnectorImageUploadState.Status.FAILED -> onSendCompleted(false, false)
+				else -> Unit
+			}
+		}
 
 		loadMessages()
 	}
@@ -184,6 +227,7 @@ class ConnectorConversationActivity : BriarActivity() {
 		val stateToSave =
 			layoutManagerStateToSave(layoutManagerState, layoutManager.onSaveInstanceState())
 		outState.putParcelable(STATE_LAYOUT_MANAGER, stateToSave)
+		outState.putString(STATE_PENDING_IMAGE, imageUpload.pendingImage)
 	}
 
 	override fun onRestoreInstanceState(savedInstanceState: Bundle) {
@@ -334,13 +378,22 @@ class ConnectorConversationActivity : BriarActivity() {
 	}
 
 	private fun updateComposeBarVisibility() {
-		val visible = shouldShowComposeBar(
-			connector?.isEnabled() == true,
-			connector?.isAuthorized() == true,
-			threadId,
-			textSender,
-		)
+		val enabled = connector?.isEnabled() == true
+		val authorized = connector?.isAuthorized() == true
+		val visible = shouldShowComposeBar(enabled, authorized, threadId, textSender)
 		composeBar.visibility = if (visible) View.VISIBLE else View.GONE
+		attachButton.visibility =
+			if (shouldShowAttachButton(
+					enabled,
+					authorized,
+					threadId,
+					imageSender,
+				)
+			) {
+				View.VISIBLE
+			} else {
+				View.GONE
+			}
 	}
 
 	private fun onSendClicked() {
@@ -357,26 +410,93 @@ class ConnectorConversationActivity : BriarActivity() {
 			} catch (e: RuntimeException) {
 				false
 			}
-			runOnUiThread { onSendCompleted(sent) }
+			runOnUiThread { onSendCompleted(sent, clearComposeText = true) }
 		}
 	}
 
-	private fun onSendCompleted(sent: Boolean) {
+	private fun onAttachImageClicked() {
+		if (!canSendImage() || sendInFlight) return
+		launchActivityToOpenFile(this, imageDocumentLauncher, imageContentLauncher, "image/*")
+	}
+
+	private fun canSendImage(): Boolean = shouldShowAttachButton(
+		connector?.isEnabled() == true,
+		connector?.isAuthorized() == true,
+		threadId,
+		imageSender,
+	)
+
+	private fun onImageChosen(uri: Uri?) {
+		if (uri == null || sendInFlight) return
+		if (!imageUpload.begin(uri.toString())) return
+		if (!canSendImage()) {
+			imageUpload.complete(false)
+			return
+		}
+		val sender = imageSender ?: return
+		sendInFlight = true
+		setComposeEnabled(false)
+		val activeThreadId = threadId
+		ioExecutor.execute {
+			val sent = try {
+				sendPickedImage(sender, activeThreadId, uri)
+			} catch (e: IOException) {
+				false
+			} catch (e: RuntimeException) {
+				false
+			}
+			runOnUiThread { imageUpload.complete(sent) }
+		}
+	}
+
+	private fun sendPickedImage(sender: ConnectorImageSender, threadId: String, uri: Uri): Boolean {
+		val mimeType = contentResolver.getType(uri) ?: return false
+		val extension = MimeTypeMap.getSingleton().getExtensionFromMimeType(mimeType)
+		val fileName = "image." + (extension ?: DEFAULT_IMAGE_FILE_EXTENSION)
+		return sendConnectorImage(sender, threadId, mimeType, fileName) {
+			contentResolver.openInputStream(uri)
+		}
+	}
+
+	private fun onSendCompleted(sent: Boolean, clearComposeText: Boolean) {
 		if (isFinishing || isDestroyed) return
 		sendInFlight = false
 		setComposeEnabled(true)
 		if (sent) {
-			composeText.setText("")
+			if (clearComposeText) composeText.setText("")
+			if (!clearComposeText) {
+				BriarSnackbarBuilder().make(
+					composeBar,
+					R.string.connector_image_sent,
+					Snackbar.LENGTH_SHORT,
+				).show()
+			}
 			loadMessages(showLoading = false)
 		} else {
-			BriarSnackbarBuilder()
-				.make(list, getString(R.string.connector_conversation_send_failed), Snackbar.LENGTH_LONG)
-				.show()
+			val snackbar = BriarSnackbarBuilder()
+			if (!clearComposeText) {
+				snackbar.setAction(R.string.connector_image_retry) {
+					onImageChosen(imageUpload.pendingImage?.let(Uri::parse))
+				}
+			}
+			snackbar.make(
+				list,
+				if (clearComposeText) {
+					R.string.connector_conversation_send_failed
+				} else {
+					R.string.connector_image_failed
+				},
+				if (clearComposeText) Snackbar.LENGTH_LONG else Snackbar.LENGTH_INDEFINITE,
+			).show()
 		}
 	}
 
 	private fun setComposeEnabled(enabled: Boolean) {
 		composeText.isEnabled = enabled
 		sendButton.isEnabled = enabled
+		attachButton.isEnabled = enabled
+		sendButton.setText(
+			if (enabled) R.string.connector_conversation_send else R.string.connector_message_sending,
+		)
 	}
 }

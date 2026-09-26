@@ -1,5 +1,6 @@
 package org.briarproject.briar.matrix
 
+import org.briarproject.briar.api.connector.ConnectorImageSender
 import org.briarproject.briar.api.connector.ConnectorMessage
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult.LoadFailed
@@ -27,8 +28,9 @@ import org.briarproject.briar.api.matrix.MatrixConnector
  * item 3 follow-up): a load failure or empty result leaves the row at its
  * prior no-known-latest-message defaults, so one room's message-read failure
  * cannot drop the room from the inbox or crash listing. [messageSendClient]
- * backs the opt-in [ConnectorTextSender] capability (MX-013): sending fails
- * closed, the same as reading, when not authorized.
+ * backs the opt-in [ConnectorTextSender] capability (MX-013) and the opt-in [ConnectorImageSender]
+ * capability (MX-014): both send capabilities fail closed, the same as reading, when not
+ * authorized.
  */
 class MatrixRoomConnector(
 	private val roomSnapshotClient: MatrixRoomSnapshotClient,
@@ -36,7 +38,8 @@ class MatrixRoomConnector(
 	private val messageSnapshotClient: MatrixMessageSnapshotClient,
 	private val messageSendClient: MatrixMessageSendClient,
 ) : MatrixConnector,
-	ConnectorTextSender {
+	ConnectorTextSender,
+	ConnectorImageSender {
 	override val source: ConnectorSource = ConnectorSources.MATRIX
 
 	override fun isEnabled(): Boolean = true
@@ -92,5 +95,15 @@ class MatrixRoomConnector(
 	override fun sendText(threadId: String, text: String): Boolean {
 		if (!isAuthorized()) return false
 		return messageSendClient.sendTextMessage(threadId, text)
+	}
+
+	override fun sendImage(
+		threadId: String,
+		imageBytes: ByteArray,
+		fileName: String,
+		mimeType: String,
+	): Boolean {
+		if (!isAuthorized()) return false
+		return messageSendClient.sendImageMessage(threadId, imageBytes, fileName, mimeType)
 	}
 }

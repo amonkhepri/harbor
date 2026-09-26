@@ -272,6 +272,48 @@ class MatrixRoomConnectorTest {
 		assertFalse(connector.sendText("!a:example.org", "hello"))
 	}
 
+	@Test
+	fun `sendImage fails closed without invoking the send client when not authorized`() {
+		val messageSendClient = FakeMessageSendClient(true)
+		val connector = connector(
+			messageSendClient = messageSendClient,
+			authSession = FakeMatrixAuthSession(MatrixAuthState.HOMESERVER_ENTRY),
+		)
+
+		val sent = connector.sendImage("!a:example.org", byteArrayOf(1, 2, 3), "image.jpg", "image/jpeg")
+
+		assertFalse(sent)
+		assertEquals(null, messageSendClient.lastRequestedRoomId)
+	}
+
+	@Test
+	fun `sendImage delegates to the send client and returns its result when authorized`() {
+		val messageSendClient = FakeMessageSendClient(true)
+		val connector = connector(
+			messageSendClient = messageSendClient,
+			authSession = FakeMatrixAuthSession(MatrixAuthState.READY),
+		)
+		val imageBytes = byteArrayOf(1, 2, 3)
+
+		val sent = connector.sendImage("!a:example.org", imageBytes, "image.jpg", "image/jpeg")
+
+		assertTrue(sent)
+		assertEquals("!a:example.org", messageSendClient.lastRequestedRoomId)
+		assertEquals(imageBytes, messageSendClient.lastRequestedImageBytes)
+		assertEquals("image.jpg", messageSendClient.lastRequestedFileName)
+		assertEquals("image/jpeg", messageSendClient.lastRequestedMimeType)
+	}
+
+	@Test
+	fun `sendImage reports the send client's failure`() {
+		val connector = connector(
+			messageSendClient = FakeMessageSendClient(false),
+			authSession = FakeMatrixAuthSession(MatrixAuthState.READY),
+		)
+
+		assertFalse(connector.sendImage("!a:example.org", byteArrayOf(1), "image.jpg", "image/jpeg"))
+	}
+
 	private fun connector(
 		roomSnapshotClient: MatrixRoomSnapshotClient = FakeRoomSnapshotClient(emptyList()),
 		messageSnapshotClient: MatrixMessageSnapshotClient = FakeMessageSnapshotClient(emptyList()),
@@ -310,10 +352,29 @@ class MatrixRoomConnectorTest {
 			private set
 		var lastRequestedText: String? = null
 			private set
+		var lastRequestedImageBytes: ByteArray? = null
+			private set
+		var lastRequestedFileName: String? = null
+			private set
+		var lastRequestedMimeType: String? = null
+			private set
 
 		override fun sendTextMessage(roomId: String, text: String): Boolean {
 			lastRequestedRoomId = roomId
 			lastRequestedText = text
+			return result
+		}
+
+		override fun sendImageMessage(
+			roomId: String,
+			imageBytes: ByteArray,
+			fileName: String,
+			mimeType: String,
+		): Boolean {
+			lastRequestedRoomId = roomId
+			lastRequestedImageBytes = imageBytes
+			lastRequestedFileName = fileName
+			lastRequestedMimeType = mimeType
 			return result
 		}
 	}
