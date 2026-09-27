@@ -71,10 +71,14 @@ internal class ConnectorConversationAdapter :
 				)
 			}
 			direction.setText(
-				if (item.isOutgoing) {
-					R.string.connector_conversation_direction_outgoing
-				} else {
-					R.string.connector_conversation_direction_incoming
+				when (item.localEchoStatus) {
+					ConnectorLocalEchoStatus.PENDING -> R.string.connector_message_sending
+					ConnectorLocalEchoStatus.FAILED -> R.string.connector_conversation_send_failed
+					null -> if (item.isOutgoing) {
+						R.string.connector_conversation_direction_outgoing
+					} else {
+						R.string.connector_conversation_direction_incoming
+					}
 				},
 			)
 			date.visibility = if (item.dateMillis > 0) View.VISIBLE else View.GONE
@@ -98,6 +102,7 @@ internal class ConnectorConversationAdapter :
 			i1.type == i2.type &&
 			i1.isEdited == i2.isEdited &&
 			i1.isReply == i2.isReply &&
-			i1.reactions == i2.reactions
+			i1.reactions == i2.reactions &&
+			i1.localEchoStatus == i2.localEchoStatus
 	}
 }

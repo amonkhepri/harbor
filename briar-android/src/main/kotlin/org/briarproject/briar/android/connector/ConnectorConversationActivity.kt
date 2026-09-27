@@ -288,9 +288,8 @@ class ConnectorConversationActivity : BriarActivity() {
 		}
 		if (showLoading) {
 			submitMessageState(
-				ConnectorConversationMessageListState(
-					messageState.messages,
-					getString(emptyTextForState(LOADING), sourceName),
+				messageState.copy(
+					emptyText = getString(emptyTextForState(LOADING), sourceName),
 					isLoading = true,
 				),
 			)
@@ -348,10 +347,15 @@ class ConnectorConversationActivity : BriarActivity() {
 		runOnUiThread {
 			if (!loadOwner.owns(loadGeneration)) return@runOnUiThread
 			automaticRefreshRunning = false
+			val next = if (availabilityState == EMPTY) {
+				messageState.reconcile(state.messages).copy(isLoading = false)
+			} else {
+				state
+			}
 			submitMessageState(
-				state.withAvailabilityState(
+				next.withAvailabilityState(
 					availabilityState,
-					messageState,
+					if (availabilityState == EMPTY) next else messageState,
 					getString(emptyTextForState(availabilityState), sourceName),
 				),
 			)
@@ -409,6 +413,8 @@ class ConnectorConversationActivity : BriarActivity() {
 		if (text.isEmpty()) return
 		sendInFlight = true
 		setComposeEnabled(false)
+		submitMessageState(messageState.beginTextSend(connector!!.source, threadId, text))
+		val echoId = messageState.localEchoes.last().item.stableId
 		val activeThreadId = threadId
 		ioExecutor.execute {
 			val sent = try {
@@ -416,7 +422,11 @@ class ConnectorConversationActivity : BriarActivity() {
 			} catch (e: RuntimeException) {
 				false
 			}
-			runOnUiThread { onSendCompleted(sent, clearComposeText = true) }
+			runOnUiThread {
+				if (isFinishing || isDestroyed) return@runOnUiThread
+				submitMessageState(messageState.completeTextSend(echoId, sent))
+				onSendCompleted(sent, clearComposeText = true)
+			}
 		}
 	}
 

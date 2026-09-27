@@ -5,6 +5,8 @@ import org.briarproject.briar.api.connector.ConnectorMessageType
 import org.briarproject.briar.api.connector.ConnectorReactionSummary
 import org.briarproject.briar.api.connector.ConnectorSource
 
+enum class ConnectorLocalEchoStatus { PENDING, FAILED }
+
 data class ConnectorConversationMessageItem(
 	val connectorSource: ConnectorSource,
 	val connectorThreadId: String,
@@ -16,9 +18,11 @@ data class ConnectorConversationMessageItem(
 	val isEdited: Boolean = false,
 	val isReply: Boolean = false,
 	val reactions: List<ConnectorReactionSummary> = emptyList(),
+	val localEchoStatus: ConnectorLocalEchoStatus? = null,
 ) {
 	val stableId: String
-		get() = "${connectorSource.id}:$connectorThreadId:$connectorMessageId"
+		get() = "${connectorSource.id}:$connectorThreadId:$connectorMessageId" +
+			if (localEchoStatus != null) ":local" else ""
 
 	companion object {
 		// No third `messageId` tiebreak: `sortedWith` is stable, and connector clients already
