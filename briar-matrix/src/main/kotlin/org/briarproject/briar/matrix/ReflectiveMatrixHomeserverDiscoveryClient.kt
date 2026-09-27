@@ -7,6 +7,7 @@ import org.briarproject.briar.api.matrix.MatrixAuthSession.RecoverableErrorDetai
 import org.briarproject.briar.api.matrix.MatrixAuthSession.RecoverableErrorDetail.NONE
 import org.briarproject.briar.api.matrix.MatrixHomeserverDiscoveryClient
 import org.briarproject.briar.api.matrix.MatrixHomeserverDiscoveryClient.DiscoveryResult
+import org.briarproject.briar.api.connector.ConnectorFileSender
 import org.briarproject.briar.api.connector.ConnectorImageSender
 import org.briarproject.briar.api.connector.ConnectorMessageType
 import org.briarproject.briar.api.connector.ConnectorReactionSummary
@@ -693,6 +694,17 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		}
 	}
 
+	@Synchronized
+	override fun prepareFileMessage(roomId: String): ConnectorFileSender.PreparedFileSend? {
+		val capturedClient = loginClient ?: return null
+		return ConnectorFileSender.PreparedFileSend { bytes, name, mime ->
+			synchronized(this) {
+				loginClient === capturedClient &&
+					sendAttachment(roomId, bytes, name, mime, false)
+			}
+		}
+	}
+
 	/** Uploads one image and awaits SDK completion; cancels an abandoned join before closing it. */
 	@Synchronized
 	override fun sendImageMessage(
@@ -700,10 +712,22 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		imageBytes: ByteArray,
 		fileName: String,
 		mimeType: String,
+	): Boolean = sendAttachment(roomId, imageBytes, fileName, mimeType, true)
+
+	// Both SDK calls return an owned join handle. Await join, cancel on failure, then release
+	// the handle, metadata, timeline and room. UploadSource.Data creates no temporary file.
+	private fun sendAttachment(
+		roomId: String,
+		bytes: ByteArray,
+		fileName: String,
+		mimeType: String,
+		image: Boolean,
 	): Boolean {
-		if (imageBytes.isEmpty() ||
-			imageBytes.size > ConnectorImageSender.MAX_IMAGE_BYTES ||
-			!mimeType.startsWith("image/") ||
+		val cap = if (image) ConnectorImageSender.MAX_IMAGE_BYTES else ConnectorFileSender.MAX_FILE_BYTES
+		if (bytes.isEmpty() ||
+			bytes.size > cap ||
+			(image && !mimeType.startsWith("image/")) ||
+			(!image && !mimeType.matches(Regex("[A-Za-z0-9.+_-]+/[A-Za-z0-9.+_-]+"))) ||
 			fileName.isBlank() ||
 			roomId.isBlank()
 		) {
@@ -712,7 +736,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		val client = loginClient ?: return false
 		var room: Any? = null
 		var timeline: Any? = null
-		var imageInfo: Any? = null
+		var attachmentInfo: Any? = null
 		var joinHandle: Any? = null
 		var completed = false
 		return try {
@@ -727,7 +751,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			val uploadSourceClass = Class.forName(UPLOAD_SOURCE_CLASS_NAME)
 			val uploadSource = Class.forName(UPLOAD_SOURCE_DATA_CLASS_NAME)
 				.getConstructor(ByteArray::class.java, String::class.java)
-				.newInstance(imageBytes, fileName)
+				.newInstance(bytes, fileName)
 			val uploadParameters = Class.forName(UPLOAD_PARAMETERS_CLASS_NAME)
 				.getConstructor(
 					uploadSourceClass,
@@ -739,29 +763,49 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 				)
 				.newInstance(uploadSource, null, null, null, null, null)
 			val uLongClass = Class.forName(ULONG_CLASS_NAME)
-			val createdImageInfo = Class.forName(IMAGE_INFO_CLASS_NAME)
-				.getConstructor(
-					uLongClass,
-					uLongClass,
-					String::class.java,
-					uLongClass,
-					Class.forName(THUMBNAIL_INFO_CLASS_NAME),
-					Class.forName(MEDIA_SOURCE_CLASS_NAME),
-					String::class.java,
-					java.lang.Boolean::class.java,
-					Class.forName(DEFAULT_CONSTRUCTOR_MARKER_CLASS_NAME),
-				)
-				.newInstance(null, null, mimeType, imageBytes.size.toULong(), null, null, null, null, null)
-			imageInfo = createdImageInfo
-			val createdJoinHandle = loadedTimeline.javaClass
-				.getMethod(
-					"sendImage",
+			val createdInfo = if (image) {
+				Class.forName(IMAGE_INFO_CLASS_NAME)
+					.getConstructor(
+						uLongClass,
+						uLongClass,
+						String::class.java,
+						uLongClass,
+						Class.forName(THUMBNAIL_INFO_CLASS_NAME),
+						Class.forName(MEDIA_SOURCE_CLASS_NAME),
+						String::class.java,
+						java.lang.Boolean::class.java,
+						Class.forName(DEFAULT_CONSTRUCTOR_MARKER_CLASS_NAME),
+					)
+					.newInstance(null, null, mimeType, bytes.size.toULong(), null, null, null, null, null)
+			} else {
+				Class.forName("org.matrix.rustcomponents.sdk.FileInfo")
+					.getConstructor(
+						String::class.java,
+						uLongClass,
+						Class.forName(THUMBNAIL_INFO_CLASS_NAME),
+						Class.forName(MEDIA_SOURCE_CLASS_NAME),
+						Class.forName(DEFAULT_CONSTRUCTOR_MARKER_CLASS_NAME),
+					)
+					.newInstance(mimeType, bytes.size.toULong(), null, null, null)
+			}
+			attachmentInfo = createdInfo
+			val createdJoinHandle = if (image) {
+				loadedTimeline.javaClass
+					.getMethod(
+						"sendImage",
+						Class.forName(UPLOAD_PARAMETERS_CLASS_NAME),
+						uploadSourceClass,
+						Class.forName(IMAGE_INFO_CLASS_NAME),
+					)
+					.invoke(loadedTimeline, uploadParameters, null, createdInfo)
+			} else {
+				loadedTimeline.javaClass.getMethod(
+					"sendFile",
 					Class.forName(UPLOAD_PARAMETERS_CLASS_NAME),
-					uploadSourceClass,
-					Class.forName(IMAGE_INFO_CLASS_NAME),
-				)
-				.invoke(loadedTimeline, uploadParameters, null, createdImageInfo)
-				?: throw SnapshotAdapterFailure()
+					createdInfo.javaClass,
+				).invoke(loadedTimeline, uploadParameters, createdInfo)
+			}
+			if (createdJoinHandle == null) throw SnapshotAdapterFailure()
 			joinHandle = createdJoinHandle
 			invokeUnit(createdJoinHandle, "join", emptyArray(), emptyArray())
 			completed = true
@@ -781,7 +825,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 				}
 			}
 			closeQuietly(joinHandle)
-			destroyQuietly(imageInfo)
+			destroyQuietly(attachmentInfo)
 			closeQuietly(timeline)
 			closeQuietly(room)
 		}

@@ -10,6 +10,7 @@ import android.webkit.MimeTypeMap
 import android.widget.Button
 import android.widget.EditText
 import android.widget.ImageButton
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.lifecycle.ViewModelProvider
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.google.android.material.snackbar.Snackbar
@@ -27,6 +28,7 @@ import org.briarproject.briar.android.util.ActivityLaunchers.OpenImageDocumentAd
 import org.briarproject.briar.android.util.BriarSnackbarBuilder
 import org.briarproject.briar.android.util.UiUtils.launchActivityToOpenFile
 import org.briarproject.briar.android.view.BriarRecyclerView
+import org.briarproject.briar.api.connector.ConnectorFileSender
 import org.briarproject.briar.api.connector.ConnectorImageSender
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult
 import org.briarproject.briar.api.connector.ConnectorRegistry
@@ -142,6 +144,11 @@ class ConnectorConversationActivity : BriarActivity() {
 	private var connector: ReadOnlyConnector? = null
 	private var textSender: ConnectorTextSender? = null
 	private var imageSender: ConnectorImageSender? = null
+	private var fileSender: ConnectorFileSender? = null
+	private lateinit var fileButton: ImageButton
+	private lateinit var fileUpload: ConnectorFileUploadState
+	private val fileLauncher =
+		registerForActivityResult(ActivityResultContracts.GetContent(), ::onFileChosen)
 	private lateinit var sourceName: String
 	private var threadId = ""
 	private lateinit var composeBar: View
@@ -176,6 +183,8 @@ class ConnectorConversationActivity : BriarActivity() {
 		connector = connectorRegistry.connectors.firstOrNull { it.source.id == sourceId }
 		textSender = connector as? ConnectorTextSender
 		imageSender = connector as? ConnectorImageSender
+		fileSender = connector as? ConnectorFileSender
+		fileUpload = ViewModelProvider(this)[ConnectorFileUploadState::class.java]
 		sourceName = connector?.source?.displayName
 			?: getString(R.string.connector_conversation_label)
 		val title = titleText(
@@ -201,6 +210,42 @@ class ConnectorConversationActivity : BriarActivity() {
 		sendButton.setOnClickListener { onSendClicked() }
 		attachButton = findViewById(R.id.connectorConversationAttachButton)
 		attachButton.setOnClickListener { onAttachImageClicked() }
+		fileButton = findViewById(R.id.connectorConversationFileButton)
+		fileButton.setOnClickListener {
+			if (!canSendFile() || sendInFlight) return@setOnClickListener
+			val prepared = fileSender?.prepareFileSend(threadId)
+			if (prepared == null) {
+				fileUpload.complete(false)
+				return@setOnClickListener
+			}
+			fileUpload.pick(prepared)
+			try {
+				fileLauncher.launch("*/*")
+			} catch (e: RuntimeException) {
+				fileUpload.choose(false)
+				fileUpload.complete(false)
+			}
+		}
+		fileUpload.status.observe(this) { status ->
+			sendInFlight = status == ConnectorFileUploadState.Status.PICKING ||
+				status == ConnectorFileUploadState.Status.SENDING
+			setComposeEnabled(!sendInFlight)
+			if (status == ConnectorFileUploadState.Status.SENT ||
+				status == ConnectorFileUploadState.Status.FAILED
+			) {
+				BriarSnackbarBuilder().make(
+					list,
+					if (status == ConnectorFileUploadState.Status.SENT) {
+						R.string.connector_file_sent
+					} else {
+						R.string.connector_file_failed
+					},
+					Snackbar.LENGTH_LONG,
+				).show()
+				if (status == ConnectorFileUploadState.Status.SENT) loadMessages(showLoading = false)
+				fileUpload.acknowledge()
+			}
+		}
 		updateComposeBarVisibility()
 		imageUpload.status.observe(this) { status ->
 			when (status) {
@@ -390,6 +435,7 @@ class ConnectorConversationActivity : BriarActivity() {
 	private fun updateComposeBarVisibility() {
 		val enabled = connector?.isEnabled() == true
 		val authorized = connector?.isAuthorized() == true
+		fileButton.visibility = if (canSendFile()) View.VISIBLE else View.GONE
 		val visible = shouldShowComposeBar(enabled, authorized, threadId, textSender)
 		composeBar.visibility = if (visible) View.VISIBLE else View.GONE
 		attachButton.visibility =
@@ -427,6 +473,32 @@ class ConnectorConversationActivity : BriarActivity() {
 				submitMessageState(messageState.completeTextSend(echoId, sent))
 				onSendCompleted(sent, clearComposeText = true)
 			}
+		}
+	}
+
+	private fun canSendFile(): Boolean = fileSender != null &&
+		connector?.isEnabled() == true &&
+		connector?.isAuthorized() == true &&
+		hasValidThreadId(threadId)
+
+	private fun onFileChosen(uri: Uri?) {
+		val prepared = fileUpload.choose(uri != null) ?: return
+		if (!canSendFile() || uri?.scheme != "content") {
+			fileUpload.complete(false)
+			return
+		}
+		try {
+			ioExecutor.execute {
+				val sent = try {
+					val mime = contentResolver.getType(uri) ?: "application/octet-stream"
+					sendConnectorFile(prepared, mime) { contentResolver.openInputStream(uri) }
+				} catch (e: RuntimeException) {
+					false
+				}
+				runOnUiThread { fileUpload.complete(sent) }
+			}
+		} catch (e: RuntimeException) {
+			fileUpload.complete(false)
 		}
 	}
 
@@ -511,6 +583,7 @@ class ConnectorConversationActivity : BriarActivity() {
 		composeText.isEnabled = enabled
 		sendButton.isEnabled = enabled
 		attachButton.isEnabled = enabled
+		fileButton.isEnabled = enabled
 		sendButton.setText(
 			if (enabled) R.string.connector_conversation_send else R.string.connector_message_sending,
 		)

@@ -31,6 +31,16 @@
 			android:src="@drawable/ic_image"
 			android:visibility="gone" />
 
+		<ImageButton
+			android:id="@+id/connectorConversationFileButton"
+			android:layout_width="48dp"
+			android:layout_height="48dp"
+			android:layout_gravity="bottom"
+			android:background="?attr/selectableItemBackgroundBorderless"
+			android:contentDescription="@string/connector_conversation_attach_file"
+			android:src="@drawable/ic_file"
+			android:visibility="gone" />
+
 		<EditText
 			android:id="@+id/connectorConversationComposeText"
 			android:layout_width="0dp"

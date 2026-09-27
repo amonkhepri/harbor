@@ -128,6 +128,13 @@ class Timeline {
 		}
 	}
 
+	fun sendFile(params: UploadParameters, info: FileInfo): SendAttachmentJoinHandle {
+		FakeMatrixSdkState.sendFileCallCount++
+		FakeMatrixSdkState.lastSendFileParams = params
+		FakeMatrixSdkState.lastSendFileInfo = info
+		return SendAttachmentJoinHandle()
+	}
+
 	/** Mirrors the pinned AAR's real shape: synchronous, returns an owned join handle (MX-014). */
 	fun sendImage(
 		params: UploadParameters,
@@ -353,6 +360,18 @@ class ThumbnailInfo
 
 /** Unconstructed stand-in for the pinned AAR's `MediaSource`; MX-014 sends no thumbnail source. */
 class MediaSource
+
+/** FileInfo has the same synthetic ULong constructor marker as ImageInfo in the pinned AAR. */
+class FileInfo(
+	val mimetype: String?,
+	val size: ULong?,
+	val thumbnailInfo: ThumbnailInfo?,
+	val thumbnailSource: MediaSource?,
+) {
+	fun destroy() {
+		FakeMatrixSdkState.fileInfoDestroyCount++
+	}
+}
 
 /**
  * Mirrors the pinned AAR's real shape (MX-014): `ImageInfo`'s public constructor takes an unused
@@ -772,6 +791,10 @@ object FakeMatrixSdkState {
 	var onImageJoined: (() -> Unit)? = null
 	var joinFinished = java.util.concurrent.CountDownLatch(1)
 	var imageCancelCount = 0
+	var sendFileCallCount = 0
+	var lastSendFileParams: UploadParameters? = null
+	var lastSendFileInfo: FileInfo? = null
+	var fileInfoDestroyCount = 0
 	var sendImageCallCount = 0
 	var lastSendImageParams: UploadParameters? = null
 	var lastSendImageThumbnailSource: UploadSource? = null
@@ -851,6 +874,10 @@ object FakeMatrixSdkState {
 		onImageJoined = null
 		joinFinished = java.util.concurrent.CountDownLatch(1)
 		imageCancelCount = 0
+		sendFileCallCount = 0
+		lastSendFileParams = null
+		lastSendFileInfo = null
+		fileInfoDestroyCount = 0
 		sendImageCallCount = 0
 		lastSendImageParams = null
 		lastSendImageThumbnailSource = null

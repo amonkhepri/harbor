@@ -1000,4 +1000,7 @@
 	<!-- This is a message to be used in screenshots. -->
 	<string name="screenshot_message_3">No problem, hope you like it 😀</string>
 
+    <string name="connector_conversation_attach_file">Send file (up to 10 MiB)</string>
+    <string name="connector_file_sent">File sent</string>
+    <string name="connector_file_failed">Could not send file. Choose a non-empty file up to 10 MiB and try again.</string>
 </resources>

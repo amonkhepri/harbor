@@ -78,6 +78,7 @@ class ConnectorLocalEchoTest {
 		set("composeBar", root)
 		set("sendButton", Button(activity))
 		set("attachButton", ImageButton(activity))
+		set("fileButton", ImageButton(activity))
 		set("connector", connector)
 		set("textSender", connector)
 		set("threadId", "room")

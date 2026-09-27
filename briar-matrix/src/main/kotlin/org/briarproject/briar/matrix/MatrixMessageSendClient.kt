@@ -1,5 +1,7 @@
 package org.briarproject.briar.matrix
 
+import org.briarproject.briar.api.connector.ConnectorFileSender.PreparedFileSend
+
 /**
  * Narrow, fakeable boundary over sending one plain-text message or one image attachment into an
  * already-joined Matrix room on an SDK client retained by a prior [MatrixLoginClient.login] or
@@ -14,9 +16,13 @@ package org.briarproject.briar.matrix
  * UploadSource?, ImageInfo)`, which returns an owned `SendAttachmentJoinHandle`; its suspend
  * `join()` is awaited to learn success or failure. The reflective implementation bridges both
  * suspend calls the same way `ReflectiveMatrixHomeserverDiscoveryClient` already bridges
- * `Room.timeline()`.
+ * `Room.timeline()`. File attachments use `Timeline.sendFile(UploadParameters, FileInfo)`
+ * and the same owned join handle (verified against the 26.08.05 AAR for MX-017).
  */
 interface MatrixMessageSendClient {
+	/** Captures the retained SDK session before provider IO; unsupported clients fail closed. */
+	fun prepareFileMessage(roomId: String): PreparedFileSend? = null
+
 	/**
 	 * Sends [text] as a plain-text message into [roomId]. Returns true on success, false --
 	 * never throwing -- when no session is retained, [roomId] cannot be found, or the SDK send

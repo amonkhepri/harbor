@@ -1,5 +1,6 @@
 package org.briarproject.briar.matrix
 
+import org.briarproject.briar.api.connector.ConnectorFileSender
 import org.briarproject.briar.api.connector.ConnectorImageSender
 import org.briarproject.briar.api.connector.ConnectorMessage
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult
@@ -39,7 +40,8 @@ class MatrixRoomConnector(
 	private val messageSendClient: MatrixMessageSendClient,
 ) : MatrixConnector,
 	ConnectorTextSender,
-	ConnectorImageSender {
+	ConnectorImageSender,
+	ConnectorFileSender {
 	override val source: ConnectorSource = ConnectorSources.MATRIX
 
 	override fun isEnabled(): Boolean = true
@@ -95,6 +97,14 @@ class MatrixRoomConnector(
 	override fun sendText(threadId: String, text: String): Boolean {
 		if (!isAuthorized()) return false
 		return messageSendClient.sendTextMessage(threadId, text)
+	}
+
+	override fun prepareFileSend(threadId: String): ConnectorFileSender.PreparedFileSend? {
+		if (!isAuthorized()) return null
+		val prepared = messageSendClient.prepareFileMessage(threadId) ?: return null
+		return ConnectorFileSender.PreparedFileSend { bytes, name, mime ->
+			isAuthorized() && prepared.send(bytes, name, mime)
+		}
 	}
 
 	override fun sendImage(
