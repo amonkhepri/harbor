@@ -1,6 +1,7 @@
 package org.briarproject.briar.android.connector
 
 import org.briarproject.briar.android.connector.ConnectorConversationAvailabilityState.ACCOUNT_UNAVAILABLE
+import org.briarproject.briar.android.connector.ConnectorConversationAvailabilityState.DISABLED
 import org.briarproject.briar.android.connector.ConnectorConversationAvailabilityState.EMPTY
 import org.briarproject.briar.android.connector.ConnectorConversationAvailabilityState.LOAD_FAILED
 import org.briarproject.briar.api.connector.ConnectorMessageType
@@ -29,6 +30,21 @@ class ConnectorConversationMessageListStateTest {
 			assertEquals("Failed", state.visibleStatusText)
 			assertFalse(state.isLoading)
 		}
+	}
+
+	@Test
+	fun testDisabledStateClearsHistoryAndStrandedLocalEchoRowsAlike() {
+		val previousState = ConnectorConversationMessageListState(messages = listOf(messageItem("1")))
+			.beginTextSend(CONNECTOR_SOURCE, "thread-1", "hello", 2_000)
+
+		val state = ConnectorConversationMessageListState()
+			.withAvailabilityState(DISABLED, previousState, "Disabled")
+
+		assertEquals(emptyList<ConnectorConversationMessageItem>(), state.messages)
+		// The pending send is still tracked internally so it can still be reconciled once the
+		// connector is re-enabled and the thread reloads, even though it is not shown while
+		// disabled.
+		assertEquals(1, state.localEchoes.size)
 	}
 
 	@Test

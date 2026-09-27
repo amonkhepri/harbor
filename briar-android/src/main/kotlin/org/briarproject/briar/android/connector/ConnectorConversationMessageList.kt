@@ -111,8 +111,7 @@ internal fun ConnectorConversationMessageListState.withAvailabilityState(
 	}
 	return copy(
 		localEchoes = previousState.localEchoes,
-		messages = nextMessages.filter { it.localEchoStatus == null } +
-			previousState.localEchoes.map { it.item },
+		messages = nextMessages,
 		emptyText = emptyText,
 		visibleStatusText = if (nextMessages.isNotEmpty() &&
 			availabilityState.shouldKeepPreviousMessages()
