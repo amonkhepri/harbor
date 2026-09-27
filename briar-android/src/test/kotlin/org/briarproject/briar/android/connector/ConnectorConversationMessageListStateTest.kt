@@ -48,6 +48,36 @@ class ConnectorConversationMessageListStateTest {
 	}
 
 	@Test
+	fun testSendCompletionWhileDisabledKeepsEchoHiddenUntilReload() {
+		for (sent in listOf(false, true)) {
+			val sending = ConnectorConversationMessageListState(messages = listOf(messageItem("1")))
+				.beginTextSend(CONNECTOR_SOURCE, "thread-1", "hello", 2_000)
+			val id = sending.localEchoes.single().item.stableId
+			val disabled = ConnectorConversationMessageListState()
+				.withAvailabilityState(DISABLED, sending, "Disabled")
+			val completed = disabled.completeTextSend(id, sent)
+
+			assertEquals(emptyList<ConnectorConversationMessageItem>(), completed.messages)
+			assertEquals("Disabled", completed.emptyText)
+			assertNull(completed.visibleStatusText)
+			val echo = completed.localEchoes.single()
+			assertEquals(true, echo.completed)
+			assertEquals(id, echo.item.stableId)
+			assertEquals(
+				if (sent) ConnectorLocalEchoStatus.PENDING else ConnectorLocalEchoStatus.FAILED,
+				echo.item.localEchoStatus,
+			)
+
+			// An enabled reload restores the retained echo, and successful sends can reconcile.
+			assertEquals(listOf(echo.item), completed.reconcile(emptyList()).messages)
+			val server = echo.item.copy(connectorMessageId = "server", localEchoStatus = null)
+			val reloaded = completed.reconcile(listOf(server))
+			assertEquals(if (sent) listOf(server) else listOf(server, echo.item), reloaded.messages)
+			assertEquals(if (sent) 0 else 1, reloaded.localEchoes.size)
+		}
+	}
+
+	@Test
 	fun testSuccessfulEmptyLoadClearsPreviousMessages() {
 		val previousState = ConnectorConversationMessageListState(
 			messages = listOf(messageItem("1")),

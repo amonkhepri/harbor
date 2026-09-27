@@ -56,7 +56,10 @@ internal data class ConnectorConversationMessageListState(
 		}
 		return copy(
 			localEchoes = echoes,
-			messages = messages.filter { it.localEchoStatus == null } + echoes.map { it.item },
+			// Completion updates visible rows without restoring echoes hidden by availability.
+			messages = messages.map { message ->
+				echoes.firstOrNull { it.item.stableId == message.stableId }?.item ?: message
+			},
 		)
 	}
 
