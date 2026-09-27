@@ -20,4 +20,5 @@ enum class ConnectorMessageType {
 	TEXT,
 	PHOTO,
 	FILE,
+	DELETED,
 }

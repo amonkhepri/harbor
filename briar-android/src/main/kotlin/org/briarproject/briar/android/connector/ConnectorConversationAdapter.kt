@@ -42,6 +42,8 @@ internal class ConnectorConversationAdapter :
 			val messageText = when (item.type) {
 				ConnectorMessageType.PHOTO -> text.resources.getString(R.string.connector_message_photo)
 				ConnectorMessageType.FILE -> text.resources.getString(R.string.connector_message_file)
+				ConnectorMessageType.DELETED ->
+					text.resources.getString(R.string.connector_message_deleted)
 				else -> item.text
 			}
 			val replyText = if (item.isReply) {

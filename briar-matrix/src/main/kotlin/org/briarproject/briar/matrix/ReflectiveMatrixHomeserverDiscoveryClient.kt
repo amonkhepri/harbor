@@ -951,6 +951,18 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			if (content.javaClass.simpleName != "MsgLike") return null
 			val msgLike = content.javaClass.getMethod("getContent").invoke(content)
 			val kind = msgLike.javaClass.getMethod("getKind").invoke(msgLike)
+			// sdk-android:26.08.05 exposes Redacted as a payload-free singleton.
+			if (kind.javaClass.simpleName == "Redacted") {
+				val timestamp = eventClass.getMethod(TIMESTAMP_GETTER_NAME).invoke(event) as Long
+				return MatrixMessageSnapshot(
+					eventId = identifier.javaClass.getMethod("getEventId").invoke(identifier) as String,
+					senderId = eventClass.getMethod("getSender").invoke(event) as String,
+					bodyText = "",
+					originServerTimestampSeconds = (timestamp.toULong() / 1_000uL).toLong(),
+					isOutgoing = eventClass.getMethod("isOwn").invoke(event) as Boolean,
+					type = ConnectorMessageType.DELETED,
+				)
+			}
 			if (kind.javaClass.simpleName != "Message") return null
 			val message = kind.javaClass.getMethod("getContent").invoke(kind)
 			val messageType = message.javaClass.getMethod("getMsgType").invoke(message)

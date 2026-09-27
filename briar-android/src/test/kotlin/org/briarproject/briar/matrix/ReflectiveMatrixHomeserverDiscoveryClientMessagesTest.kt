@@ -41,6 +41,49 @@ class ReflectiveMatrixHomeserverDiscoveryClientMessagesTest {
 	}
 
 	@Test
+	fun `redacted events remain between surrounding messages with identity and direction intact`() {
+		val client = loggedInClient()
+		FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec("!room:example.org"))
+		val deleted = TimelineItem(
+			FakeTimelineEventSpec(
+				EventOrTransactionId.EventId("\$deleted:example.org"),
+				"@bob:example.org",
+				null,
+				2_000uL,
+				own = true,
+				redacted = true,
+			),
+		)
+		FakeMatrixSdkState.timelineDiffsToReturn = listOf(
+			TimelineDiff.Reset(
+				listOf(
+					remoteEvent("\$before:example.org", "before", 1_000uL),
+					deleted,
+					remoteEvent("\$after:example.org", "after", 3_000uL),
+				),
+			),
+		)
+
+		assertEquals(
+			listOf(
+				MatrixMessageSnapshot("\$before:example.org", "@alice:example.org", "before", 1L, false),
+				MatrixMessageSnapshot(
+					"\$deleted:example.org",
+					"@bob:example.org",
+					"",
+					2L,
+					true,
+					type = ConnectorMessageType.DELETED,
+				),
+				MatrixMessageSnapshot("\$after:example.org", "@alice:example.org", "after", 3L, false),
+			),
+			client.getRecentMessages("!room:example.org", 3),
+		)
+		assertEquals(3, FakeMatrixSdkState.eventTimelineItemDestroyCount)
+		assertEquals(2, FakeMatrixSdkState.messageContentDestroyCount)
+	}
+
+	@Test
 	fun `getRecentMessages maps Matrix images to connector photo placeholders`() {
 		val client = loggedInClient()
 		FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec("!room:example.org"))

@@ -192,9 +192,12 @@ data class FakeTimelineEventSpec(
 	val edited: Boolean = false,
 	val isReply: Boolean = false,
 	val reactions: List<Reaction> = emptyList(),
+	val redacted: Boolean = false,
 ) {
 	fun toEventTimelineItem(): EventTimelineItem {
-		val content = if (body == null) {
+		val content = if (redacted) {
+			TimelineItemContent.MsgLike(MsgLikeContent(MsgLikeKind.Redacted))
+		} else if (body == null) {
 			TimelineItemContent.Other
 		} else {
 			TimelineItemContent.MsgLike(
@@ -268,6 +271,10 @@ class InReplyToDetails {
 
 sealed class MsgLikeKind {
 	abstract fun destroy()
+
+	object Redacted : MsgLikeKind() {
+		override fun destroy() = Unit
+	}
 
 	class Message(val content: MessageContent) : MsgLikeKind() {
 		override fun destroy() = content.destroy()

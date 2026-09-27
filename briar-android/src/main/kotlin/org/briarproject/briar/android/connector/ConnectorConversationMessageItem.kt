@@ -47,6 +47,7 @@ data class ConnectorConversationMessageItem(
 				.filter {
 					it.type == ConnectorMessageType.PHOTO ||
 						it.type == ConnectorMessageType.FILE ||
+						it.type == ConnectorMessageType.DELETED ||
 						it.text.trim().isNotEmpty()
 				}
 				.map { from(it) }
