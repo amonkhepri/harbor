@@ -1,6 +1,7 @@
 package org.briarproject.briar.android.connector
 
 import android.app.Application
+import android.net.Uri
 import android.view.LayoutInflater
 import android.widget.Button
 import android.widget.EditText
@@ -12,6 +13,8 @@ import java.util.concurrent.Executor
 import org.briarproject.briar.R
 import org.briarproject.briar.android.Localizer
 import org.briarproject.briar.android.view.BriarRecyclerView
+import org.briarproject.briar.api.connector.ConnectorFileSender
+import org.briarproject.briar.api.connector.ConnectorImageSender
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult
 import org.briarproject.briar.api.connector.ConnectorMessageType
 import org.briarproject.briar.api.connector.ConnectorSources
@@ -19,6 +22,7 @@ import org.briarproject.briar.api.connector.ConnectorTextSender
 import org.briarproject.briar.api.connector.ConnectorThread
 import org.briarproject.briar.api.connector.ReadOnlyConnector
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -39,6 +43,88 @@ class ConnectorLocalEchoTest {
 		"hello",
 		ConnectorMessageType.TEXT,
 	)
+
+	private class MediaConnector :
+		ReadOnlyConnector,
+		ConnectorImageSender,
+		ConnectorFileSender {
+		override val source = ConnectorSources.MATRIX
+		override fun isEnabled() = true
+		override fun isAuthorized() = true
+		override fun getRecentThreads(limit: Int) = emptyList<ConnectorThread>()
+		override fun getRecentMessageReadResult(threadId: String, limit: Int) =
+			ConnectorMessageReadResult.Success(emptyList())
+		override fun sendImage(
+			threadId: String,
+			imageBytes: ByteArray,
+			fileName: String,
+			mimeType: String,
+		) = true
+		override fun prepareFileSend(threadId: String) =
+			ConnectorFileSender.PreparedFileSend { _, _, _ -> true }
+	}
+
+	private fun buildActivityForMediaSend(
+		connector: ReadOnlyConnector,
+		work: MutableList<Runnable>,
+	): ConnectorConversationActivity {
+		Localizer.initialize(RuntimeEnvironment.getApplication().getSharedPreferences("test", 0))
+		val activity = Robolectric.buildActivity(ConnectorConversationActivity::class.java).get()
+		activity.setTheme(R.style.BriarTheme)
+		val root = FrameLayout(activity).apply { id = android.R.id.content }
+		val list = BriarRecyclerView(activity)
+		root.addView(list)
+		val manager = LinearLayoutManager(activity)
+		list.setLayoutManager(manager)
+		val adapter = ConnectorConversationActivity::class.java.getDeclaredField("adapter").apply {
+			isAccessible = true
+		}.get(activity) as ConnectorConversationAdapter
+		list.setAdapter(adapter)
+		setField(activity, "list", list)
+		setField(activity, "layoutManager", manager)
+		setField(activity, "composeText", EditText(activity))
+		setField(activity, "composeBar", root)
+		setField(activity, "sendButton", Button(activity))
+		setField(activity, "attachButton", ImageButton(activity))
+		setField(activity, "fileButton", ImageButton(activity))
+		setField(activity, "connector", connector)
+		setField(activity, "threadId", "room")
+		activity.ioExecutor = Executor { work.add(it) }
+		return activity
+	}
+
+	private fun setField(activity: ConnectorConversationActivity, name: String, value: Any?) {
+		ConnectorConversationActivity::class.java.getDeclaredField(name).apply {
+			isAccessible = true
+		}.set(activity, value)
+	}
+
+	private fun getField(activity: ConnectorConversationActivity, name: String): Any? =
+		ConnectorConversationActivity::class.java.getDeclaredField(name).apply {
+			isAccessible = true
+		}.get(activity)
+
+	private fun invokeUriMethod(activity: ConnectorConversationActivity, method: String, uri: Uri?) {
+		ConnectorConversationActivity::class.java.getDeclaredMethod(method, Uri::class.java).apply {
+			isAccessible = true
+		}.invoke(activity, uri)
+	}
+
+	private fun invokeCompleteEcho(
+		activity: ConnectorConversationActivity,
+		method: String,
+		sent: Boolean,
+	) {
+		ConnectorConversationActivity::class.java
+			.getDeclaredMethod(method, Boolean::class.javaPrimitiveType)
+			.apply { isAccessible = true }
+			.invoke(activity, sent)
+	}
+
+	private fun messageState(
+		activity: ConnectorConversationActivity,
+	): ConnectorConversationMessageListState = getField(activity, "messageState")
+		as ConnectorConversationMessageListState
 
 	@Test fun activityFailureRetainsComposeTextAndMarksPendingRowFailed() {
 		Localizer.initialize(RuntimeEnvironment.getApplication().getSharedPreferences("test", 0))
@@ -190,5 +276,115 @@ class ConnectorLocalEchoTest {
 		assertEquals(2, state.messages.size)
 		state = state.reconcile(listOf(server, server.copy(connectorMessageId = "second")))
 		assertTrue(state.localEchoes.isEmpty())
+	}
+
+	@Test fun imageSendAddsPendingPhotoRowThenReconcilesOnSuccess() {
+		val connector = MediaConnector()
+		val work = mutableListOf<Runnable>()
+		val activity = buildActivityForMediaSend(connector, work)
+		setField(activity, "imageSender", connector)
+		setField(activity, "imageUpload", ConnectorImageUploadState())
+
+		invokeUriMethod(activity, "onImageChosen", Uri.parse("content://picker/image/1"))
+
+		val pending = messageState(activity).messages.last()
+		assertEquals(ConnectorMessageType.PHOTO, pending.type)
+		assertEquals(ConnectorLocalEchoStatus.PENDING, pending.localEchoStatus)
+		assertEquals(pending.stableId, getField(activity, "pendingImageEchoId"))
+		assertTrue("send should be queued, not yet run", work.isNotEmpty())
+		val view = LayoutInflater.from(RuntimeEnvironment.getApplication())
+			.inflate(R.layout.list_item_connector_message, null)
+		ConnectorConversationAdapter.MessageViewHolder(view).bind(pending)
+		assertEquals(
+			view.resources.getString(R.string.connector_message_photo),
+			view.findViewById<TextView>(R.id.connectorMessageText).text.toString(),
+		)
+
+		invokeCompleteEcho(activity, "completeImageEcho", true)
+
+		assertNull(getField(activity, "pendingImageEchoId"))
+		val server = pending.copy(connectorMessageId = "server", localEchoStatus = null)
+		assertEquals(listOf(server), messageState(activity).reconcile(listOf(server)).messages)
+	}
+
+	@Test fun imageSendFailureMarksPendingRowFailedAndKeepsRecoverableSelection() {
+		val connector = MediaConnector()
+		val work = mutableListOf<Runnable>()
+		val activity = buildActivityForMediaSend(connector, work)
+		setField(activity, "imageSender", connector)
+		val imageUpload = ConnectorImageUploadState()
+		setField(activity, "imageUpload", imageUpload)
+		val uri = Uri.parse("content://picker/image/2")
+
+		invokeUriMethod(activity, "onImageChosen", uri)
+		imageUpload.complete(false)
+		invokeCompleteEcho(activity, "completeImageEcho", false)
+
+		assertEquals(
+			ConnectorLocalEchoStatus.FAILED,
+			messageState(activity).messages.last().localEchoStatus,
+		)
+		assertEquals(uri.toString(), imageUpload.pendingImage)
+	}
+
+	@Test fun fileSendAddsPendingFileRowThenReconcilesOnSuccess() {
+		val connector = MediaConnector()
+		val work = mutableListOf<Runnable>()
+		val activity = buildActivityForMediaSend(connector, work)
+		setField(activity, "fileSender", connector)
+		val fileUpload = ConnectorFileUploadState()
+		fileUpload.pick(connector.prepareFileSend("room")!!)
+		setField(activity, "fileUpload", fileUpload)
+
+		invokeUriMethod(activity, "onFileChosen", Uri.parse("content://provider/document/1"))
+
+		val pending = messageState(activity).messages.last()
+		assertEquals(ConnectorMessageType.FILE, pending.type)
+		assertEquals(ConnectorLocalEchoStatus.PENDING, pending.localEchoStatus)
+		assertEquals(pending.stableId, getField(activity, "pendingFileEchoId"))
+		assertTrue("send should be queued, not yet run", work.isNotEmpty())
+		val view = LayoutInflater.from(RuntimeEnvironment.getApplication())
+			.inflate(R.layout.list_item_connector_message, null)
+		ConnectorConversationAdapter.MessageViewHolder(view).bind(pending)
+		assertEquals(
+			view.resources.getString(R.string.connector_message_file),
+			view.findViewById<TextView>(R.id.connectorMessageText).text.toString(),
+		)
+
+		invokeCompleteEcho(activity, "completeFileEcho", true)
+
+		assertNull(getField(activity, "pendingFileEchoId"))
+		val server = pending.copy(connectorMessageId = "server", localEchoStatus = null)
+		assertEquals(listOf(server), messageState(activity).reconcile(listOf(server)).messages)
+	}
+
+	@Test fun fileSendFailureMarksPendingRowFailedInPlace() {
+		val connector = MediaConnector()
+		val work = mutableListOf<Runnable>()
+		val activity = buildActivityForMediaSend(connector, work)
+		setField(activity, "fileSender", connector)
+		val fileUpload = ConnectorFileUploadState()
+		fileUpload.pick(connector.prepareFileSend("room")!!)
+		setField(activity, "fileUpload", fileUpload)
+
+		invokeUriMethod(activity, "onFileChosen", Uri.parse("content://provider/document/2"))
+		invokeCompleteEcho(activity, "completeFileEcho", false)
+
+		val failed = messageState(activity).messages.last()
+		assertEquals(ConnectorMessageType.FILE, failed.type)
+		assertEquals(ConnectorLocalEchoStatus.FAILED, failed.localEchoStatus)
+	}
+
+	@Test fun completingMediaEchoWithoutAPendingSendIsANoOpAcrossActivityRecreation() {
+		val connector = MediaConnector()
+		val work = mutableListOf<Runnable>()
+		val activity = buildActivityForMediaSend(connector, work)
+		setField(activity, "imageSender", connector)
+		setField(activity, "fileSender", connector)
+
+		invokeCompleteEcho(activity, "completeImageEcho", true)
+		invokeCompleteEcho(activity, "completeFileEcho", false)
+
+		assertTrue(messageState(activity).messages.isEmpty())
 	}
 }

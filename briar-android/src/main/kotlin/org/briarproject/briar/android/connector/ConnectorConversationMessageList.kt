@@ -16,6 +16,23 @@ internal data class ConnectorConversationMessageListState(
 		threadId: String,
 		text: String,
 		now: Long = System.currentTimeMillis(),
+	): ConnectorConversationMessageListState =
+		beginSend(source, threadId, ConnectorMessageType.TEXT, text, now)
+
+	/** Image/file sends have no caption to show up front, so the row carries the type alone. */
+	fun beginMediaSend(
+		source: ConnectorSource,
+		threadId: String,
+		type: ConnectorMessageType,
+		now: Long = System.currentTimeMillis(),
+	): ConnectorConversationMessageListState = beginSend(source, threadId, type, "", now)
+
+	private fun beginSend(
+		source: ConnectorSource,
+		threadId: String,
+		type: ConnectorMessageType,
+		text: String,
+		now: Long,
 	): ConnectorConversationMessageListState {
 		val item = ConnectorConversationMessageItem(
 			source,
@@ -24,7 +41,7 @@ internal data class ConnectorConversationMessageListState(
 			now,
 			true,
 			text,
-			ConnectorMessageType.TEXT,
+			type,
 			localEchoStatus = ConnectorLocalEchoStatus.PENDING,
 		)
 		return copy(
@@ -68,7 +85,9 @@ internal data class ConnectorConversationMessageListState(
 	): ConnectorConversationMessageListState {
 		val consumed = mutableSetOf<String>()
 		val remaining = localEchoes.filter { echo ->
-			// The sender returns only a Boolean, so match new outgoing text conservatively.
+			// The sender returns only a Boolean, so match new outgoing messages conservatively:
+			// text sends compare body text, while media sends have no caption to compare and
+			// match on type, source, thread and timing alone.
 			val match = serverMessages.firstOrNull {
 				echo.completed &&
 					echo.item.localEchoStatus == ConnectorLocalEchoStatus.PENDING &&
@@ -77,8 +96,8 @@ internal data class ConnectorConversationMessageListState(
 					it.connectorSource == echo.item.connectorSource &&
 					it.connectorThreadId == echo.item.connectorThreadId &&
 					it.isOutgoing &&
-					it.type == ConnectorMessageType.TEXT &&
-					it.text == echo.item.text &&
+					it.type == echo.item.type &&
+					(echo.item.type != ConnectorMessageType.TEXT || it.text == echo.item.text) &&
 					it.dateMillis / 1000 >= echo.item.dateMillis / 1000
 			}
 			if (match != null) consumed.add(match.stableId)

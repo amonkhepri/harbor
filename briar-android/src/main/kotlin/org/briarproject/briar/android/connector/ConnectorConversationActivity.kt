@@ -31,6 +31,7 @@ import org.briarproject.briar.android.view.BriarRecyclerView
 import org.briarproject.briar.api.connector.ConnectorFileSender
 import org.briarproject.briar.api.connector.ConnectorImageSender
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult
+import org.briarproject.briar.api.connector.ConnectorMessageType
 import org.briarproject.briar.api.connector.ConnectorRegistry
 import org.briarproject.briar.api.connector.ConnectorTextSender
 import org.briarproject.briar.api.connector.ReadOnlyConnector
@@ -158,6 +159,10 @@ class ConnectorConversationActivity : BriarActivity() {
 	private var sendInFlight = false
 	private lateinit var imageUpload: ConnectorImageUploadState
 
+	// Not restored across recreation: matches MX-015's local-only echo scope boundary.
+	private var pendingImageEchoId: String? = null
+	private var pendingFileEchoId: String? = null
+
 	private val imageContentLauncher = registerForActivityResult(GetImageAdvanced(), ::onImageChosen)
 	private val imageDocumentLauncher =
 		registerForActivityResult(OpenImageDocumentAdvanced(), ::onImageChosen)
@@ -233,6 +238,7 @@ class ConnectorConversationActivity : BriarActivity() {
 			if (status == ConnectorFileUploadState.Status.SENT ||
 				status == ConnectorFileUploadState.Status.FAILED
 			) {
+				completeFileEcho(status == ConnectorFileUploadState.Status.SENT)
 				BriarSnackbarBuilder().make(
 					list,
 					if (status == ConnectorFileUploadState.Status.SENT) {
@@ -254,10 +260,12 @@ class ConnectorConversationActivity : BriarActivity() {
 					setComposeEnabled(false)
 				}
 				ConnectorImageUploadState.Status.SENT -> {
+					completeImageEcho(true)
 					onSendCompleted(true, false)
 					imageUpload.acknowledge()
 				}
 				ConnectorImageUploadState.Status.FAILED -> {
+					completeImageEcho(false)
 					onSendCompleted(false, false)
 					imageUpload.acknowledge()
 				}
@@ -487,6 +495,10 @@ class ConnectorConversationActivity : BriarActivity() {
 			fileUpload.complete(false)
 			return
 		}
+		submitMessageState(
+			messageState.beginMediaSend(connector!!.source, threadId, ConnectorMessageType.FILE),
+		)
+		pendingFileEchoId = messageState.localEchoes.last().item.stableId
 		try {
 			ioExecutor.execute {
 				val sent = try {
@@ -524,6 +536,10 @@ class ConnectorConversationActivity : BriarActivity() {
 		val sender = imageSender ?: return
 		sendInFlight = true
 		setComposeEnabled(false)
+		submitMessageState(
+			messageState.beginMediaSend(connector!!.source, threadId, ConnectorMessageType.PHOTO),
+		)
+		pendingImageEchoId = messageState.localEchoes.last().item.stableId
 		val activeThreadId = threadId
 		ioExecutor.execute {
 			val sent = try {
@@ -544,6 +560,18 @@ class ConnectorConversationActivity : BriarActivity() {
 		return sendConnectorImage(sender, threadId, mimeType, fileName) {
 			contentResolver.openInputStream(uri)
 		}
+	}
+
+	private fun completeImageEcho(sent: Boolean) {
+		val id = pendingImageEchoId ?: return
+		pendingImageEchoId = null
+		submitMessageState(messageState.completeTextSend(id, sent))
+	}
+
+	private fun completeFileEcho(sent: Boolean) {
+		val id = pendingFileEchoId ?: return
+		pendingFileEchoId = null
+		submitMessageState(messageState.completeTextSend(id, sent))
 	}
 
 	private fun onSendCompleted(sent: Boolean, clearComposeText: Boolean) {
