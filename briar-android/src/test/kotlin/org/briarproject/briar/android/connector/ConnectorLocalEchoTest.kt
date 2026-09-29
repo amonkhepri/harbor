@@ -201,7 +201,7 @@ class ConnectorLocalEchoTest {
 		)
 		state = state.reconcile(listOf(old, server))
 		assertEquals(3, state.messages.size)
-		state = state.completeTextSend(echo.stableId, true).reconcile(listOf(old))
+		state = state.completeSend(echo.stableId, true).reconcile(listOf(old))
 		assertEquals(echo, state.messages.last())
 		state = state.reconcile(listOf(old, server))
 		assertEquals(listOf(old, server), state.messages)
@@ -217,7 +217,7 @@ class ConnectorLocalEchoTest {
 		var state = ConnectorConversationMessageListState()
 			.beginTextSend(ConnectorSources.MATRIX, "room", "hello", 2_000)
 		val id = state.messages.single().stableId
-		state = state.completeTextSend(id, false).reconcile(emptyList())
+		state = state.completeSend(id, false).reconcile(emptyList())
 		state = ConnectorConversationMessageListState().withAvailabilityState(
 			ConnectorConversationAvailabilityState.LOAD_FAILED,
 			state,
@@ -240,7 +240,7 @@ class ConnectorLocalEchoTest {
 	@Test fun unrelatedOrHistoricalRowsDoNotConsumeEcho() {
 		var state = ConnectorConversationMessageListState()
 			.beginTextSend(ConnectorSources.MATRIX, "room", "hello", 2_000)
-		state = state.completeTextSend(state.messages.last().stableId, true)
+		state = state.completeSend(state.messages.last().stableId, true)
 		for (unrelated in listOf(
 			server.copy(isOutgoing = false),
 			server.copy(connectorThreadId = "other"),
@@ -256,9 +256,9 @@ class ConnectorLocalEchoTest {
 		var state = ConnectorConversationMessageListState()
 			.beginTextSend(ConnectorSources.MATRIX, "room", "hello", 2_000)
 		val failedId = state.messages.last().stableId
-		state = state.completeTextSend(failedId, false)
+		state = state.completeSend(failedId, false)
 			.beginTextSend(ConnectorSources.MATRIX, "room", "hello", 2_000)
-		state = state.completeTextSend(state.messages.last().stableId, true)
+		state = state.completeSend(state.messages.last().stableId, true)
 			.reconcile(listOf(server))
 		assertEquals(listOf(server), state.messages.filter { it.localEchoStatus == null })
 		assertEquals(failedId, state.localEchoes.single().item.stableId)
@@ -269,7 +269,7 @@ class ConnectorLocalEchoTest {
 		var state = ConnectorConversationMessageListState()
 		repeat(2) {
 			state = state.beginTextSend(ConnectorSources.MATRIX, "room", "hello", 2_000)
-			state = state.completeTextSend(state.messages.last().stableId, true)
+			state = state.completeSend(state.messages.last().stableId, true)
 		}
 		state = state.reconcile(listOf(server)).reconcile(listOf(server))
 		assertEquals(1, state.localEchoes.size)

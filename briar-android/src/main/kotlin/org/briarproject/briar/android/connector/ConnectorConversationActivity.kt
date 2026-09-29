@@ -478,7 +478,7 @@ class ConnectorConversationActivity : BriarActivity() {
 			}
 			runOnUiThread {
 				if (isFinishing || isDestroyed) return@runOnUiThread
-				submitMessageState(messageState.completeTextSend(echoId, sent))
+				submitMessageState(messageState.completeSend(echoId, sent))
 				onSendCompleted(sent, clearComposeText = true)
 			}
 		}
@@ -565,13 +565,13 @@ class ConnectorConversationActivity : BriarActivity() {
 	private fun completeImageEcho(sent: Boolean) {
 		val id = pendingImageEchoId ?: return
 		pendingImageEchoId = null
-		submitMessageState(messageState.completeTextSend(id, sent))
+		submitMessageState(messageState.completeSend(id, sent))
 	}
 
 	private fun completeFileEcho(sent: Boolean) {
 		val id = pendingFileEchoId ?: return
 		pendingFileEchoId = null
-		submitMessageState(messageState.completeTextSend(id, sent))
+		submitMessageState(messageState.completeSend(id, sent))
 	}
 
 	private fun onSendCompleted(sent: Boolean, clearComposeText: Boolean) {

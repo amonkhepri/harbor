@@ -54,7 +54,7 @@ internal data class ConnectorConversationMessageListState(
 		)
 	}
 
-	fun completeTextSend(id: String, sent: Boolean): ConnectorConversationMessageListState {
+	fun completeSend(id: String, sent: Boolean): ConnectorConversationMessageListState {
 		val echoes = localEchoes.map {
 			if (it.item.stableId != id) {
 				it

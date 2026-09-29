@@ -55,7 +55,7 @@ class ConnectorConversationMessageListStateTest {
 			val id = sending.localEchoes.single().item.stableId
 			val disabled = ConnectorConversationMessageListState()
 				.withAvailabilityState(DISABLED, sending, "Disabled")
-			val completed = disabled.completeTextSend(id, sent)
+			val completed = disabled.completeSend(id, sent)
 
 			assertEquals(emptyList<ConnectorConversationMessageItem>(), completed.messages)
 			assertEquals("Disabled", completed.emptyText)
