@@ -707,8 +707,8 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 
 	/**
 	 * Marks [roomId] read via the pinned AAR's suspend `Room.markAsRead(ReceiptType)` (MX-019),
-	 * bridged the same way [invokeUnit] bridges `login`/`logout`. Sends `ReceiptType.READ` (a
-	 * public read receipt), not `READ_PRIVATE`/`FULLY_READ`. Returns false, never throwing, when
+	 * bridged the same way [invokeUnit] bridges `login`/`logout`. Sends `ReceiptType.READ_PRIVATE`
+	 * (a private read receipt). Returns false, never throwing, when
 	 * no session is retained, [roomId] cannot be found, or the SDK call fails.
 	 */
 	@Synchronized
@@ -719,7 +719,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			room = client.javaClass.getMethod("getRoom", String::class.java).invoke(client, roomId)
 				?: throw SnapshotAdapterFailure()
 			val receiptTypeClass = Class.forName(RECEIPT_TYPE_CLASS_NAME)
-			val readReceiptType = receiptTypeClass.getField("READ").get(null)
+			val readReceiptType = receiptTypeClass.getField("READ_PRIVATE").get(null)
 			invokeUnit(room, "markAsRead", arrayOf(receiptTypeClass), arrayOf(readReceiptType))
 			true
 		} catch (e: InterruptedException) {

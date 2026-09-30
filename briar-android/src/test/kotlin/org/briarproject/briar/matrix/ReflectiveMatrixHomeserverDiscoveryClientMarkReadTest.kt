@@ -35,7 +35,7 @@ class ReflectiveMatrixHomeserverDiscoveryClientMarkReadTest {
 	}
 
 	@Test
-	fun `markRead sends a public READ receipt and releases the room`() {
+	fun `markRead sends a private READ receipt and releases the room`() {
 		val client = loggedInClient()
 		FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec("!room:example.org"))
 
@@ -44,7 +44,7 @@ class ReflectiveMatrixHomeserverDiscoveryClientMarkReadTest {
 		assertTrue(marked)
 		assertEquals(1, FakeMatrixSdkState.markAsReadCallCount)
 		assertEquals("!room:example.org", FakeMatrixSdkState.lastMarkAsReadRoomId)
-		assertEquals(ReceiptType.READ, FakeMatrixSdkState.lastMarkAsReadReceiptType)
+		assertEquals(ReceiptType.READ_PRIVATE, FakeMatrixSdkState.lastMarkAsReadReceiptType)
 		assertEquals(1, FakeMatrixSdkState.roomCloseCount)
 	}
 
