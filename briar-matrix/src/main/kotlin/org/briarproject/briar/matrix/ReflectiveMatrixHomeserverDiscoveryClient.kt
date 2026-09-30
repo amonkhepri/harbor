@@ -36,7 +36,7 @@ import kotlin.coroutines.intrinsics.COROUTINE_SUSPENDED
 /**
  * Production [MatrixHomeserverDiscoveryClient], [MatrixLoginClient], [MatrixRoomSnapshotClient],
  * [MatrixMessageSnapshotClient], and [MatrixMessageSendClient] (text send MX-013, image send
- * MX-014) that invoke the pinned
+ * MX-014, read marker MX-019) that invoke the pinned
  * `org.matrix.rustcomponents:sdk-android` `ClientBuilder.serverName(...).build()`
  * discovery path entirely over reflection, so `:briar-matrix` keeps zero
  * compile-time dependency on the SDK (see this module's `build.gradle` and
@@ -705,6 +705,35 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		}
 	}
 
+	/**
+	 * Marks [roomId] read via the pinned AAR's suspend `Room.markAsRead(ReceiptType)` (MX-019),
+	 * bridged the same way [invokeUnit] bridges `login`/`logout`. Sends `ReceiptType.READ` (a
+	 * public read receipt), not `READ_PRIVATE`/`FULLY_READ`. Returns false, never throwing, when
+	 * no session is retained, [roomId] cannot be found, or the SDK call fails.
+	 */
+	@Synchronized
+	override fun markRead(roomId: String): Boolean {
+		val client = loginClient ?: return false
+		var room: Any? = null
+		return try {
+			room = client.javaClass.getMethod("getRoom", String::class.java).invoke(client, roomId)
+				?: throw SnapshotAdapterFailure()
+			val receiptTypeClass = Class.forName(RECEIPT_TYPE_CLASS_NAME)
+			val readReceiptType = receiptTypeClass.getField("READ").get(null)
+			invokeUnit(room, "markAsRead", arrayOf(receiptTypeClass), arrayOf(readReceiptType))
+			true
+		} catch (e: InterruptedException) {
+			Thread.currentThread().interrupt()
+			false
+		} catch (e: Exception) {
+			false
+		} catch (e: LinkageError) {
+			false
+		} finally {
+			closeQuietly(room)
+		}
+	}
+
 	/** Uploads one image and awaits SDK completion; cancels an abandoned join before closing it. */
 	@Synchronized
 	override fun sendImageMessage(
@@ -1277,6 +1306,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		const val IMAGE_INFO_CLASS_NAME = "org.matrix.rustcomponents.sdk.ImageInfo"
 		const val THUMBNAIL_INFO_CLASS_NAME = "org.matrix.rustcomponents.sdk.ThumbnailInfo"
 		const val MEDIA_SOURCE_CLASS_NAME = "org.matrix.rustcomponents.sdk.MediaSource"
+		const val RECEIPT_TYPE_CLASS_NAME = "org.matrix.rustcomponents.sdk.ReceiptType"
 		const val ULONG_CLASS_NAME = "kotlin.ULong"
 		const val DEFAULT_CONSTRUCTOR_MARKER_CLASS_NAME = "kotlin.jvm.internal.DefaultConstructorMarker"
 		const val PAGINATE_BACKWARDS_METHOD_NAME = "paginateBackwards-vckuEUM"

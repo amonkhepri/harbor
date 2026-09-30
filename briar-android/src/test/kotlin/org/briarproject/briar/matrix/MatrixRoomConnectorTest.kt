@@ -314,6 +314,44 @@ class MatrixRoomConnectorTest {
 		assertFalse(connector.sendImage("!a:example.org", byteArrayOf(1), "image.jpg", "image/jpeg"))
 	}
 
+	@Test
+	fun `markThreadRead fails closed without invoking the send client when not authorized`() {
+		val messageSendClient = FakeMessageSendClient(true)
+		val connector = connector(
+			messageSendClient = messageSendClient,
+			authSession = FakeMatrixAuthSession(MatrixAuthState.HOMESERVER_ENTRY),
+		)
+
+		val marked = connector.markThreadRead("!a:example.org")
+
+		assertFalse(marked)
+		assertEquals(null, messageSendClient.lastMarkReadRoomId)
+	}
+
+	@Test
+	fun `markThreadRead delegates to the send client and returns its result when authorized`() {
+		val messageSendClient = FakeMessageSendClient(true)
+		val connector = connector(
+			messageSendClient = messageSendClient,
+			authSession = FakeMatrixAuthSession(MatrixAuthState.READY),
+		)
+
+		val marked = connector.markThreadRead("!a:example.org")
+
+		assertTrue(marked)
+		assertEquals("!a:example.org", messageSendClient.lastMarkReadRoomId)
+	}
+
+	@Test
+	fun `markThreadRead reports the send client's failure`() {
+		val connector = connector(
+			messageSendClient = FakeMessageSendClient(false),
+			authSession = FakeMatrixAuthSession(MatrixAuthState.READY),
+		)
+
+		assertFalse(connector.markThreadRead("!a:example.org"))
+	}
+
 	private fun connector(
 		roomSnapshotClient: MatrixRoomSnapshotClient = FakeRoomSnapshotClient(emptyList()),
 		messageSnapshotClient: MatrixMessageSnapshotClient = FakeMessageSnapshotClient(emptyList()),
@@ -358,6 +396,8 @@ class MatrixRoomConnectorTest {
 			private set
 		var lastRequestedMimeType: String? = null
 			private set
+		var lastMarkReadRoomId: String? = null
+			private set
 
 		override fun sendTextMessage(roomId: String, text: String): Boolean {
 			lastRequestedRoomId = roomId
@@ -375,6 +415,11 @@ class MatrixRoomConnectorTest {
 			lastRequestedImageBytes = imageBytes
 			lastRequestedFileName = fileName
 			lastRequestedMimeType = mimeType
+			return result
+		}
+
+		override fun markRead(roomId: String): Boolean {
+			lastMarkReadRoomId = roomId
 			return result
 		}
 	}

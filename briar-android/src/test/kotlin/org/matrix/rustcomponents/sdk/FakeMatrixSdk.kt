@@ -42,6 +42,8 @@ enum class EncryptionState { NOT_ENCRYPTED, ENCRYPTED, UNKNOWN }
 
 enum class Membership { INVITED, JOINED, LEFT, KNOCKED, BANNED }
 
+enum class ReceiptType { READ, READ_PRIVATE, FULLY_READ }
+
 /** Mirrors the pinned AAR's real shape: synchronous `id()`/`displayName()`/`isSpace()`/`membership()`. */
 class Room(
 	private val roomId: String,
@@ -72,6 +74,13 @@ class Room(
 	fun close() {
 		FakeMatrixSdkState.roomCloseCount++
 		FakeMatrixSdkState.closedRoomHandles.add(roomId)
+	}
+
+	suspend fun markAsRead(receiptType: ReceiptType) {
+		FakeMatrixSdkState.markAsReadCallCount++
+		FakeMatrixSdkState.lastMarkAsReadRoomId = roomId
+		FakeMatrixSdkState.lastMarkAsReadReceiptType = receiptType
+		FakeMatrixSdkState.markAsReadFailureToThrow?.let { throw it }
 	}
 }
 
@@ -805,6 +814,10 @@ object FakeMatrixSdkState {
 	var joinSuspendAsynchronously = false
 	var joinDelayMs = 0L
 	var sendAttachmentJoinHandleCloseCount = 0
+	var markAsReadCallCount = 0
+	var lastMarkAsReadRoomId: String? = null
+	var lastMarkAsReadReceiptType: ReceiptType? = null
+	var markAsReadFailureToThrow: ClientException? = null
 
 	fun reset() {
 		awaitBuilds()
@@ -888,5 +901,9 @@ object FakeMatrixSdkState {
 		joinSuspendAsynchronously = false
 		joinDelayMs = 0L
 		sendAttachmentJoinHandleCloseCount = 0
+		markAsReadCallCount = 0
+		lastMarkAsReadRoomId = null
+		lastMarkAsReadReceiptType = null
+		markAsReadFailureToThrow = null
 	}
 }

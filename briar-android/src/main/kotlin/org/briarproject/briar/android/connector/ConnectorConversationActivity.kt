@@ -32,6 +32,7 @@ import org.briarproject.briar.api.connector.ConnectorFileSender
 import org.briarproject.briar.api.connector.ConnectorImageSender
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult
 import org.briarproject.briar.api.connector.ConnectorMessageType
+import org.briarproject.briar.api.connector.ConnectorReadMarker
 import org.briarproject.briar.api.connector.ConnectorRegistry
 import org.briarproject.briar.api.connector.ConnectorTextSender
 import org.briarproject.briar.api.connector.ReadOnlyConnector
@@ -71,7 +72,9 @@ internal class ConnectorConversationLoadOwner {
  * button next to the compose bar launches the system image picker and sends the chosen image. The
  * Telegram source built this screen first; it is now chosen at runtime via [SOURCE_ID] so a Matrix
  * inbox row reuses the same rendering, pagination and availability-state handling instead of
- * duplicating a Matrix-only Activity.
+ * duplicating a Matrix-only Activity. When the connector also implements [ConnectorReadMarker]
+ * (MX-019), opening this screen marks the thread read once, and a periodic/manual refresh that
+ * loads at least one message marks it read again.
  */
 @MethodsNotNullByDefault
 @ParametersNotNullByDefault
@@ -146,6 +149,7 @@ class ConnectorConversationActivity : BriarActivity() {
 	private var textSender: ConnectorTextSender? = null
 	private var imageSender: ConnectorImageSender? = null
 	private var fileSender: ConnectorFileSender? = null
+	private var readMarker: ConnectorReadMarker? = null
 	private lateinit var fileButton: ImageButton
 	private lateinit var fileUpload: ConnectorFileUploadState
 	private val fileLauncher =
@@ -189,6 +193,7 @@ class ConnectorConversationActivity : BriarActivity() {
 		textSender = connector as? ConnectorTextSender
 		imageSender = connector as? ConnectorImageSender
 		fileSender = connector as? ConnectorFileSender
+		readMarker = connector as? ConnectorReadMarker
 		fileUpload = ViewModelProvider(this)[ConnectorFileUploadState::class.java]
 		sourceName = connector?.source?.displayName
 			?: getString(R.string.connector_conversation_label)
@@ -273,7 +278,7 @@ class ConnectorConversationActivity : BriarActivity() {
 			}
 		}
 
-		loadMessages()
+		loadMessages(isInitialOpen = true)
 	}
 
 	override fun onCreateOptionsMenu(menu: Menu): Boolean {
@@ -331,7 +336,7 @@ class ConnectorConversationActivity : BriarActivity() {
 		super.onDestroy()
 	}
 
-	private fun loadMessages(showLoading: Boolean = true) {
+	private fun loadMessages(showLoading: Boolean = true, isInitialOpen: Boolean = false) {
 		automaticRefreshRunning = !showLoading
 		val loadGeneration = loadOwner.begin()
 		val activeConnector = connector
@@ -373,6 +378,9 @@ class ConnectorConversationActivity : BriarActivity() {
 							ConnectorConversationMessageItem.fromMessages(result.messages),
 						)
 						showMessages(loadGeneration, state, EMPTY)
+						if (isInitialOpen || result.messages.isNotEmpty()) {
+							markThreadRead(loadGeneration)
+						}
 					}
 					ConnectorMessageReadResult.LoadFailed -> {
 						showMessages(
@@ -389,6 +397,18 @@ class ConnectorConversationActivity : BriarActivity() {
 					LOAD_FAILED,
 				)
 			}
+		}
+	}
+
+	// Runs on ioExecutor, already inside loadMessages' load block. Re-checks loadOwner so a
+	// stale/cancelled load (e.g. the activity moved to a different thread) cannot still mark a
+	// room read after this screen no longer owns it.
+	private fun markThreadRead(loadGeneration: Long) {
+		val marker = readMarker ?: return
+		if (!loadOwner.owns(loadGeneration)) return
+		try {
+			marker.markThreadRead(threadId)
+		} catch (e: RuntimeException) {
 		}
 	}
 
