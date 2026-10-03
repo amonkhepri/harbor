@@ -708,7 +708,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 	/**
 	 * Marks [roomId] read via the pinned AAR's suspend `Room.markAsRead(ReceiptType)` (MX-019),
 	 * bridged the same way [invokeUnit] bridges `login`/`logout`. Sends `ReceiptType.READ_PRIVATE`
-	 * (a private read receipt). Returns false, never throwing, when
+	 * (a private read receipt) to prevent metadata leak. Returns false, never throwing, when
 	 * no session is retained, [roomId] cannot be found, or the SDK call fails.
 	 */
 	@Synchronized
