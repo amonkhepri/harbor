@@ -746,14 +746,14 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 				invokeCloseableValue(room, "timeline", emptyArray(), emptyArray(), ::closeQuietly)
 			timeline = loadedTimeline
 
-			val eventIdClass = Class.forName("org.matrix.rustcomponents.sdk.EventOrTransactionId\$EventId")
+			val eventIdClass = Class.forName(EVENT_ID_CLASS_NAME)
 			val eventIdObj = eventIdClass.getConstructor(String::class.java).newInstance(eventId)
 
 			invokeUnit(
 				loadedTimeline,
 				"redactEvent",
 				arrayOf(
-					Class.forName("org.matrix.rustcomponents.sdk.EventOrTransactionId"),
+					Class.forName(EVENT_OR_TRANSACTION_ID_CLASS_NAME),
 					String::class.java,
 				),
 				arrayOf(eventIdObj, null),
@@ -1343,6 +1343,8 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		const val MENTIONS_CLASS_NAME = "org.matrix.rustcomponents.sdk.Mentions"
 		const val IMAGE_INFO_CLASS_NAME = "org.matrix.rustcomponents.sdk.ImageInfo"
 		const val THUMBNAIL_INFO_CLASS_NAME = "org.matrix.rustcomponents.sdk.ThumbnailInfo"
+		const val EVENT_OR_TRANSACTION_ID_CLASS_NAME = "org.matrix.rustcomponents.sdk.EventOrTransactionId"
+		const val EVENT_ID_CLASS_NAME = "org.matrix.rustcomponents.sdk.EventOrTransactionId\$EventId"
 		const val MEDIA_SOURCE_CLASS_NAME = "org.matrix.rustcomponents.sdk.MediaSource"
 		const val RECEIPT_TYPE_CLASS_NAME = "org.matrix.rustcomponents.sdk.ReceiptType"
 		const val ULONG_CLASS_NAME = "kotlin.ULong"

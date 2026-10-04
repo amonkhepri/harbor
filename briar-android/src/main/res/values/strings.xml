@@ -170,6 +170,7 @@
 	<string name="connector_conversation_compose_hint">Message %1$s</string>
 	<string name="connector_conversation_send">Send</string>
 	<string name="connector_conversation_send_failed">Message could not be sent</string>
+	<string name="connector_conversation_delete_failed">Message could not be deleted</string>
 	<string name="connector_conversation_attach_image">Attach image</string>
 	<string name="connector_image_sent">Image sent</string>
 	<string name="connector_image_retry">Retry image</string>

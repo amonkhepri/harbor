@@ -11,6 +11,7 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.ImageButton
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.lifecycle.ViewModelProvider
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.google.android.material.snackbar.Snackbar
@@ -644,7 +645,7 @@ class ConnectorConversationActivity : BriarActivity() {
 		val currentThreadId = threadId
 		if (currentThreadId.isEmpty()) return
 
-		androidx.appcompat.app.AlertDialog.Builder(this, R.style.BriarDialogTheme)
+		AlertDialog.Builder(this, R.style.BriarDialogTheme)
 			.setTitle(R.string.delete)
 			.setPositiveButton(R.string.delete) { _, _ ->
 				executeDeleteMessage(deleter, currentThreadId, item)
@@ -663,6 +664,7 @@ class ConnectorConversationActivity : BriarActivity() {
 			if (success) {
 				val updatedItem = item.copy(type = ConnectorMessageType.DELETED)
 				runOnUiThread {
+					if (isFinishing || isDestroyed) return@runOnUiThread
 					submitMessageState(
 						messageState.copy(
 							messages = messageState.messages.map {
@@ -674,9 +676,10 @@ class ConnectorConversationActivity : BriarActivity() {
 				}
 			} else {
 				runOnUiThread {
+					if (isFinishing || isDestroyed) return@runOnUiThread
 					Snackbar.make(
 						list,
-						R.string.connector_conversation_send_failed,
+						R.string.connector_conversation_delete_failed,
 						Snackbar.LENGTH_LONG,
 					).show()
 				}
