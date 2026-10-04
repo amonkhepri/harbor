@@ -309,6 +309,9 @@ sealed class MessageType {
 	object Video : MessageType()
 	object Audio : MessageType()
 	object File : MessageType()
+	object Gallery : MessageType()
+	object Location : MessageType()
+	object Notice : MessageType()
 }
 
 /** Mirrors the pinned AAR's real shape: `TextMessageContent(String body, FormattedBody formatted)`. */

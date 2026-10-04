@@ -170,7 +170,7 @@ class ReflectiveMatrixHomeserverDiscoveryClientMessagesTest {
 	}
 
 	@Test
-	fun `getRecentMessages maps Matrix video, audio, and file to connector file placeholders`() {
+	fun `getRecentMessages maps video, audio, file, gallery to FILE placeholders`() {
 		val client = loggedInClient()
 		FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec("!room:example.org"))
 		FakeMatrixSdkState.timelineDiffsToReturn = listOf(
@@ -194,14 +194,56 @@ class ReflectiveMatrixHomeserverDiscoveryClientMessagesTest {
 						4_000uL,
 						messageType = MessageType.File,
 					),
+					remoteEvent(
+						"\$gallery:example.org",
+						"private gallery body",
+						5_000uL,
+						messageType = MessageType.Gallery,
+					),
 				),
 			),
 		)
 
-		val result = client.getRecentMessages("!room:example.org", 3)
+		val result = client.getRecentMessages("!room:example.org", 4)
 
 		assertEquals(
-			listOf(ConnectorMessageType.FILE, ConnectorMessageType.FILE, ConnectorMessageType.FILE),
+			listOf(
+				ConnectorMessageType.FILE,
+				ConnectorMessageType.FILE,
+				ConnectorMessageType.FILE,
+				ConnectorMessageType.FILE,
+			),
+			result?.map { it.type },
+		)
+	}
+
+	@Test
+	fun `getRecentMessages maps Location and Notice to connector text`() {
+		val client = loggedInClient()
+		FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec("!room:example.org"))
+		FakeMatrixSdkState.timelineDiffsToReturn = listOf(
+			TimelineDiff.Reset(
+				listOf(
+					remoteEvent(
+						"\$location:example.org",
+						"private location body",
+						6_000uL,
+						messageType = MessageType.Location,
+					),
+					remoteEvent(
+						"\$notice:example.org",
+						"private notice body",
+						7_000uL,
+						messageType = MessageType.Notice,
+					),
+				),
+			),
+		)
+
+		val result = client.getRecentMessages("!room:example.org", 2)
+
+		assertEquals(
+			listOf(ConnectorMessageType.TEXT, ConnectorMessageType.TEXT),
 			result?.map { it.type },
 		)
 	}
