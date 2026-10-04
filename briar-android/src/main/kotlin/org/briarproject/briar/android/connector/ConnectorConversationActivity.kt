@@ -672,7 +672,6 @@ class ConnectorConversationActivity : BriarActivity() {
 							},
 						),
 					)
-					loadMessages(showLoading = false)
 				}
 			} else {
 				runOnUiThread {
