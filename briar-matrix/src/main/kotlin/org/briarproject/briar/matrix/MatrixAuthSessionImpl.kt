@@ -22,12 +22,14 @@ class MatrixAuthSessionImpl(
 ) : MatrixAuthSession {
 
 	private var snapshot = CLOSED_SNAPSHOT
+	private var isClosed = false
 
 	@Synchronized
 	override fun getSnapshot(): Snapshot = snapshot
 
 	@Synchronized
 	override fun start() {
+		if (isClosed) return
 		if (snapshot.authState != MatrixAuthState.CLOSED) return
 		val storeConfiguration = storeConfigurationProvider?.getStoreConfiguration()
 		snapshot = if (storeConfiguration == null) {
@@ -76,6 +78,7 @@ class MatrixAuthSessionImpl(
 
 	@Synchronized
 	override fun logout() {
+		if (isClosed) return
 		try {
 			loginClient.logout()
 		} finally {
@@ -90,6 +93,8 @@ class MatrixAuthSessionImpl(
 
 	@Synchronized
 	override fun close() {
+		if (isClosed) return
+		isClosed = true
 		loginClient.close()
 		snapshot = CLOSED_SNAPSHOT
 	}
