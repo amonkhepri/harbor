@@ -79,6 +79,7 @@ internal class ConnectorConversationAdapter(
 			direction.setText(
 				when (item.localEchoStatus) {
 					ConnectorLocalEchoStatus.PENDING -> R.string.connector_message_sending
+					ConnectorLocalEchoStatus.SENT -> R.string.connector_message_sent
 					ConnectorLocalEchoStatus.FAILED -> R.string.connector_conversation_send_failed
 					null -> if (item.isOutgoing) {
 						R.string.connector_conversation_direction_outgoing

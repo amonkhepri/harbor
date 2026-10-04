@@ -126,6 +126,12 @@ class ConnectorConversationAdapterTest {
 		assertEquals(false, view.performLongClick())
 		assertEquals(null, clickedItem)
 
+		// Sent local echo: no action
+		val sentEcho = received.copy(isOutgoing = true, localEchoStatus = ConnectorLocalEchoStatus.SENT)
+		holder.bind(sentEcho)
+		assertEquals(false, view.performLongClick())
+		assertEquals(null, clickedItem)
+
 		// Failed local echo: no action
 		val failed = received.copy(isOutgoing = true, localEchoStatus = ConnectorLocalEchoStatus.FAILED)
 		holder.bind(failed)

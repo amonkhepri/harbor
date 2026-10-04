@@ -63,7 +63,7 @@ internal data class ConnectorConversationMessageListState(
 					completed = true,
 					item = it.item.copy(
 						localEchoStatus = if (sent) {
-							ConnectorLocalEchoStatus.PENDING
+							ConnectorLocalEchoStatus.SENT
 						} else {
 							ConnectorLocalEchoStatus.FAILED
 						},
@@ -90,7 +90,10 @@ internal data class ConnectorConversationMessageListState(
 			// match on type, source, thread and timing alone.
 			val match = serverMessages.firstOrNull {
 				echo.completed &&
-					echo.item.localEchoStatus == ConnectorLocalEchoStatus.PENDING &&
+					(
+						echo.item.localEchoStatus == ConnectorLocalEchoStatus.PENDING ||
+							echo.item.localEchoStatus == ConnectorLocalEchoStatus.SENT
+						) &&
 					it.stableId !in echo.knownIds &&
 					it.stableId !in consumed &&
 					it.connectorSource == echo.item.connectorSource &&

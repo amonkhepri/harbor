@@ -64,7 +64,7 @@ class ConnectorConversationMessageListStateTest {
 			assertEquals(true, echo.completed)
 			assertEquals(id, echo.item.stableId)
 			assertEquals(
-				if (sent) ConnectorLocalEchoStatus.PENDING else ConnectorLocalEchoStatus.FAILED,
+				if (sent) ConnectorLocalEchoStatus.SENT else ConnectorLocalEchoStatus.FAILED,
 				echo.item.localEchoStatus,
 			)
 

@@ -5,7 +5,7 @@ import org.briarproject.briar.api.connector.ConnectorMessageType
 import org.briarproject.briar.api.connector.ConnectorReactionSummary
 import org.briarproject.briar.api.connector.ConnectorSource
 
-enum class ConnectorLocalEchoStatus { PENDING, FAILED }
+enum class ConnectorLocalEchoStatus { PENDING, SENT, FAILED }
 
 data class ConnectorConversationMessageItem(
 	val connectorSource: ConnectorSource,
