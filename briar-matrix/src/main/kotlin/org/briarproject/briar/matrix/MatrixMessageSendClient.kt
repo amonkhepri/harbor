@@ -49,4 +49,10 @@ interface MatrixMessageSendClient {
 	 * throwing -- when no session is retained, [roomId] cannot be found, or the SDK call fails.
 	 */
 	fun markRead(roomId: String): Boolean
+
+	/**
+	 * Deletes [eventId] from [roomId]. Returns true on success, false -- never
+	 * throwing -- when no session is retained, [roomId] cannot be found, or the SDK call fails.
+	 */
+	fun deleteMessage(roomId: String, eventId: String): Boolean
 }

@@ -92,4 +92,56 @@ class ConnectorConversationAdapterTest {
 			view.findViewById<TextView>(R.id.connectorMessageText).text.toString(),
 		)
 	}
+
+	@Test
+	fun testDeleteAffordanceOnlyOnOwnSentMessages() {
+		val context = RuntimeEnvironment.getApplication()
+		val parent = android.widget.FrameLayout(context)
+		val view = LayoutInflater.from(context)
+			.inflate(R.layout.list_item_connector_message, parent, false)
+		parent.addView(view)
+		
+		var clickedItem: ConnectorConversationMessageItem? = null
+		val holder = ConnectorConversationAdapter.MessageViewHolder(view) {
+			clickedItem = it
+		}
+
+		// Received message: no action
+		val received = ConnectorConversationMessageItem(
+			connectorSource = ConnectorSources.MATRIX,
+			connectorThreadId = "!room",
+			connectorMessageId = "\$1",
+			dateMillis = 1000L,
+			isOutgoing = false,
+			text = "hello",
+			type = ConnectorMessageType.TEXT,
+		)
+		holder.bind(received)
+		assertEquals(false, view.performLongClick())
+		assertEquals(null, clickedItem)
+
+		// Pending local echo: no action
+		val pending = received.copy(isOutgoing = true, localEchoStatus = ConnectorLocalEchoStatus.PENDING)
+		holder.bind(pending)
+		assertEquals(false, view.performLongClick())
+		assertEquals(null, clickedItem)
+
+		// Failed local echo: no action
+		val failed = received.copy(isOutgoing = true, localEchoStatus = ConnectorLocalEchoStatus.FAILED)
+		holder.bind(failed)
+		assertEquals(false, view.performLongClick())
+		assertEquals(null, clickedItem)
+
+		// Deleted message placeholder: no action
+		val deleted = received.copy(isOutgoing = true, type = ConnectorMessageType.DELETED)
+		holder.bind(deleted)
+		assertEquals(false, view.performLongClick())
+		assertEquals(null, clickedItem)
+
+		// Own sent message: triggers callback
+		val sent = received.copy(isOutgoing = true)
+		holder.bind(sent)
+		assertEquals(true, view.performLongClick())
+		assertEquals(sent, clickedItem)
+	}
 }

@@ -11,11 +11,12 @@ import org.briarproject.briar.R
 import org.briarproject.briar.android.util.UiUtils.formatDate
 import org.briarproject.briar.api.connector.ConnectorMessageType
 
-internal class ConnectorConversationAdapter :
-	ListAdapter<
-		ConnectorConversationMessageItem,
-		ConnectorConversationAdapter.MessageViewHolder,
-		>(MessageCallback()) {
+internal class ConnectorConversationAdapter(
+	private val onDeleteClicked: ((ConnectorConversationMessageItem) -> Unit)? = null,
+) : ListAdapter<
+	ConnectorConversationMessageItem,
+	ConnectorConversationAdapter.MessageViewHolder,
+	>(MessageCallback()) {
 
 	override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): MessageViewHolder {
 		val view = LayoutInflater.from(parent.context).inflate(
@@ -23,14 +24,17 @@ internal class ConnectorConversationAdapter :
 			parent,
 			false,
 		)
-		return MessageViewHolder(view)
+		return MessageViewHolder(view, onDeleteClicked)
 	}
 
 	override fun onBindViewHolder(holder: MessageViewHolder, position: Int) {
 		holder.bind(getItem(position))
 	}
 
-	class MessageViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
+	class MessageViewHolder(
+		itemView: View,
+		private val onDeleteClicked: ((ConnectorConversationMessageItem) -> Unit)? = null,
+	) : RecyclerView.ViewHolder(itemView) {
 		private val text: TextView =
 			itemView.findViewById(R.id.connectorMessageText)
 		private val direction: TextView =
@@ -85,6 +89,17 @@ internal class ConnectorConversationAdapter :
 			)
 			date.visibility = if (item.dateMillis > 0) View.VISIBLE else View.GONE
 			date.text = if (item.dateMillis > 0) formatDate(date.context, item.dateMillis) else ""
+			itemView.setOnLongClickListener {
+				if (item.isOutgoing &&
+					item.localEchoStatus == null &&
+					item.type != ConnectorMessageType.DELETED
+				) {
+					onDeleteClicked?.invoke(item)
+					true
+				} else {
+					false
+				}
+			}
 		}
 	}
 

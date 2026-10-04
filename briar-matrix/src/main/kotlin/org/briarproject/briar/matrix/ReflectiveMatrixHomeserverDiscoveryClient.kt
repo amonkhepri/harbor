@@ -734,6 +734,44 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		}
 	}
 
+	@Synchronized
+	override fun deleteMessage(roomId: String, eventId: String): Boolean {
+		val client = loginClient ?: return false
+		var room: Any? = null
+		var timeline: Any? = null
+		return try {
+			room = client.javaClass.getMethod("getRoom", String::class.java).invoke(client, roomId)
+				?: throw SnapshotAdapterFailure()
+			val loadedTimeline =
+				invokeCloseableValue(room, "timeline", emptyArray(), emptyArray(), ::closeQuietly)
+			timeline = loadedTimeline
+
+			val eventIdClass = Class.forName("org.matrix.rustcomponents.sdk.EventOrTransactionId\$EventId")
+			val eventIdObj = eventIdClass.getConstructor(String::class.java).newInstance(eventId)
+
+			invokeUnit(
+				loadedTimeline,
+				"redactEvent",
+				arrayOf(
+					Class.forName("org.matrix.rustcomponents.sdk.EventOrTransactionId"),
+					String::class.java,
+				),
+				arrayOf(eventIdObj, null),
+			)
+			true
+		} catch (e: InterruptedException) {
+			Thread.currentThread().interrupt()
+			false
+		} catch (e: Exception) {
+			false
+		} catch (e: LinkageError) {
+			false
+		} finally {
+			closeQuietly(timeline)
+			closeQuietly(room)
+		}
+	}
+
 	/** Uploads one image and awaits SDK completion; cancels an abandoned join before closing it. */
 	@Synchronized
 	override fun sendImageMessage(

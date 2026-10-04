@@ -11,6 +11,7 @@ import org.briarproject.briar.api.matrix.MatrixAuthSession.RecoverableErrorDetai
 import org.briarproject.briar.api.matrix.MatrixAuthState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -385,6 +386,42 @@ class MatrixRoomConnectorTest {
 		}
 	}
 
+	@Test
+	fun `deleteMessage returns false when not authorized`() {
+		val authSession = FakeMatrixAuthSession(MatrixAuthState.CREDENTIAL_ENTRY)
+		val messageSendClient = FakeMessageSendClient(true)
+		val connector = connector(authSession = authSession, messageSendClient = messageSendClient)
+
+		val sent = connector.deleteMessage("!room:example.org", "\$event")
+
+		assertFalse(sent)
+		assertNull(messageSendClient.lastRequestedRoomId)
+		assertNull(messageSendClient.lastDeletedEventId)
+	}
+
+	@Test
+	fun `deleteMessage bridges roomId and eventId to SDK client when authorized`() {
+		val authSession = FakeMatrixAuthSession(MatrixAuthState.READY)
+		val messageSendClient = FakeMessageSendClient(true)
+		val connector = connector(authSession = authSession, messageSendClient = messageSendClient)
+
+		val sent = connector.deleteMessage("!room:example.org", "\$event")
+
+		assertTrue(sent)
+		assertEquals("!room:example.org", messageSendClient.lastRequestedRoomId)
+		assertEquals("\$event", messageSendClient.lastDeletedEventId)
+	}
+
+	@Test
+	fun `deleteMessage reports the send client's failure`() {
+		val connector = connector(
+			messageSendClient = FakeMessageSendClient(false),
+			authSession = FakeMatrixAuthSession(MatrixAuthState.READY),
+		)
+
+		assertFalse(connector.deleteMessage("!room:example.org", "\$event"))
+	}
+
 	private class FakeMessageSendClient(private val result: Boolean) : MatrixMessageSendClient {
 		var lastRequestedRoomId: String? = null
 			private set
@@ -399,9 +436,18 @@ class MatrixRoomConnectorTest {
 		var lastMarkReadRoomId: String? = null
 			private set
 
+		var lastDeletedEventId: String? = null
+			private set
+
 		override fun sendTextMessage(roomId: String, text: String): Boolean {
 			lastRequestedRoomId = roomId
 			lastRequestedText = text
+			return result
+		}
+
+		override fun deleteMessage(roomId: String, eventId: String): Boolean {
+			lastRequestedRoomId = roomId
+			lastDeletedEventId = eventId
 			return result
 		}
 

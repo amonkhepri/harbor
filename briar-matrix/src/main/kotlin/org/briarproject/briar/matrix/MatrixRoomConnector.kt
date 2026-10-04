@@ -3,6 +3,7 @@ package org.briarproject.briar.matrix
 import org.briarproject.briar.api.connector.ConnectorFileSender
 import org.briarproject.briar.api.connector.ConnectorImageSender
 import org.briarproject.briar.api.connector.ConnectorMessage
+import org.briarproject.briar.api.connector.ConnectorMessageDeleter
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult.LoadFailed
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult.Success
@@ -43,7 +44,8 @@ class MatrixRoomConnector(
 	ConnectorTextSender,
 	ConnectorImageSender,
 	ConnectorFileSender,
-	ConnectorReadMarker {
+	ConnectorReadMarker,
+	ConnectorMessageDeleter {
 	override val source: ConnectorSource = ConnectorSources.MATRIX
 
 	override fun isEnabled(): Boolean = true
@@ -122,5 +124,10 @@ class MatrixRoomConnector(
 	override fun markThreadRead(threadId: String): Boolean {
 		if (!isAuthorized()) return false
 		return messageSendClient.markRead(threadId)
+	}
+
+	override fun deleteMessage(threadId: String, messageId: String): Boolean {
+		if (!isAuthorized()) return false
+		return messageSendClient.deleteMessage(threadId, messageId)
 	}
 }

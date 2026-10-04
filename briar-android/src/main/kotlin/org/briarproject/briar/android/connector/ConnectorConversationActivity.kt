@@ -30,6 +30,7 @@ import org.briarproject.briar.android.util.UiUtils.launchActivityToOpenFile
 import org.briarproject.briar.android.view.BriarRecyclerView
 import org.briarproject.briar.api.connector.ConnectorFileSender
 import org.briarproject.briar.api.connector.ConnectorImageSender
+import org.briarproject.briar.api.connector.ConnectorMessageDeleter
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult
 import org.briarproject.briar.api.connector.ConnectorMessageType
 import org.briarproject.briar.api.connector.ConnectorReadMarker
@@ -133,7 +134,7 @@ class ConnectorConversationActivity : BriarActivity() {
 			if (title == null || title.trim().isEmpty()) fallback else title
 	}
 
-	private val adapter = ConnectorConversationAdapter()
+	private val adapter = ConnectorConversationAdapter(::onDeleteMessageClicked)
 
 	@Inject
 	lateinit var connectorRegistry: ConnectorRegistry
@@ -635,5 +636,50 @@ class ConnectorConversationActivity : BriarActivity() {
 		sendButton.setText(
 			if (enabled) R.string.connector_conversation_send else R.string.connector_message_sending,
 		)
+	}
+
+	private fun onDeleteMessageClicked(item: ConnectorConversationMessageItem) {
+		val deleter = connector as? ConnectorMessageDeleter ?: return
+		val currentThreadId = threadId
+		if (currentThreadId.isEmpty()) return
+
+		androidx.appcompat.app.AlertDialog.Builder(this, R.style.BriarDialogTheme)
+			.setTitle(R.string.delete)
+			.setPositiveButton(R.string.delete) { _, _ ->
+				executeDeleteMessage(deleter, currentThreadId, item)
+			}
+			.setNegativeButton(R.string.cancel, null)
+			.show()
+	}
+
+	private fun executeDeleteMessage(
+		deleter: ConnectorMessageDeleter,
+		targetThreadId: String,
+		item: ConnectorConversationMessageItem,
+	) {
+		ioExecutor.execute {
+			val success = deleter.deleteMessage(targetThreadId, item.connectorMessageId)
+			if (success) {
+				val updatedItem = item.copy(type = ConnectorMessageType.DELETED)
+				runOnUiThread {
+					submitMessageState(
+						messageState.copy(
+							messages = messageState.messages.map {
+								if (it.stableId == item.stableId) updatedItem else it
+							},
+						),
+					)
+					loadMessages(showLoading = false)
+				}
+			} else {
+				runOnUiThread {
+					Snackbar.make(
+						list,
+						R.string.connector_conversation_send_failed,
+						Snackbar.LENGTH_LONG,
+					).show()
+				}
+			}
+		}
 	}
 }
