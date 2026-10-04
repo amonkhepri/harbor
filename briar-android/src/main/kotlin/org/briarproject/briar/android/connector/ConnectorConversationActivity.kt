@@ -639,6 +639,7 @@ class ConnectorConversationActivity : BriarActivity() {
 	}
 
 	private fun onDeleteMessageClicked(item: ConnectorConversationMessageItem) {
+		// MX-020: Prompt to delete an outgoing message
 		val deleter = connector as? ConnectorMessageDeleter ?: return
 		val currentThreadId = threadId
 		if (currentThreadId.isEmpty()) return
