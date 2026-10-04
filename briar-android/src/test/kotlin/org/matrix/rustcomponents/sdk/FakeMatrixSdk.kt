@@ -312,6 +312,8 @@ sealed class MessageType {
 	object Gallery : MessageType()
 	object Location : MessageType()
 	object Notice : MessageType()
+	object Emote : MessageType()
+	object Other : MessageType()
 }
 
 /** Mirrors the pinned AAR's real shape: `TextMessageContent(String body, FormattedBody formatted)`. */
