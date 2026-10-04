@@ -647,6 +647,7 @@ class ConnectorConversationActivity : BriarActivity() {
 
 		AlertDialog.Builder(this, R.style.BriarDialogTheme)
 			.setTitle(R.string.delete)
+			.setMessage(R.string.dialog_message_delete)
 			.setPositiveButton(R.string.delete) { _, _ ->
 				executeDeleteMessage(deleter, currentThreadId, item)
 			}
