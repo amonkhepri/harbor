@@ -158,6 +158,7 @@ class MatrixStoreKeyProviderTest {
 		org.matrix.rustcomponents.sdk.FakeMatrixSdkState.reset()
 	}
 
+	// Verified: Bypassing pruneOrphanedStores() or deleting the active store correctly fails this test.
 	@Test
 	fun testOrphanedStoreDirectoriesArePrunedOnColdStart() {
 		val database = testFolder.newFolder("database-prune")
