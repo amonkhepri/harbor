@@ -158,6 +158,42 @@ class MatrixStoreKeyProviderTest {
 		org.matrix.rustcomponents.sdk.FakeMatrixSdkState.reset()
 	}
 
+	@Test
+	fun testOrphanedStoreDirectoriesArePrunedOnColdStart() {
+		val database = testFolder.newFolder("database-prune")
+		val keyDirectory = testFolder.newFolder("keys-prune")
+		val config = config(databaseDirectory = database, keyDirectory = keyDirectory)
+		val account = fakeAccountManager()
+		val provider = ProtectedMatrixStoreConfigurationProvider(config, account)
+
+		val activeConfig = checkNotNull(provider.newStoreConfiguration())
+		val activeStoreName = activeConfig.directory.name
+		activeConfig.directory.mkdirs()
+
+		val abandonedDir = File(database, "matrix-sdk-00000000-0000-0000-0000-000000000000")
+		abandonedDir.mkdirs()
+		File(abandonedDir, "some-file").writeText("abandoned")
+
+		val siblingDir = File(database, "non-matrix-sdk")
+		siblingDir.mkdirs()
+		File(siblingDir, "sibling-file").writeText("sibling")
+
+		val coldStartProvider = ProtectedMatrixStoreConfigurationProvider(config, account)
+
+		assertEquals(false, abandonedDir.exists())
+
+		val activeConfigOnColdStart = checkNotNull(coldStartProvider.getStoreConfiguration())
+		assertEquals(activeStoreName, activeConfigOnColdStart.directory.name)
+		assertEquals(true, activeConfigOnColdStart.directory.exists())
+
+		assertEquals(true, siblingDir.exists())
+
+		val secondColdStartProvider = ProtectedMatrixStoreConfigurationProvider(config, account)
+		assertEquals(true, activeConfigOnColdStart.directory.exists())
+		val secondColdStartConfig = checkNotNull(secondColdStartProvider.getStoreConfiguration())
+		assertEquals(activeStoreName, secondColdStartConfig.directory.name)
+	}
+
 	private fun config(
 		keyDirectory: File = testFolder.root,
 		strengthener: KeyStrengthener = FakeKeyStrengthener(),
