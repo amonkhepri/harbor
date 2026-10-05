@@ -170,6 +170,8 @@ class MatrixStoreKeyProviderTest {
 		val activeConfig = checkNotNull(provider.newStoreConfiguration())
 		val activeStoreName = activeConfig.directory.name
 		activeConfig.directory.mkdirs()
+		val activeSentinel = File(activeConfig.directory, "active-sentinel")
+		activeSentinel.writeText("active")
 
 		val abandonedDir = File(database, "matrix-sdk-00000000-0000-0000-0000-000000000000")
 		abandonedDir.mkdirs()
@@ -177,7 +179,8 @@ class MatrixStoreKeyProviderTest {
 
 		val siblingDir = File(database, "non-matrix-sdk")
 		siblingDir.mkdirs()
-		File(siblingDir, "sibling-file").writeText("sibling")
+		val siblingSentinel = File(siblingDir, "sibling-file")
+		siblingSentinel.writeText("sibling")
 
 		val coldStartProvider = ProtectedMatrixStoreConfigurationProvider(config, account)
 
@@ -186,11 +189,14 @@ class MatrixStoreKeyProviderTest {
 		val activeConfigOnColdStart = checkNotNull(coldStartProvider.getStoreConfiguration())
 		assertEquals(activeStoreName, activeConfigOnColdStart.directory.name)
 		assertEquals(true, activeConfigOnColdStart.directory.exists())
+		assertEquals("active", File(activeConfigOnColdStart.directory, "active-sentinel").readText())
 
 		assertEquals(true, siblingDir.exists())
+		assertEquals("sibling", siblingSentinel.readText())
 
 		val secondColdStartProvider = ProtectedMatrixStoreConfigurationProvider(config, account)
 		assertEquals(true, activeConfigOnColdStart.directory.exists())
+		assertEquals("active", File(activeConfigOnColdStart.directory, "active-sentinel").readText())
 		val secondColdStartConfig = checkNotNull(secondColdStartProvider.getStoreConfiguration())
 		assertEquals(activeStoreName, secondColdStartConfig.directory.name)
 	}
