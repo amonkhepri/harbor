@@ -9,7 +9,9 @@ import org.briarproject.briar.api.connector.ConnectorSource
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.briarproject.briar.api.connector.ConnectorSources
 
 class ConnectorConversationMessageListStateTest {
 
@@ -104,6 +106,39 @@ class ConnectorConversationMessageListStateTest {
 			text = "body",
 			type = ConnectorMessageType.TEXT,
 		)
+
+	@Test fun sentMediaEchoRemainsUntilMatchingServerRowReplacesItExactlyOnce() {
+		val server = ConnectorConversationMessageItem(
+			ConnectorSources.MATRIX,
+			"room",
+			"event",
+			2_000,
+			true,
+			"hello",
+			ConnectorMessageType.TEXT,
+		)
+		val unrelated = server.copy(connectorMessageId = "unrelated")
+		for (type in listOf(ConnectorMessageType.PHOTO, ConnectorMessageType.FILE)) {
+			var state = ConnectorConversationMessageListState(messages = listOf(unrelated))
+				.beginMediaSend(ConnectorSources.MATRIX, "room", type, 2_000)
+
+			val id = state.messages.last().stableId
+			state = state.completeSend(id, true)
+
+			state = state.reconcile(listOf(unrelated))
+			assertEquals(2, state.messages.size)
+			assertEquals(ConnectorLocalEchoStatus.SENT, state.messages.last().localEchoStatus)
+
+			val confirmed = server.copy(connectorMessageId = "confirmed", type = type, text = "")
+			state = state.reconcile(listOf(unrelated, confirmed))
+			assertEquals(listOf(unrelated, confirmed), state.messages)
+			assertTrue(state.localEchoes.isEmpty())
+
+			state = state.reconcile(listOf(unrelated, confirmed))
+			assertEquals(listOf(unrelated, confirmed), state.messages)
+			assertTrue(state.localEchoes.isEmpty())
+		}
+	}
 
 	companion object {
 		private val CONNECTOR_SOURCE = ConnectorSource("sample", "Sample")
