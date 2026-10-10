@@ -7,7 +7,6 @@ import androidx.recyclerview.widget.DiffUtil.ItemCallback
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView.ViewHolder
 import org.briarproject.briar.R
-import org.briarproject.nullsafety.NullSafety
 
 class InboxThreadAdapter(private val listener: OnInboxThreadClickListener) :
 	ListAdapter<InboxThreadItem, ViewHolder>(InboxThreadCallback()) {
@@ -76,14 +75,11 @@ class InboxThreadAdapter(private val listener: OnInboxThreadClickListener) :
 			if (c1.unreadCount != c2.unreadCount) return false
 			if (c1.timestamp != c2.timestamp) return false
 			if (c1.isConnected != c2.isConnected) return false
-			if (!NullSafety.equals(c1.contact.alias, c2.contact.alias)) {
+			if (c1.contact.alias != c2.contact.alias) {
 				return false
 			}
 			if (c1.authorInfo.status != c2.authorInfo.status) return false
-			return NullSafety.equals(
-				c1.authorInfo.avatarHeader,
-				c2.authorInfo.avatarHeader,
-			)
+			return c1.authorInfo.avatarHeader == c2.authorInfo.avatarHeader
 		}
 	}
 
