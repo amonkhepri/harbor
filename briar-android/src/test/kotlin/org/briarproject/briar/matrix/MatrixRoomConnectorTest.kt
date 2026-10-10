@@ -353,6 +353,29 @@ class MatrixRoomConnectorTest {
 		assertFalse(connector.markThreadRead("!a:example.org"))
 	}
 
+	@Test
+	fun `markThreadRead respects authorization revocation`() {
+		val messageSendClient = FakeMessageSendClient(true)
+		val authSession = FakeMatrixAuthSession(MatrixAuthState.READY)
+		val connector = connector(
+			messageSendClient = messageSendClient,
+			authSession = authSession,
+		)
+
+		// Authorized call reaches the fake receipt client
+		val markedAuthorized = connector.markThreadRead("!a:example.org")
+		assertTrue(markedAuthorized)
+		assertEquals("!a:example.org", messageSendClient.lastMarkReadRoomId)
+
+		// Revoke authorization
+		authSession.state = MatrixAuthState.HOMESERVER_ENTRY
+
+		// Call through the same connector returns failure and makes no further client call
+		val markedRevoked = connector.markThreadRead("!b:example.org")
+		assertFalse(markedRevoked)
+		// Should still be the old one, verifying no further call
+		assertEquals("!a:example.org", messageSendClient.lastMarkReadRoomId)
+	}
 	private fun connector(
 		roomSnapshotClient: MatrixRoomSnapshotClient = FakeRoomSnapshotClient(emptyList()),
 		messageSnapshotClient: MatrixMessageSnapshotClient = FakeMessageSnapshotClient(emptyList()),
