@@ -91,11 +91,14 @@ internal class ConnectorConversationAdapter(
 			date.visibility = if (item.dateMillis > 0) View.VISIBLE else View.GONE
 			date.text = if (item.dateMillis > 0) formatDate(date.context, item.dateMillis) else ""
 			itemView.setOnLongClickListener {
+				val isMatrixLocalId = item.connectorSource.id == org.briarproject.briar.api.connector.ConnectorSources.MATRIX_ID && !item.connectorMessageId.startsWith("\$")
 				if (item.isOutgoing &&
 					item.localEchoStatus == null &&
-					item.type != ConnectorMessageType.DELETED
+					item.type != ConnectorMessageType.DELETED &&
+					onDeleteClicked != null &&
+					!isMatrixLocalId
 				) {
-					onDeleteClicked?.invoke(item)
+					onDeleteClicked.invoke(item)
 					true
 				} else {
 					false
