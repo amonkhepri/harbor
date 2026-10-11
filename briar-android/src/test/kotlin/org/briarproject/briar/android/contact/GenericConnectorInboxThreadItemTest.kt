@@ -1,11 +1,23 @@
 package org.briarproject.briar.android.contact
 
+import android.app.Application
+import android.view.LayoutInflater
+import android.widget.TextView
+import com.vanniktech.emoji.EmojiManager
+import com.vanniktech.emoji.google.GoogleEmojiProvider
+import org.briarproject.briar.R
 import org.briarproject.briar.api.connector.ConnectorMessageType
 import org.briarproject.briar.api.connector.ConnectorSources
 import org.briarproject.briar.api.connector.ConnectorThread
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
+import org.robolectric.annotation.Config
 
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [21], application = Application::class)
 class GenericConnectorInboxThreadItemTest {
 
 	@Test
@@ -59,11 +71,11 @@ class GenericConnectorInboxThreadItemTest {
 	}
 
 	@Test
-	fun testOutgoingLoadingAndPhotoPreviewStateArePreserved() {
+	fun testBlankTitleLoadingRowBindsFallbackAndPreservesPreviewState() {
 		val loading = GenericConnectorInboxThreadItem(
 			connectorSource = ConnectorSources.MATRIX,
 			connectorThreadId = "!room:matrix.example.org",
-			title = "room",
+			title = " \t",
 			latestActivityMillis = 0L,
 			previewText = "",
 			isLastMessageOutgoing = false,
@@ -73,6 +85,12 @@ class GenericConnectorInboxThreadItemTest {
 
 		assertEquals(true, loading.isPreviewLoading)
 		assertEquals(false, loading.hasPreviewText())
+		RuntimeEnvironment.getApplication().setTheme(R.style.BriarTheme)
+		EmojiManager.install(GoogleEmojiProvider())
+		val view = LayoutInflater.from(RuntimeEnvironment.getApplication())
+			.inflate(R.layout.list_item_connector_thread, null)
+		ConnectorInboxThreadViewHolder(view).bind(loading) { _, _ -> }
+		assertEquals("Chat", view.findViewById<TextView>(R.id.connectorThreadTitle).text.toString())
 
 		val outgoingPhoto = GenericConnectorInboxThreadItem(
 			ConnectorThread(
