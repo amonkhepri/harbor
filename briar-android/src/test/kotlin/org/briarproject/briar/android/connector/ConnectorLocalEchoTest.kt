@@ -238,13 +238,14 @@ class ConnectorLocalEchoTest {
 		assertTrue(ConnectorConversationMessageListState().localEchoes.isEmpty())
 	}
 
-	@Test fun unrelatedRowsDoNotConsumeEcho() {
+	@Test fun unrelatedOrHistoricalRowsDoNotConsumeEcho() {
 		var state = ConnectorConversationMessageListState()
 			.beginTextSend(ConnectorSources.MATRIX, "room", "hello", 2_000)
 		state = state.completeSend(state.messages.last().stableId, true)
 		for (unrelated in listOf(
 			server.copy(isOutgoing = false),
 			server.copy(connectorThreadId = "other"),
+			server.copy(dateMillis = 1_000),
 			server.copy(connectorSource = ConnectorSources.TELEGRAM),
 			server.copy(text = "other"),
 		)) {
