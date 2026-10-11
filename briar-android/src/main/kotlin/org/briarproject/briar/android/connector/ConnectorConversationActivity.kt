@@ -662,9 +662,9 @@ class ConnectorConversationActivity : BriarActivity() {
 	) {
 		ioExecutor.execute {
 			val success = deleter.deleteMessage(targetThreadId, item.connectorMessageId)
-			val outcome = resolveDeleteOutcome(messageState, item, success)
 			runOnUiThread {
 				if (isFinishing || isDestroyed) return@runOnUiThread
+				val outcome = resolveDeleteOutcome(messageState, item, success)
 				outcome.feedbackStringRes?.let { Snackbar.make(list, it, Snackbar.LENGTH_LONG).show() }
 					?: submitMessageState(outcome.nextState)
 			}
