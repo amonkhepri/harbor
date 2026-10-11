@@ -89,7 +89,10 @@ class GenericConnectorInboxThreadItemTest {
 		EmojiManager.install(GoogleEmojiProvider())
 		val view = LayoutInflater.from(RuntimeEnvironment.getApplication())
 			.inflate(R.layout.list_item_connector_thread, null)
-		ConnectorInboxThreadViewHolder(view).bind(loading) { _, _ -> }
+		val holder = ConnectorInboxThreadViewHolder(view)
+		holder.bind(loading) { _, _ -> }
+		assertEquals("Chat", view.findViewById<TextView>(R.id.connectorThreadTitle).text.toString())
+		holder.bind(loading.copy(title = "")) { _, _ -> }
 		assertEquals("Chat", view.findViewById<TextView>(R.id.connectorThreadTitle).text.toString())
 
 		val outgoingPhoto = GenericConnectorInboxThreadItem(
