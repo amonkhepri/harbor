@@ -662,28 +662,29 @@ class ConnectorConversationActivity : BriarActivity() {
 	) {
 		ioExecutor.execute {
 			val success = deleter.deleteMessage(targetThreadId, item.connectorMessageId)
-			if (success) {
-				val updatedItem = item.copy(type = ConnectorMessageType.DELETED)
-				runOnUiThread {
-					if (isFinishing || isDestroyed) return@runOnUiThread
-					submitMessageState(
-						messageState.copy(
-							messages = messageState.messages.map {
-								if (it.stableId == item.stableId) updatedItem else it
-							},
-						),
-					)
-				}
-			} else {
-				runOnUiThread {
-					if (isFinishing || isDestroyed) return@runOnUiThread
-					Snackbar.make(
-						list,
-						R.string.connector_conversation_delete_failed,
-						Snackbar.LENGTH_LONG,
-					).show()
-				}
+			val outcome = resolveDeleteOutcome(messageState, item, success)
+			runOnUiThread {
+				if (isFinishing || isDestroyed) return@runOnUiThread
+				outcome.feedbackStringRes?.let { Snackbar.make(list, it, Snackbar.LENGTH_LONG).show() }
+					?: submitMessageState(outcome.nextState)
 			}
 		}
 	}
+}
+
+internal data class ConnectorDeleteOutcome(
+	val nextState: ConnectorConversationMessageListState,
+	val feedbackStringRes: Int? = null,
+)
+
+internal fun resolveDeleteOutcome(
+	state: ConnectorConversationMessageListState,
+	item: ConnectorConversationMessageItem,
+	success: Boolean,
+): ConnectorDeleteOutcome = if (success) {
+	val updated = item.copy(type = ConnectorMessageType.DELETED)
+	val messages = state.messages.map { if (it.stableId == item.stableId) updated else it }
+	ConnectorDeleteOutcome(state.copy(messages = messages))
+} else {
+	ConnectorDeleteOutcome(state, R.string.connector_conversation_delete_failed)
 }
