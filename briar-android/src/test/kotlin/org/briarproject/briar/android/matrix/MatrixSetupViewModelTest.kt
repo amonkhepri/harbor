@@ -29,6 +29,7 @@ class MatrixSetupViewModelTest {
 		var starts = 0
 		var submissions = 0
 		var failLogin = false
+		var failStart = false
 		var logouts = 0
 		var failLogout = false
 		var failSnapshot = false
@@ -38,6 +39,7 @@ class MatrixSetupViewModelTest {
 		}
 		override fun start() {
 			starts++
+			if (failStart) throw IllegalStateException("sensitive SDK response")
 			current = Snapshot(
 				if (restored) MatrixAuthState.READY else MatrixAuthState.HOMESERVER_ENTRY,
 				RecoverableErrorDetail.NONE,
@@ -166,6 +168,23 @@ class MatrixSetupViewModelTest {
 		assertTrue(model.state.value!!.logoutFailed)
 		assertEquals(MatrixSetupStep.UNAVAILABLE, setupStep(model.state.value!!.snapshot!!))
 		assertFalse(model.state.value.toString().contains("sensitive"))
+	}
+
+	@Test fun startFailureAllowsRetryInsteadOfPermanentlyStranding() {
+		val session = Session().apply { failStart = true }
+		val queue = QueueExecutor()
+		val model = MatrixSetupViewModel(session, queue, true)
+		model.start()
+		queue.runNext()
+		assertEquals(1, session.starts)
+		assertTrue(model.state.value!!.actionFailed)
+		assertEquals(MatrixSetupStep.UNAVAILABLE, setupStep(model.state.value!!.snapshot!!))
+		assertFalse(model.state.value.toString().contains("sensitive"))
+		session.failStart = false
+		model.start()
+		queue.runNext()
+		assertEquals(2, session.starts)
+		assertEquals(MatrixSetupStep.HOMESERVER, setupStep(model.state.value!!.snapshot!!))
 	}
 
 	@Test fun recoverableErrorsReturnToTheCorrectForm() {

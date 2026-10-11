@@ -38,12 +38,13 @@ internal class MatrixSetupViewModel(
 ) : ViewModel() {
 	private val mutableState = MutableLiveData(MatrixSetupState())
 	val state: LiveData<MatrixSetupState> = mutableState
+	@Volatile
 	private var started = false
 
 	fun start() {
 		if (!enabled || started) return
 		started = true
-		runAction { session.start() }
+		runAction(onFailure = { started = false }) { session.start() }
 	}
 
 	fun submitHomeserver(homeserver: String) {
@@ -64,7 +65,11 @@ internal class MatrixSetupViewModel(
 
 	private fun currentStep(): MatrixSetupStep? = state.value?.snapshot?.let(::setupStep)
 
-	private fun runAction(reconcileLogoutFailure: Boolean = false, action: () -> Unit) {
+	private fun runAction(
+		reconcileLogoutFailure: Boolean = false,
+		onFailure: () -> Unit = {},
+		action: () -> Unit,
+	) {
 		if (!enabled || state.value?.busy == true) return
 		val previous = state.value ?: MatrixSetupState()
 		mutableState.value = previous.copy(busy = true, actionFailed = false, logoutFailed = false)
@@ -74,6 +79,7 @@ internal class MatrixSetupViewModel(
 					action()
 					MatrixSetupState(session.getSnapshot())
 				} catch (_: Exception) {
+					onFailure()
 					// SDK exceptions may contain credentials or server responses. Do not log them.
 					if (reconcileLogoutFailure) {
 						val snapshot = try {
@@ -90,6 +96,7 @@ internal class MatrixSetupViewModel(
 				mutableState.postValue(result)
 			}
 		} catch (_: RuntimeException) {
+			onFailure()
 			mutableState.value = failureState(previous).copy(logoutFailed = reconcileLogoutFailure)
 		}
 	}
