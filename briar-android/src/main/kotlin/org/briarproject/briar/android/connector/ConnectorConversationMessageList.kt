@@ -44,31 +44,25 @@ internal data class ConnectorConversationMessageListState(
 			type,
 			localEchoStatus = ConnectorLocalEchoStatus.PENDING,
 		)
+		val confirmed = messages.filter { it.localEchoStatus == null }
 		return copy(
 			messages = messages + item,
 			isLoading = false,
 			localEchoes = localEchoes + ConnectorLocalEcho(
 				item,
-				messages.filter { it.localEchoStatus == null }.map { it.stableId }.toSet(),
+				confirmed.map { it.stableId }.toSet(),
+				historyBaseline = confirmed.maxOfOrNull { it.dateMillis },
 			),
 		)
 	}
 
 	fun completeSend(id: String, sent: Boolean): ConnectorConversationMessageListState {
+		val status = if (sent) ConnectorLocalEchoStatus.SENT else ConnectorLocalEchoStatus.FAILED
 		val echoes = localEchoes.map {
 			if (it.item.stableId != id) {
 				it
 			} else {
-				it.copy(
-					completed = true,
-					item = it.item.copy(
-						localEchoStatus = if (sent) {
-							ConnectorLocalEchoStatus.SENT
-						} else {
-							ConnectorLocalEchoStatus.FAILED
-						},
-					),
-				)
+				it.copy(completed = true, item = it.item.copy(localEchoStatus = status))
 			}
 		}
 		return copy(
@@ -101,7 +95,10 @@ internal data class ConnectorConversationMessageListState(
 					it.isOutgoing &&
 					it.type == echo.item.type &&
 					(echo.item.type != ConnectorMessageType.TEXT || it.text == echo.item.text) &&
-					(echo.knownIds.isNotEmpty() || it.dateMillis / 1000 >= echo.item.dateMillis / 1000)
+					(
+						it.dateMillis / 1000 >= echo.item.dateMillis / 1000 ||
+							(echo.historyBaseline != null && it.dateMillis >= echo.historyBaseline)
+						)
 			}
 			if (match != null) consumed.add(match.stableId)
 			match == null
@@ -114,6 +111,7 @@ internal data class ConnectorLocalEcho(
 	val item: ConnectorConversationMessageItem,
 	val knownIds: Set<String>,
 	val completed: Boolean = false,
+	val historyBaseline: Long? = null,
 )
 
 internal enum class ConnectorConversationAvailabilityState {

@@ -144,13 +144,15 @@ class ConnectorConversationMessageListStateTest {
 	@Test fun sentTextEchoReconcilesWithClockSkewWithoutMatchingKnownRows() {
 		val base = messageItem("base")
 		val server = messageItem("server").copy(isOutgoing = true)
+		val historical = server.copy(connectorMessageId = "h", dateMillis = 0)
 		for (known in listOf(listOf(base), listOf(base, server))) {
 			val sending = ConnectorConversationMessageListState(messages = known)
 				.beginTextSend(CONNECTOR_SOURCE, "thread-1", server.text, server.dateMillis + 5_000)
 			val completed = sending.completeSend(sending.localEchoes.single().item.stableId, true)
-			val state = completed.reconcile(listOf(base, server))
+			val all = listOf(historical, base, server)
+			val state = completed.reconcile(all)
 			val echo = completed.localEchoes.single().item
-			val expected = if (server in known) listOf(base, server, echo) else listOf(base, server)
+			val expected = if (server in known) all + echo else all
 			assertEquals(expected, state.messages)
 			assertEquals(if (server in known) completed.localEchoes else emptyList(), state.localEchoes)
 		}
