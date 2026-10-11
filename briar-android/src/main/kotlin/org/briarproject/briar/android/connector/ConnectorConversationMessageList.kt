@@ -87,7 +87,8 @@ internal data class ConnectorConversationMessageListState(
 		val remaining = localEchoes.filter { echo ->
 			// The sender returns only a Boolean, so match new outgoing messages conservatively:
 			// text sends compare body text, while media sends have no caption to compare and
-			// match on type, source, thread and timing alone.
+			// match on type, source and thread. Known IDs exclude pre-existing rows without
+			// relying on device and server clocks agreeing.
 			val match = serverMessages.firstOrNull {
 				echo.completed &&
 					(
@@ -100,8 +101,7 @@ internal data class ConnectorConversationMessageListState(
 					it.connectorThreadId == echo.item.connectorThreadId &&
 					it.isOutgoing &&
 					it.type == echo.item.type &&
-					(echo.item.type != ConnectorMessageType.TEXT || it.text == echo.item.text) &&
-					it.dateMillis / 1000 >= echo.item.dateMillis / 1000
+					(echo.item.type != ConnectorMessageType.TEXT || it.text == echo.item.text)
 			}
 			if (match != null) consumed.add(match.stableId)
 			match == null

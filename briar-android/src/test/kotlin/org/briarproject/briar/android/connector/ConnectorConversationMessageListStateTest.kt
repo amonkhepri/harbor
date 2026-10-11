@@ -141,6 +141,23 @@ class ConnectorConversationMessageListStateTest {
 		}
 	}
 
+	@Test fun sentTextEchoReconcilesWithClockSkewWithoutMatchingKnownRows() {
+		val server = messageItem("server").copy(isOutgoing = true)
+		for (known in listOf(emptyList(), listOf(server))) {
+			val sending = ConnectorConversationMessageListState(messages = known)
+				.beginTextSend(CONNECTOR_SOURCE, "thread-1", server.text, server.dateMillis + 5_000)
+			val completed = sending.completeSend(sending.localEchoes.single().item.stableId, true)
+			val state = completed.reconcile(listOf(server))
+			if (known.isEmpty()) {
+				assertEquals(listOf(server), state.messages)
+				assertTrue(state.localEchoes.isEmpty())
+			} else {
+				assertEquals(listOf(server, completed.localEchoes.single().item), state.messages)
+				assertEquals(completed.localEchoes, state.localEchoes)
+			}
+		}
+	}
+
 	@Test fun testFailedDeleteLeavesMessageVisibleWithFeedback() {
 		val item = messageItem("1").copy(isOutgoing = true)
 		val state = ConnectorConversationMessageListState(messages = listOf(item))
