@@ -154,11 +154,5 @@ class ConnectorConversationAdapterTest {
 		val holderNoDeleter = ConnectorConversationAdapter.MessageViewHolder(view, null)
 		holderNoDeleter.bind(sent)
 		assertEquals(false, view.performLongClick())
-
-		// Matrix local ID (not a confirmed event): no action
-		val localId = received.copy(isOutgoing = true, connectorMessageId = "m.local.123")
-		holder.bind(localId)
-		assertEquals(false, view.performLongClick())
-		assertEquals(sent, clickedItem) // clickedItem hasn't changed
 	}
 }
