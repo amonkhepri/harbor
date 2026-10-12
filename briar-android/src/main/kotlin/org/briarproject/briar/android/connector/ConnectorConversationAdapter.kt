@@ -10,6 +10,7 @@ import androidx.recyclerview.widget.RecyclerView
 import org.briarproject.briar.R
 import org.briarproject.briar.android.util.UiUtils.formatDate
 import org.briarproject.briar.api.connector.ConnectorMessageType
+import org.briarproject.briar.api.connector.ConnectorSources
 
 internal class ConnectorConversationAdapter(
 	private val onDeleteClicked: ((ConnectorConversationMessageItem) -> Unit)? = null,
@@ -91,7 +92,8 @@ internal class ConnectorConversationAdapter(
 			date.visibility = if (item.dateMillis > 0) View.VISIBLE else View.GONE
 			date.text = if (item.dateMillis > 0) formatDate(date.context, item.dateMillis) else ""
 			itemView.setOnLongClickListener {
-				val isMatrixLocalId = item.connectorSource.id == org.briarproject.briar.api.connector.ConnectorSources.MATRIX_ID && !item.connectorMessageId.startsWith("\$")
+				val isMatrixLocalId = item.connectorSource.id == ConnectorSources.MATRIX_ID &&
+					!item.connectorMessageId.startsWith("\$")
 				if (item.isOutgoing &&
 					item.localEchoStatus == null &&
 					item.type != ConnectorMessageType.DELETED &&
