@@ -534,6 +534,32 @@ class TelegramConnectorMessageTest {
 	}
 
 	@Test
+	fun testMessageClientInterruptedDuringSleepAbortsPromptly() {
+		Client.resetTestState()
+		Client.setAuthorizationStateAfterTdlibParameters(TdApi.AuthorizationStateReady())
+		Client.prepareSetTdlibParametersAcceptedLatch()
+		val accessGate = TelegramTdlibAccessGate()
+		val client = configuredReflectiveMessageClient(
+			tdlibDirectory = testFolder.newFolder("tdlib-sleep-interrupt"),
+			accessGate = accessGate,
+		)
+		val readFinished = CountDownLatch(1)
+		var threads: List<ConnectorThread> = emptyList()
+		val readThread = Thread {
+			threads = client.getRecentThreads(1)
+			readFinished.countDown()
+		}
+		readThread.start()
+
+		assertTrue(Client.awaitSetTdlibParametersAccepted(1_000L))
+		readThread.interrupt()
+		assertTrue(readFinished.await(2L, SECONDS))
+		readThread.join(2_000L)
+		assertTrue(threads.isEmpty())
+		assertTrue(readThread.isInterrupted)
+	}
+
+	@Test
 	fun testSessionStopDuringPendingAuthorizationStateAbortsPromptly() {
 		Client.resetTestState()
 		Client.prepareSetTdlibParametersAcceptedLatch()

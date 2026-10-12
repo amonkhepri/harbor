@@ -50,6 +50,26 @@ class TelegramTdlibAccessGateTest {
 	}
 
 	@Test
+	fun sleepUnlessStoppedPropagatesThreadInterruptionPromptly() {
+		val gate = TelegramTdlibAccessGate()
+		val aboutToSleep = CountDownLatch(1)
+		val interrupted = CountDownLatch(1)
+		val sleepThread = Thread {
+			aboutToSleep.countDown()
+			try {
+				gate.sleepUnlessStopped(5_000L)
+			} catch (_: InterruptedException) {
+				interrupted.countDown()
+			}
+		}
+		sleepThread.start()
+
+		assertTrue(aboutToSleep.await(1, SECONDS))
+		sleepThread.interrupt()
+		assertTrue(interrupted.await(500, java.util.concurrent.TimeUnit.MILLISECONDS))
+	}
+
+	@Test
 	fun awaitUnlessStoppedWakesImmediatelyWhenStopped() {
 		val gate = TelegramTdlibAccessGate()
 		val targetLatch = CountDownLatch(1)

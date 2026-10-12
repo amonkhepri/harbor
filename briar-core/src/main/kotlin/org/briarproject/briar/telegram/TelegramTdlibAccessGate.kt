@@ -55,13 +55,10 @@ class TelegramTdlibAccessGate {
 		}
 	}
 
+	@Throws(InterruptedException::class)
 	fun sleepUnlessStopped(timeoutMs: Long) {
 		if (!acceptingCalls || timeoutMs <= 0L) return
-		try {
-			stopLatch.await(timeoutMs, MILLISECONDS)
-		} catch (_: InterruptedException) {
-			Thread.currentThread().interrupt()
-		}
+		stopLatch.await(timeoutMs, MILLISECONDS)
 	}
 
 	fun awaitUnlessStopped(
