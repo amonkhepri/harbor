@@ -157,7 +157,7 @@ class ReflectiveTelegramTdlibMessageClient(
 	@Throws(InterruptedException::class)
 	private fun awaitPreparedAuthorizationStateClassName(
 		pendingAuthorizationUpdate: PendingAuthorizationUpdate,
-	): String = pendingAuthorizationUpdate.await(requestTimeoutMs) ?: ""
+	): String = pendingAuthorizationUpdate.await(requestTimeoutMs, accessGate) ?: ""
 
 	@Throws(ReflectiveOperationException::class)
 	private fun createTdlibClient(
@@ -198,7 +198,7 @@ class ReflectiveTelegramTdlibMessageClient(
 	@Throws(ReflectiveOperationException::class, InterruptedException::class)
 	private fun sendAndAwait(client: Any, request: Any): Any? {
 		if (accessGate.isStopped) return null
-		val result = sendReflectiveTdlibRequest(client, request, requestTimeoutMs)
+		val result = sendReflectiveTdlibRequest(client, request, requestTimeoutMs, accessGate)
 		return result.value.takeIf { result.completed && it?.javaClass?.simpleName != "Error" }
 	}
 
@@ -289,7 +289,7 @@ class ReflectiveTelegramTdlibMessageClient(
 				"AuthorizationStateClosed",
 			)
 			closeReflectiveTdlibClient(client)
-			awaitPreparedAuthorizationStateClassName(closeUpdate)
+			awaitAuthorizationClose(closeUpdate)
 		} catch (_: ReflectiveOperationException) {
 		} catch (_: LinkageError) {
 		} catch (e: InterruptedException) {
@@ -299,11 +299,34 @@ class ReflectiveTelegramTdlibMessageClient(
 		}
 	}
 
+	@Throws(InterruptedException::class)
+	private fun awaitAuthorizationClose(closeUpdate: PendingAuthorizationUpdate): String? {
+		val deadlineNanos = System.nanoTime() + requestTimeoutMs * 1_000_000L
+		var stopGraceDeadlineNanos: Long? = null
+		while (true) {
+			if (accessGate.isStopped && stopGraceDeadlineNanos == null) {
+				stopGraceDeadlineNanos = System.nanoTime() +
+					minOf(requestTimeoutMs, CANCELLATION_CLOSE_TIMEOUT_MS) * 1_000_000L
+			}
+			val effectiveDeadline = if (stopGraceDeadlineNanos != null) {
+				minOf(deadlineNanos, stopGraceDeadlineNanos)
+			} else {
+				deadlineNanos
+			}
+			val remainingNanos = effectiveDeadline - System.nanoTime()
+			if (remainingNanos <= 0L) return null
+			val waitMs = minOf((remainingNanos + 999_999L) / 1_000_000L, 25L)
+			val state = closeUpdate.await(waitMs)
+			if (state != null) return state
+		}
+	}
+
 	private fun safeLimit(limit: Int): Int = limit.coerceIn(0, MAX_TDLIB_MESSAGE_LIMIT)
 
 	private companion object {
 		const val MAX_TDLIB_MESSAGE_LIMIT = 100
 		const val MAX_TDLIB_CHAT_LOAD_REQUESTS = 5
 		const val MAX_TDLIB_HISTORY_REQUESTS = 5
+		const val CANCELLATION_CLOSE_TIMEOUT_MS = 500L
 	}
 }

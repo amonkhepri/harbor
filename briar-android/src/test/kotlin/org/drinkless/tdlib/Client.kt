@@ -107,7 +107,12 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 			}
 			is TdApi.GetChat -> {
 				onGetChatRequest?.invoke()
-				resultHandler?.onResult(chatsById[request.chatId] ?: TdApi.Error())
+				val chat = chatsById[request.chatId] ?: TdApi.Error()
+				if (getChatResultDelayMs > 0L) {
+					emitResult(resultHandler, chat, getChatResultDelayMs)
+				} else {
+					resultHandler?.onResult(chat)
+				}
 			}
 			is TdApi.GetChatHistory -> {
 				getChatHistoryRequestCount++
@@ -215,6 +220,7 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 		private var rejectGetChatHistoryAfterPages = Int.MAX_VALUE
 		private var getChatHistoryRequestCount = 0
 		private var onGetChatRequest: (() -> Unit)? = null
+		private var getChatResultDelayMs = 0L
 		private var qrAuthorizationLink = "test-qr-link"
 		private var activeInstance: Client? = null
 
@@ -237,6 +243,7 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 			closeAuthorizationUpdateDelayMs = 0L
 			phoneNumberResultDelayMs = 0L
 			authenticationCodeResultDelayMs = 0L
+			getChatResultDelayMs = 0L
 			lastPhoneNumber = ""
 			lastDatabaseDirectory = ""
 			lastFilesDirectory = ""
@@ -266,6 +273,10 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 
 		fun setOnGetChatRequest(action: (() -> Unit)?) {
 			onGetChatRequest = action
+		}
+
+		fun setGetChatResultDelayMs(delayMs: Long) {
+			getChatResultDelayMs = delayMs
 		}
 
 		fun setAuthorizationUpdateDelayMs(delayMs: Long) {

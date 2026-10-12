@@ -25,10 +25,20 @@ internal class PendingAuthorizationUpdate(private val acceptedClassName: String?
 	}
 
 	@Throws(InterruptedException::class)
-	fun await(timeoutMs: Long): String? = if (updateReceived.await(timeoutMs, TimeUnit.MILLISECONDS)) {
-		authorizationStateClassName.get()
-	} else {
-		null
+	fun await(
+		timeoutMs: Long,
+		accessGate: TelegramTdlibAccessGate? = null,
+	): String? {
+		val completed = if (accessGate != null) {
+			accessGate.awaitUnlessStopped(updateReceived, timeoutMs)
+		} else {
+			updateReceived.await(timeoutMs, TimeUnit.MILLISECONDS)
+		}
+		return if (completed) {
+			authorizationStateClassName.get()
+		} else {
+			null
+		}
 	}
 }
 
@@ -80,6 +90,7 @@ internal fun sendReflectiveTdlibRequest(
 	client: Any,
 	request: Any,
 	timeoutMs: Long,
+	accessGate: TelegramTdlibAccessGate? = null,
 ): ReflectiveTdlibSendResult {
 	val result = AtomicReference<Any?>(NoTdlibResult)
 	val resultReceived = CountDownLatch(1)
@@ -97,7 +108,12 @@ internal fun sendReflectiveTdlibRequest(
 		null
 	}
 	client.sendReflectively(request, resultHandler)
-	return if (resultReceived.await(timeoutMs, TimeUnit.MILLISECONDS)) {
+	val completed = if (accessGate != null) {
+		accessGate.awaitUnlessStopped(resultReceived, timeoutMs)
+	} else {
+		resultReceived.await(timeoutMs, TimeUnit.MILLISECONDS)
+	}
+	return if (completed) {
 		ReflectiveTdlibSendResult(true, result.get())
 	} else {
 		ReflectiveTdlibSendResult(false, null)

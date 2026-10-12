@@ -48,4 +48,37 @@ class TelegramTdlibAccessGateTest {
 		assertTrue(gate.isStopped)
 		assertFalse(gate.isAcceptingCalls())
 	}
+
+	@Test
+	fun awaitUnlessStoppedWakesImmediatelyWhenStopped() {
+		val gate = TelegramTdlibAccessGate()
+		val targetLatch = CountDownLatch(1)
+		val waitFinished = CountDownLatch(1)
+		var completed = true
+		Thread {
+			completed = gate.awaitUnlessStopped(targetLatch, 5_000L)
+			waitFinished.countDown()
+		}.start()
+
+		assertFalse(waitFinished.await(50, java.util.concurrent.TimeUnit.MILLISECONDS))
+		gate.stop {}
+		assertTrue(waitFinished.await(500, java.util.concurrent.TimeUnit.MILLISECONDS))
+		assertFalse(completed)
+	}
+
+	@Test
+	fun awaitUnlessStoppedReturnsTrueWhenLatchCountedDown() {
+		val gate = TelegramTdlibAccessGate()
+		val targetLatch = CountDownLatch(1)
+		targetLatch.countDown()
+		assertTrue(gate.awaitUnlessStopped(targetLatch, 1_000L))
+	}
+
+	@Test
+	fun awaitUnlessStoppedReturnsFalseWhenAlreadyStopped() {
+		val gate = TelegramTdlibAccessGate()
+		gate.stop {}
+		val targetLatch = CountDownLatch(1)
+		assertFalse(gate.awaitUnlessStopped(targetLatch, 1_000L))
+	}
 }

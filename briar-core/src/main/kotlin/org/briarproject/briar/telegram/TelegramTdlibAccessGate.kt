@@ -44,4 +44,34 @@ class TelegramTdlibAccessGate {
 			Thread.currentThread().interrupt()
 		}
 	}
+
+	fun awaitUnlessStopped(
+		latch: CountDownLatch,
+		timeoutMs: Long,
+		cancellationGraceMs: Long = 200L,
+	): Boolean {
+		if (!acceptingCalls || timeoutMs <= 0L) return false
+		if (latch.count == 0L) return true
+		val deadlineNanos = System.nanoTime() + timeoutMs * 1_000_000L
+		var stopDeadlineNanos: Long? = null
+		while (true) {
+			if (!acceptingCalls && stopDeadlineNanos == null) {
+				stopDeadlineNanos = System.nanoTime() + cancellationGraceMs * 1_000_000L
+			}
+			val effectiveDeadline = if (stopDeadlineNanos != null) {
+				minOf(deadlineNanos, stopDeadlineNanos)
+			} else {
+				deadlineNanos
+			}
+			val remainingNanos = effectiveDeadline - System.nanoTime()
+			if (remainingNanos <= 0L) return false
+			val waitMs = minOf((remainingNanos + 999_999L) / 1_000_000L, 25L)
+			try {
+				if (latch.await(waitMs, MILLISECONDS)) return true
+			} catch (_: InterruptedException) {
+				Thread.currentThread().interrupt()
+				return false
+			}
+		}
+	}
 }
