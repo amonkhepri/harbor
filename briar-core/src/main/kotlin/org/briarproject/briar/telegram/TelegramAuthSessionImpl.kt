@@ -569,23 +569,12 @@ class ReflectiveTelegramTdlibLoginClient(
 						awaitAuthorizationUpdate(closeUpdate, timeoutMs, gate = null).isNotEmpty()
 					} catch (_: InterruptedException) {
 						interrupted = true
-						false
+						break
 					}
 				} while (!confirmed)
-			} else if (accessGate.isStopped) {
-				confirmed = try {
-					awaitAuthorizationUpdate(
-						closeUpdate,
-						minOf(authorizationUpdateTimeoutMs, CANCELLATION_CLOSE_TIMEOUT_MS),
-						gate = null,
-					).isNotEmpty()
-				} catch (_: InterruptedException) {
-					interrupted = true
-					false
-				}
 			} else {
 				confirmed = try {
-					awaitAuthorizationUpdate(closeUpdate, authorizationUpdateTimeoutMs, gate = null).isNotEmpty()
+					awaitAuthorizationClose(closeUpdate) != null
 				} catch (_: InterruptedException) {
 					interrupted = true
 					false
@@ -606,6 +595,31 @@ class ReflectiveTelegramTdlibLoginClient(
 			log.warning("Telegram TDLib close was not confirmed before shutdown timeout")
 		}
 		return confirmed
+	}
+
+	@Throws(InterruptedException::class)
+	private fun awaitAuthorizationClose(closeUpdate: PendingAuthorizationUpdate): String? {
+		val deadlineNanos = System.nanoTime() + authorizationUpdateTimeoutMs * NANOS_PER_MS
+		var stopGraceDeadlineNanos: Long? = null
+		while (true) {
+			if (accessGate.isStopped && stopGraceDeadlineNanos == null) {
+				stopGraceDeadlineNanos = System.nanoTime() +
+					minOf(authorizationUpdateTimeoutMs, CANCELLATION_CLOSE_TIMEOUT_MS) * NANOS_PER_MS
+			}
+			val effectiveDeadline = if (stopGraceDeadlineNanos != null) {
+				minOf(deadlineNanos, stopGraceDeadlineNanos)
+			} else {
+				deadlineNanos
+			}
+			val remainingNanos = effectiveDeadline - System.nanoTime()
+			if (remainingNanos <= 0L) return null
+			val waitMs = minOf((remainingNanos + NANOS_PER_MS - 1L) / NANOS_PER_MS, 25L)
+			val state = closeUpdate.await(waitMs)
+			if (state != null) {
+				lastAuthorizationStateClassName = state
+				return state
+			}
+		}
 	}
 
 	private fun completePendingAuthorizationUpdate(className: String) {

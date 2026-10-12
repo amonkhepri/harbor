@@ -863,6 +863,69 @@ class TelegramConnectorMessageTest {
 		}
 	}
 
+	@Test
+	fun testSessionStopDuringOrdinaryCloseWaitAbortsPromptlyAndReportsFailure() {
+		Client.resetTestState()
+		Client.setCloseAuthorizationUpdateEnabled(false)
+		val gate = TelegramTdlibAccessGate()
+		val loginClient = ReflectiveTelegramTdlibLoginClient(
+			tdlibDirectory = testFolder.newFolder("tdlib-login-ordinary-close-stop"),
+			apiId = 1,
+			apiHash = "x",
+			tdlibKeyProvider = StaticTelegramTdlibDatabaseKeyProvider(TDLIB_KEY),
+			authorizationUpdateTimeoutMs = 10_000L,
+			shutdownCloseTimeoutMs = 1_000L,
+			accessGate = gate,
+		)
+		val session = TelegramAuthSessionImpl(loginClient, gate)
+		session.start()
+
+		val ordinaryCloseDone = CountDownLatch(1)
+		val ordinaryCloseThread = Thread {
+			session.close()
+			ordinaryCloseDone.countDown()
+		}
+		ordinaryCloseThread.start()
+
+		val deadline = System.nanoTime() + SECONDS.toNanos(2)
+		while (!Client.getSentRequestNames().contains("Close") && System.nanoTime() < deadline) {
+			Thread.sleep(5L)
+		}
+		assertTrue(Client.getSentRequestNames().contains("Close"))
+
+		val stopped = CountDownLatch(1)
+		val stopFailure = AtomicReference<Throwable?>()
+		val startStop = System.nanoTime()
+		val stopThread = Thread {
+			try {
+				session.stopService()
+			} catch (t: Throwable) {
+				stopFailure.set(t)
+			} finally {
+				stopped.countDown()
+			}
+		}
+		stopThread.start()
+
+		try {
+			assertTrue("stop finished within 2s", stopped.await(2L, SECONDS))
+			val stopDurationMs = MILLISECONDS.convert(
+				System.nanoTime() - startStop,
+				java.util.concurrent.TimeUnit.NANOSECONDS,
+			)
+			assertTrue("stop duration under 1500ms: ${stopDurationMs}ms", stopDurationMs < 1500L)
+			assertTrue("ordinary close finished within 2s", ordinaryCloseDone.await(2L, SECONDS))
+			assertTrue(
+				"Expected stopService() to report failure when login TDLib close was unconfirmed",
+				stopFailure.get() is ServiceException,
+			)
+		} finally {
+			Client.setCloseAuthorizationUpdateEnabled(true)
+			ordinaryCloseThread.join(2_000L)
+			stopThread.join(2_000L)
+		}
+	}
+
 	private fun readyReflectiveMessageClient(
 		configureClientState: () -> Unit = {},
 	): ReflectiveTelegramTdlibMessageClient {
