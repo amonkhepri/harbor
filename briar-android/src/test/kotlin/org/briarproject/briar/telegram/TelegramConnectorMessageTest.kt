@@ -665,6 +665,77 @@ class TelegramConnectorMessageTest {
 		}
 	}
 
+	@Test
+	fun testSessionStopDuringSlowCallChainReportsFailureWhenReaderInterruptedDuringClose() {
+		Client.resetTestState()
+		Client.setAuthorizationStateAfterTdlibParameters(TdApi.AuthorizationStateReady())
+		Client.setCloseAuthorizationUpdateEnabled(false)
+		val chats = (1L..5L).map { chat(it, 1_700_000_000 + it.toInt()) }.toTypedArray()
+		Client.setChats(*chats)
+		val accessGate = TelegramTdlibAccessGate()
+		val client = configuredReflectiveMessageClient(
+			tdlibDirectory = testFolder.newFolder("tdlib-unconfirmed-close-interrupted"),
+			requestTimeoutMs = 10_000L,
+			accessGate = accessGate,
+		)
+		val loginClient = ReflectiveTelegramTdlibLoginClient(
+			tdlibDirectory = testFolder.newFolder("tdlib-login-unconfirmed-close-interrupted"),
+			apiId = 1,
+			apiHash = "x",
+			tdlibKeyProvider = StaticTelegramTdlibDatabaseKeyProvider(TDLIB_KEY),
+			authorizationUpdateTimeoutMs = 1_000L,
+			shutdownCloseTimeoutMs = 1_000L,
+		)
+		val session = TelegramAuthSessionImpl(loginClient, accessGate)
+		Client.setGetChatResultDelayMs(30_000L)
+		val firstGetChatLatch = CountDownLatch(1)
+		Client.setOnGetChatRequest {
+			firstGetChatLatch.countDown()
+		}
+
+		val readFinished = CountDownLatch(1)
+		val stopFinished = CountDownLatch(1)
+		val stopFailure = AtomicReference<Throwable?>()
+		val readThread = Thread {
+			client.getRecentThreads(5)
+			readFinished.countDown()
+		}
+		readThread.start()
+
+		try {
+			assertTrue(firstGetChatLatch.await(5L, SECONDS))
+			val stopThread = Thread {
+				try {
+					session.stopService()
+				} catch (e: Throwable) {
+					stopFailure.set(e)
+				} finally {
+					stopFinished.countDown()
+				}
+			}
+			stopThread.start()
+
+			while (accessGate.isAcceptingCalls()) {
+				Thread.sleep(10L)
+			}
+			readThread.interrupt()
+
+			assertTrue(stopFinished.await(2L, SECONDS))
+			assertTrue(readFinished.await(2L, SECONDS))
+			readThread.join(2_000L)
+			stopThread.join(2_000L)
+			assertTrue(readThread.isInterrupted)
+			assertTrue(
+				"Expected stopService() to report failure when the connector's TDLib " +
+					"close confirmation was interrupted, so callers do not proceed as if it is " +
+					"safe to delete the account",
+				stopFailure.get() is ServiceException,
+			)
+		} finally {
+			Client.setCloseAuthorizationUpdateEnabled(true)
+		}
+	}
+
 	private fun readyReflectiveMessageClient(
 		configureClientState: () -> Unit = {},
 	): ReflectiveTelegramTdlibMessageClient {

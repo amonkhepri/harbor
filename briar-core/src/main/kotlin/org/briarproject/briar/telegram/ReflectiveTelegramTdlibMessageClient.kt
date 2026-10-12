@@ -283,20 +283,22 @@ class ReflectiveTelegramTdlibMessageClient(
 		client: Any,
 		pendingAuthorizationUpdate: AtomicReference<PendingAuthorizationUpdate?>,
 	) {
+		var confirmedClosed = false
 		try {
 			val closeUpdate = prepareAuthorizationUpdate(
 				pendingAuthorizationUpdate,
 				"AuthorizationStateClosed",
 			)
 			closeReflectiveTdlibClient(client)
-			if (awaitAuthorizationClose(closeUpdate) == null && accessGate.isStopped) {
-				accessGate.reportUnconfirmedCancelledClose()
-			}
+			confirmedClosed = awaitAuthorizationClose(closeUpdate) != null
 		} catch (_: ReflectiveOperationException) {
 		} catch (_: LinkageError) {
 		} catch (e: InterruptedException) {
 			Thread.currentThread().interrupt()
 		} finally {
+			if (!confirmedClosed && accessGate.isStopped) {
+				accessGate.reportUnconfirmedCancelledClose()
+			}
 			pendingAuthorizationUpdate.set(null)
 		}
 	}
