@@ -32,4 +32,20 @@ class TelegramTdlibAccessGateTest {
 		assertTrue(stopFinished.await(1, SECONDS))
 		assertEquals("fallback", gate.run("fallback") { "called" })
 	}
+
+	@Test
+	fun sleepUnlessStoppedWakesImmediatelyWhenStopped() {
+		val gate = TelegramTdlibAccessGate()
+		val sleepFinished = CountDownLatch(1)
+		Thread {
+			gate.sleepUnlessStopped(5_000L)
+			sleepFinished.countDown()
+		}.start()
+
+		assertFalse(sleepFinished.await(50, java.util.concurrent.TimeUnit.MILLISECONDS))
+		gate.stop {}
+		assertTrue(sleepFinished.await(500, java.util.concurrent.TimeUnit.MILLISECONDS))
+		assertTrue(gate.isStopped)
+		assertFalse(gate.isAcceptingCalls())
+	}
 }

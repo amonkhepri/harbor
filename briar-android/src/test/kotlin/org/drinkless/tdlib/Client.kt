@@ -106,6 +106,7 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 				)
 			}
 			is TdApi.GetChat -> {
+				onGetChatRequest?.invoke()
 				resultHandler?.onResult(chatsById[request.chatId] ?: TdApi.Error())
 			}
 			is TdApi.GetChatHistory -> {
@@ -213,6 +214,7 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 		private var rejectGetChatHistory = false
 		private var rejectGetChatHistoryAfterPages = Int.MAX_VALUE
 		private var getChatHistoryRequestCount = 0
+		private var onGetChatRequest: (() -> Unit)? = null
 		private var qrAuthorizationLink = "test-qr-link"
 		private var activeInstance: Client? = null
 
@@ -257,8 +259,13 @@ class Client private constructor(private val updateHandler: ResultHandler) {
 			rejectGetChatHistory = false
 			rejectGetChatHistoryAfterPages = Int.MAX_VALUE
 			getChatHistoryRequestCount = 0
+			onGetChatRequest = null
 			qrAuthorizationLink = "test-qr-link"
 			activeInstance = null
+		}
+
+		fun setOnGetChatRequest(action: (() -> Unit)?) {
+			onGetChatRequest = action
 		}
 
 		fun setAuthorizationUpdateDelayMs(delayMs: Long) {
