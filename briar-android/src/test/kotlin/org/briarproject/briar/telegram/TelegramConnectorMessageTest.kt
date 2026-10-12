@@ -8,6 +8,7 @@ import org.briarproject.briar.api.connector.ConnectorMessageReadResult.Success
 import org.briarproject.briar.api.connector.ConnectorSources
 import org.briarproject.briar.api.connector.ConnectorThread
 import org.briarproject.briar.api.telegram.TelegramConnector
+import org.briarproject.bramble.api.lifecycle.ServiceException
 import org.drinkless.tdlib.Client
 import org.drinkless.tdlib.TdApi
 import org.junit.After
@@ -21,6 +22,7 @@ import java.io.File
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit.MILLISECONDS
 import java.util.concurrent.TimeUnit.SECONDS
+import java.util.concurrent.atomic.AtomicReference
 
 private fun telegramMessage(
 	chatId: Long,
@@ -573,7 +575,7 @@ class TelegramConnectorMessageTest {
 	}
 
 	@Test
-	fun testSessionStopDuringSlowCallChainBoundsWaitWhenCloseUnconfirmed() {
+	fun testSessionStopDuringSlowCallChainReportsFailureWhenCloseUnconfirmed() {
 		Client.resetTestState()
 		Client.setAuthorizationStateAfterTdlibParameters(TdApi.AuthorizationStateReady())
 		Client.setCloseAuthorizationUpdateEnabled(false)
@@ -602,6 +604,7 @@ class TelegramConnectorMessageTest {
 
 		val readFinished = CountDownLatch(1)
 		val stopFinished = CountDownLatch(1)
+		val stopFailure = AtomicReference<Throwable?>()
 		val readThread = Thread {
 			client.getRecentThreads(5)
 			readFinished.countDown()
@@ -611,8 +614,13 @@ class TelegramConnectorMessageTest {
 		try {
 			assertTrue(firstGetChatLatch.await(5L, SECONDS))
 			val stopThread = Thread {
-				session.stopService()
-				stopFinished.countDown()
+				try {
+					session.stopService()
+				} catch (e: Throwable) {
+					stopFailure.set(e)
+				} finally {
+					stopFinished.countDown()
+				}
 			}
 			stopThread.start()
 
@@ -620,6 +628,12 @@ class TelegramConnectorMessageTest {
 			assertTrue(readFinished.await(2L, SECONDS))
 			readThread.join(2_000L)
 			stopThread.join(2_000L)
+			assertTrue(
+				"Expected stopService() to report failure when the connector's TDLib " +
+					"close could not be confirmed, so callers do not proceed as if it is " +
+					"safe to delete the account",
+				stopFailure.get() is ServiceException,
+			)
 		} finally {
 			Client.setCloseAuthorizationUpdateEnabled(true)
 		}

@@ -289,7 +289,9 @@ class ReflectiveTelegramTdlibMessageClient(
 				"AuthorizationStateClosed",
 			)
 			closeReflectiveTdlibClient(client)
-			awaitAuthorizationClose(closeUpdate)
+			if (awaitAuthorizationClose(closeUpdate) == null && accessGate.isStopped) {
+				accessGate.reportUnconfirmedCancelledClose()
+			}
 		} catch (_: ReflectiveOperationException) {
 		} catch (_: LinkageError) {
 		} catch (e: InterruptedException) {

@@ -1,5 +1,6 @@
 package org.briarproject.briar.telegram
 
+import org.briarproject.bramble.api.lifecycle.ServiceException
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit.MILLISECONDS
 
@@ -10,6 +11,8 @@ class TelegramTdlibAccessGate {
 	private var stopLatch = CountDownLatch(1)
 	@Volatile
 	private var acceptingCalls = true
+	@Volatile
+	private var unconfirmedCancelledClose = false
 
 	val isStopped: Boolean
 		get() = !acceptingCalls
@@ -26,13 +29,29 @@ class TelegramTdlibAccessGate {
 	fun start() = synchronized(lock) {
 		stopLatch = CountDownLatch(1)
 		acceptingCalls = true
+		unconfirmedCancelledClose = false
 	}
 
+	/**
+	 * Records that a call aborted by [stop] could not confirm its TDLib
+	 * client had actually closed before giving up. [stop] surfaces this as a
+	 * failure so callers do not treat shutdown as safe to proceed with
+	 * (e.g. account deletion) while that client may still own the database.
+	 */
+	fun reportUnconfirmedCancelledClose() {
+		unconfirmedCancelledClose = true
+	}
+
+	@Throws(ServiceException::class)
 	fun stop(close: () -> Unit) {
 		acceptingCalls = false
 		stopLatch.countDown()
 		synchronized(lock) {
 			close()
+			if (unconfirmedCancelledClose) {
+				unconfirmedCancelledClose = false
+				throw ServiceException()
+			}
 		}
 	}
 
