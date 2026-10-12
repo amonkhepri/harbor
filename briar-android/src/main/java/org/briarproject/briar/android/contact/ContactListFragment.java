@@ -25,11 +25,13 @@ import org.briarproject.briar.android.conversation.ConversationActivity;
 import org.briarproject.briar.android.fragment.BaseFragment;
 import org.briarproject.briar.android.util.BriarSnackbarBuilder;
 import org.briarproject.briar.android.view.BriarRecyclerView;
-import org.briarproject.briar.api.connector.ConnectorSources;
+import org.briarproject.briar.api.connector.ConnectorSource;
 import org.briarproject.nullsafety.MethodsNotNullByDefault;
 import org.briarproject.nullsafety.ParametersNotNullByDefault;
 
+import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 
 import javax.annotation.Nullable;
 import javax.inject.Inject;
@@ -62,7 +64,7 @@ public class ContactListFragment extends BaseFragment
 	private FabSpeedDial speedDial;
 	private List<ContactListItem> briarItems = emptyList();
 	private List<ConnectorInboxThreadItem> connectorItems = emptyList();
-	private ConnectorInboxAvailabilityState telegramAvailabilityState =
+	private ConnectorInboxAvailabilityState connectorAvailabilityState =
 			ConnectorInboxAvailabilityState.NONE;
 
 	/**
@@ -125,10 +127,7 @@ public class ContactListFragment extends BaseFragment
 				});
 		viewModel.getConnectorAvailabilityStates()
 				.observe(getViewLifecycleOwner(), states -> {
-					ConnectorInboxAvailabilityState state =
-							states.get(ConnectorSources.TELEGRAM);
-					telegramAvailabilityState = state == null ?
-							ConnectorInboxAvailabilityState.NONE : state;
+					connectorAvailabilityState = aggregateAvailabilityState(states);
 					updateEmptyState();
 					requireActivity().invalidateOptionsMenu();
 				});
@@ -174,11 +173,11 @@ public class ContactListFragment extends BaseFragment
 	@Override
 	public void onPrepareOptionsMenu(Menu menu) {
 		super.onPrepareOptionsMenu(menu);
-		MenuItem refresh = menu.findItem(R.id.action_refresh_telegram_threads);
+		MenuItem refresh = menu.findItem(R.id.action_refresh_connector_threads);
 		if (refresh != null) {
 			refresh.setVisible(shouldShowManualRefreshAction(
 					viewModel.isAnyConnectorEnabled(),
-					telegramAvailabilityState));
+					connectorAvailabilityState));
 		}
 	}
 
@@ -253,14 +252,14 @@ public class ContactListFragment extends BaseFragment
 	}
 
 	private void updateEmptyState() {
-		list.setEmptyText(emptyTextForState(telegramAvailabilityState));
-		int actionRes = emptyActionTextForState(telegramAvailabilityState);
+		list.setEmptyText(emptyTextForState(connectorAvailabilityState));
+		int actionRes = emptyActionTextForState(connectorAvailabilityState);
 		if (actionRes == 0) list.setEmptyAction("");
 		else list.setEmptyAction(actionRes);
 	}
 
 	static boolean isManualRefreshAction(int itemId) {
-		return itemId == R.id.action_refresh_telegram_threads;
+		return itemId == R.id.action_refresh_connector_threads;
 	}
 
 	static boolean shouldShowManualRefreshAction(boolean connectorEnabled,
@@ -269,16 +268,35 @@ public class ContactListFragment extends BaseFragment
 				state != ConnectorInboxAvailabilityState.LOADING;
 	}
 
+	/**
+	 * Multiple connectors (Telegram, Matrix) can each report their own
+	 * availability state. Pick the single most relevant one to drive the
+	 * shared empty-state text and refresh action, in order of urgency: an
+	 * in-progress load, then a failure, then an auth problem, then "empty"
+	 * only once every enabled connector agrees, else no special state.
+	 */
+	static ConnectorInboxAvailabilityState aggregateAvailabilityState(
+			Map<ConnectorSource, ConnectorInboxAvailabilityState> states) {
+		for (ConnectorInboxAvailabilityState candidate : Arrays.asList(
+				ConnectorInboxAvailabilityState.LOADING,
+				ConnectorInboxAvailabilityState.LOAD_FAILED,
+				ConnectorInboxAvailabilityState.ACCOUNT_UNAVAILABLE,
+				ConnectorInboxAvailabilityState.EMPTY)) {
+			if (states.containsValue(candidate)) return candidate;
+		}
+		return ConnectorInboxAvailabilityState.NONE;
+	}
+
 	static int emptyTextForState(ConnectorInboxAvailabilityState state) {
 		switch (state) {
 			case LOADING:
-				return R.string.telegram_inbox_loading;
+				return R.string.connector_inbox_loading;
 			case ACCOUNT_UNAVAILABLE:
-				return R.string.telegram_inbox_account_unavailable;
+				return R.string.connector_inbox_account_unavailable;
 			case EMPTY:
-				return R.string.telegram_inbox_empty;
+				return R.string.connector_inbox_empty;
 			case LOAD_FAILED:
-				return R.string.telegram_inbox_load_failed;
+				return R.string.connector_inbox_load_failed;
 			default:
 				return R.string.no_contacts;
 		}

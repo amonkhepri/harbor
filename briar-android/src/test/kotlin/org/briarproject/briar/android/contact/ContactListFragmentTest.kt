@@ -22,7 +22,7 @@ class ContactListFragmentTest {
 	@Test
 	fun testManualRefreshActionIsRecognized() {
 		listOf(
-			R.id.action_refresh_telegram_threads to true,
+			R.id.action_refresh_connector_threads to true,
 			android.R.id.home to false,
 			R.id.action_add_contact_remotely to false,
 		).forEach { (actionId, expected) ->
@@ -60,10 +60,10 @@ class ContactListFragmentTest {
 	fun testTelegramAvailabilityUsesSanitizedEmptyText() {
 		mapOf(
 			NONE to R.string.no_contacts,
-			LOADING to R.string.telegram_inbox_loading,
-			ACCOUNT_UNAVAILABLE to R.string.telegram_inbox_account_unavailable,
-			EMPTY to R.string.telegram_inbox_empty,
-			LOAD_FAILED to R.string.telegram_inbox_load_failed,
+			LOADING to R.string.connector_inbox_loading,
+			ACCOUNT_UNAVAILABLE to R.string.connector_inbox_account_unavailable,
+			EMPTY to R.string.connector_inbox_empty,
+			LOAD_FAILED to R.string.connector_inbox_load_failed,
 		).forEach { (state, emptyText) ->
 			assertEquals(emptyText, ContactListFragment.emptyTextForState(state))
 		}
@@ -75,6 +75,41 @@ class ContactListFragmentTest {
 			val expected = if (state == NONE) R.string.no_contacts_action else 0
 			assertEquals(expected, ContactListFragment.emptyActionTextForState(state))
 		}
+	}
+
+	@Test
+	fun testAggregateAvailabilityStatePrioritizesMostUrgentConnector() {
+		// A Matrix-only problem must not be masked by an unrelated Telegram
+		// state, in either priority direction.
+		assertEquals(
+			LOADING,
+			ContactListFragment.aggregateAvailabilityState(
+				mapOf(ConnectorSources.TELEGRAM to EMPTY, ConnectorSources.MATRIX to LOADING),
+			),
+		)
+		assertEquals(
+			ACCOUNT_UNAVAILABLE,
+			ContactListFragment.aggregateAvailabilityState(
+				mapOf(ConnectorSources.TELEGRAM to NONE, ConnectorSources.MATRIX to ACCOUNT_UNAVAILABLE),
+			),
+		)
+		assertEquals(
+			LOAD_FAILED,
+			ContactListFragment.aggregateAvailabilityState(
+				mapOf(
+					ConnectorSources.TELEGRAM to ACCOUNT_UNAVAILABLE,
+					ConnectorSources.MATRIX to LOAD_FAILED,
+				),
+			),
+		)
+		assertEquals(
+			EMPTY,
+			ContactListFragment.aggregateAvailabilityState(mapOf(ConnectorSources.MATRIX to EMPTY)),
+		)
+		assertEquals(
+			NONE,
+			ContactListFragment.aggregateAvailabilityState(emptyMap()),
+		)
 	}
 
 	@Test

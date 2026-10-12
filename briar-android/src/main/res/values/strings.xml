@@ -153,10 +153,10 @@
 	<string name="connector_message_reply">↩ %1$s</string>
 	<string name="connector_message_reaction_summary">%1$s %2$d</string>
 	<string name="connector_message_with_reactions">%1$s\n%2$s</string>
-	<string name="telegram_inbox_loading">Loading Telegram inbox...</string>
-	<string name="telegram_inbox_account_unavailable">Telegram account unavailable</string>
-	<string name="telegram_inbox_empty">No recent Telegram chats</string>
-	<string name="telegram_inbox_load_failed">Telegram inbox unavailable</string>
+	<string name="connector_inbox_loading">Loading connector inbox...</string>
+	<string name="connector_inbox_account_unavailable">Connector account unavailable</string>
+	<string name="connector_inbox_empty">No recent connector chats</string>
+	<string name="connector_inbox_load_failed">Connector inbox unavailable</string>
 	<string name="connector_conversation_label">Conversation</string>
 	<string name="connector_conversation_title">%1$s conversation</string>
 	<string name="connector_conversation_loading">Loading %1$s messages...</string>
@@ -178,7 +178,7 @@
 	<string name="connector_image_failed">Image could not be sent. Retry or choose another image (up to 10 MB).</string>
 	<string name="connector_message_sending">Sending…</string>
 	<string name="connector_message_sent">Sent</string>
-	<string name="telegram_inbox_refresh">Refresh Telegram inbox</string>
+	<string name="connector_inbox_refresh">Refresh connector inbox</string>
 
 	<!-- Notifications -->
 	<string name="reminder_notification_title">Signed out of Harbor</string>
