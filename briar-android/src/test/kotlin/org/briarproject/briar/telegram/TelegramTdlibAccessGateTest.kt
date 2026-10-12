@@ -101,4 +101,26 @@ class TelegramTdlibAccessGateTest {
 		val targetLatch = CountDownLatch(1)
 		assertFalse(gate.awaitUnlessStopped(targetLatch, 1_000L))
 	}
+
+	@Test
+	fun awaitUnlessStoppedPropagatesThreadInterruptionPromptly() {
+		val gate = TelegramTdlibAccessGate()
+		val targetLatch = CountDownLatch(1)
+		val aboutToWait = CountDownLatch(1)
+		val interrupted = CountDownLatch(1)
+		val waitThread = Thread {
+			aboutToWait.countDown()
+			try {
+				gate.awaitUnlessStopped(targetLatch, 5_000L)
+			} catch (_: InterruptedException) {
+				interrupted.countDown()
+			}
+		}
+		waitThread.start()
+
+		assertTrue(aboutToWait.await(1, SECONDS))
+		waitThread.interrupt()
+		assertTrue(interrupted.await(500, java.util.concurrent.TimeUnit.MILLISECONDS))
+		waitThread.join(2_000L)
+	}
 }

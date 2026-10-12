@@ -115,6 +115,7 @@ class TelegramModule {
 					featureFlags.getTelegramApiId(),
 					featureFlags.getTelegramApiHash(),
 					tdlibKeyProvider,
+					accessGate = accessGate,
 				),
 				accessGate,
 			)

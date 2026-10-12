@@ -61,11 +61,13 @@ class TelegramTdlibAccessGate {
 		stopLatch.await(timeoutMs, MILLISECONDS)
 	}
 
+	@Throws(InterruptedException::class)
 	fun awaitUnlessStopped(
 		latch: CountDownLatch,
 		timeoutMs: Long,
 		cancellationGraceMs: Long = 200L,
 	): Boolean {
+		if (Thread.interrupted()) throw InterruptedException()
 		if (!acceptingCalls || timeoutMs <= 0L) return false
 		if (latch.count == 0L) return true
 		val deadlineNanos = System.nanoTime() + timeoutMs * 1_000_000L
@@ -82,12 +84,7 @@ class TelegramTdlibAccessGate {
 			val remainingNanos = effectiveDeadline - System.nanoTime()
 			if (remainingNanos <= 0L) return false
 			val waitMs = minOf((remainingNanos + 999_999L) / 1_000_000L, 25L)
-			try {
-				if (latch.await(waitMs, MILLISECONDS)) return true
-			} catch (_: InterruptedException) {
-				Thread.currentThread().interrupt()
-				return false
-			}
+			if (latch.await(waitMs, MILLISECONDS)) return true
 		}
 	}
 }
