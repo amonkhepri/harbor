@@ -578,6 +578,39 @@ class ReflectiveTelegramTdlibLoginClientTest {
 	}
 
 	@Test
+	fun testCloseAndConfirmWaitsPastCloseTimeoutForTdlibConfirmation() {
+		Client.setCloseAuthorizationUpdateDelayMs(200L)
+		val session = TelegramAuthSessionImpl(
+			createClient(authorizationUpdateTimeoutMs = 50L),
+		)
+		session.start()
+
+		val startedAt = System.currentTimeMillis()
+		val confirmed = session.closeAndConfirm()
+		val elapsed = System.currentTimeMillis() - startedAt
+
+		assertEquals("Expected close wait, got ${elapsed}ms", true, elapsed >= 150L)
+		assertEquals(true, confirmed)
+		assertEquals(TelegramAuthState.CLOSED, session.getSnapshot().authState)
+		assertSentRequests(CLOSE)
+	}
+
+	@Test(timeout = 2_000L)
+	fun testCloseAndConfirmReturnsFalseWhenTdlibNeverConfirmsClose() {
+		Client.setCloseAuthorizationUpdateEnabled(false)
+		val session = TelegramAuthSessionImpl(
+			createClient(
+				authorizationUpdateTimeoutMs = 25L,
+				shutdownCloseTimeoutMs = 100L,
+			),
+		)
+		session.start()
+
+		assertEquals(false, session.closeAndConfirm())
+		assertSentRequests(CLOSE)
+	}
+
+	@Test
 	fun testQrAuthorizationRequestIsIdempotentAndCapturesRotatedLink() {
 		val client = createClient(qrAuthorizationPollMs = 1L)
 		client.start()

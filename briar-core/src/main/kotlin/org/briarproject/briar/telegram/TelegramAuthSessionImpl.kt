@@ -54,6 +54,14 @@ class TelegramAuthSessionImpl(
 
 	override fun close() = updateState(tdlibLoginClient::close)
 
+	override fun closeAndConfirm(): Boolean {
+		var confirmed = false
+		updateState {
+			tdlibLoginClient.closeForShutdown().also { confirmed = it == TelegramAuthState.CLOSED }
+		}
+		return confirmed
+	}
+
 	private fun updateState(call: () -> TelegramAuthState) {
 		accessGate.run(Unit) {
 			currentState = call()
