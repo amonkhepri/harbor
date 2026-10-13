@@ -150,6 +150,12 @@ class ConnectorConversationAdapterTest {
 		assertEquals(true, view.performLongClick())
 		assertEquals(sent, clickedItem)
 
+		// Sent message with non-$ connectorMessageId: triggers callback without connector-specific id gating
+		val nonDollarId = received.copy(isOutgoing = true, connectorMessageId = "m.local.123")
+		holder.bind(nonDollarId)
+		assertEquals(true, view.performLongClick())
+		assertEquals(nonDollarId, clickedItem)
+
 		// Connector without delete capability: no action
 		val holderNoDeleter = ConnectorConversationAdapter.MessageViewHolder(view, null)
 		holderNoDeleter.bind(sent)
