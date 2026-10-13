@@ -85,6 +85,33 @@ internal fun closeReflectiveTdlibClient(client: Any) {
 	client.sendReflectively(createTdApiObject("Close"), null)
 }
 
+@Throws(InterruptedException::class)
+internal fun awaitAuthorizationClose(
+	closeUpdate: PendingAuthorizationUpdate,
+	accessGate: TelegramTdlibAccessGate,
+	timeoutMs: Long,
+	cancellationCloseTimeoutMs: Long = CANCELLATION_CLOSE_TIMEOUT_MS,
+): String? {
+	val deadlineNanos = System.nanoTime() + timeoutMs * NANOS_PER_MS
+	var stopGraceDeadlineNanos: Long? = null
+	while (true) {
+		if (accessGate.isStopped && stopGraceDeadlineNanos == null) {
+			stopGraceDeadlineNanos = System.nanoTime() +
+				minOf(timeoutMs, cancellationCloseTimeoutMs) * NANOS_PER_MS
+		}
+		val effectiveDeadline = if (stopGraceDeadlineNanos != null) {
+			minOf(deadlineNanos, stopGraceDeadlineNanos)
+		} else {
+			deadlineNanos
+		}
+		val remainingNanos = effectiveDeadline - System.nanoTime()
+		if (remainingNanos <= 0L) return null
+		val waitMs = minOf((remainingNanos + NANOS_PER_MS - 1L) / NANOS_PER_MS, 25L)
+		val state = closeUpdate.await(waitMs)
+		if (state != null) return state
+	}
+}
+
 @Throws(ReflectiveOperationException::class, InterruptedException::class)
 internal fun sendReflectiveTdlibRequest(
 	client: Any,
@@ -194,3 +221,5 @@ private val CAMEL_CASE_BOUNDARY = Regex("(?<=[a-z0-9])(?=[A-Z])")
 private const val TDLIB_RESULT_HANDLER = "org.drinkless.tdlib.Client\$ResultHandler"
 private const val UNKNOWN_CODE_DELIVERY_STATUS =
 	"current=UNKNOWN next=UNKNOWN timeout_seconds=UNKNOWN"
+internal const val CANCELLATION_CLOSE_TIMEOUT_MS = 500L
+private const val NANOS_PER_MS = 1_000_000L

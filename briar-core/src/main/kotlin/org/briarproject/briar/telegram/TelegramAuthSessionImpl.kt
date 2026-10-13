@@ -598,29 +598,14 @@ class ReflectiveTelegramTdlibLoginClient(
 	}
 
 	@Throws(InterruptedException::class)
-	private fun awaitAuthorizationClose(closeUpdate: PendingAuthorizationUpdate): String? {
-		val deadlineNanos = System.nanoTime() + authorizationUpdateTimeoutMs * NANOS_PER_MS
-		var stopGraceDeadlineNanos: Long? = null
-		while (true) {
-			if (accessGate.isStopped && stopGraceDeadlineNanos == null) {
-				stopGraceDeadlineNanos = System.nanoTime() +
-					minOf(authorizationUpdateTimeoutMs, CANCELLATION_CLOSE_TIMEOUT_MS) * NANOS_PER_MS
-			}
-			val effectiveDeadline = if (stopGraceDeadlineNanos != null) {
-				minOf(deadlineNanos, stopGraceDeadlineNanos)
-			} else {
-				deadlineNanos
-			}
-			val remainingNanos = effectiveDeadline - System.nanoTime()
-			if (remainingNanos <= 0L) return null
-			val waitMs = minOf((remainingNanos + NANOS_PER_MS - 1L) / NANOS_PER_MS, 25L)
-			val state = closeUpdate.await(waitMs)
-			if (state != null) {
-				lastAuthorizationStateClassName = state
-				return state
-			}
+	private fun awaitAuthorizationClose(closeUpdate: PendingAuthorizationUpdate): String? =
+		awaitAuthorizationClose(
+			closeUpdate = closeUpdate,
+			accessGate = accessGate,
+			timeoutMs = authorizationUpdateTimeoutMs,
+		)?.also {
+			lastAuthorizationStateClassName = it
 		}
-	}
 
 	private fun completePendingAuthorizationUpdate(className: String) {
 		pendingAuthorizationUpdate?.let {
@@ -631,6 +616,5 @@ class ReflectiveTelegramTdlibLoginClient(
 	private companion object {
 		const val QR_AUTHORIZATION_STATE = "AuthorizationStateWaitOtherDeviceConfirmation"
 		const val NANOS_PER_MS = 1_000_000L
-		const val CANCELLATION_CLOSE_TIMEOUT_MS = 500L
 	}
 }
