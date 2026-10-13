@@ -1,7 +1,9 @@
 package org.briarproject.briar.telegram
 
+import org.briarproject.bramble.api.lifecycle.ServiceException
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.concurrent.CountDownLatch
@@ -122,5 +124,37 @@ class TelegramTdlibAccessGateTest {
 		waitThread.interrupt()
 		assertTrue(interrupted.await(500, java.util.concurrent.TimeUnit.MILLISECONDS))
 		waitThread.join(2_000L)
+	}
+
+	@Test
+	fun stopThrowsServiceExceptionWhenUnconfirmedCloseReported() {
+		val gate = TelegramTdlibAccessGate()
+		gate.reportUnconfirmedClose()
+		assertTrue(gate.hasUnconfirmedClose())
+		assertThrows(ServiceException::class.java) {
+			gate.stop {}
+		}
+		assertFalse(gate.hasUnconfirmedClose())
+	}
+
+	@Test
+	fun stopThrowsServiceExceptionWhenUnconfirmedCancelledCloseReported() {
+		val gate = TelegramTdlibAccessGate()
+		gate.reportUnconfirmedCancelledClose()
+		assertTrue(gate.hasUnconfirmedClose())
+		assertThrows(ServiceException::class.java) {
+			gate.stop {}
+		}
+		assertFalse(gate.hasUnconfirmedClose())
+	}
+
+	@Test
+	fun startClearsUnconfirmedClose() {
+		val gate = TelegramTdlibAccessGate()
+		gate.reportUnconfirmedClose()
+		assertTrue(gate.hasUnconfirmedClose())
+		gate.start()
+		assertFalse(gate.hasUnconfirmedClose())
+		gate.stop {}
 	}
 }
