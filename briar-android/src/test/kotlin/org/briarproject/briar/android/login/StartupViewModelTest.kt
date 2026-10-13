@@ -17,6 +17,8 @@ import org.briarproject.briar.api.telegram.TelegramAuthSession
 import org.briarproject.briar.api.telegram.TelegramAuthSession.RecoverableErrorDetail
 import org.briarproject.briar.api.telegram.TelegramAuthSession.Snapshot
 import org.briarproject.briar.api.telegram.TelegramAuthState
+import org.briarproject.briar.telegram.TelegramAuthSessionImpl
+import org.briarproject.briar.telegram.TelegramTdlibLoginClient
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -29,6 +31,9 @@ import org.mockito.Mockito.verify
 import org.mockito.Mockito.`when`
 import java.util.ArrayDeque
 import java.util.concurrent.Executor
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit.SECONDS
 
 class StartupViewModelTest {
 
@@ -45,7 +50,10 @@ class StartupViewModelTest {
 		viewModel = createViewModel(ImmediateExecutor())
 	}
 
-	private fun createViewModel(ioExecutor: Executor): StartupViewModel {
+	private fun createViewModel(
+		ioExecutor: Executor,
+		session: TelegramAuthSession = telegramAuthSession,
+	): StartupViewModel {
 		val app = mock(Application::class.java)
 		accountManager = mock(AccountManager::class.java)
 		val lifecycleManager = mock(LifecycleManager::class.java)
@@ -64,7 +72,7 @@ class StartupViewModelTest {
 			eventBus,
 			ioExecutor,
 			featureFlags,
-			telegramAuthSession,
+			session,
 		)
 	}
 
@@ -411,6 +419,53 @@ class StartupViewModelTest {
 			TelegramAuthState.IDENTIFIER_ENTRY,
 			getOrAwaitValue(viewModel.getTelegramAuthSnapshot()).authState,
 		)
+	}
+
+	@Test
+	fun testConstructionAndClearingDoNotWaitForStalledAuthSubmission() {
+		val client = mock(TelegramTdlibLoginClient::class.java)
+		`when`(client.start()).thenReturn(TelegramAuthState.IDENTIFIER_ENTRY)
+		`when`(client.getRecoverableErrorDetail()).thenReturn(RecoverableErrorDetail.NONE)
+		val entered = CountDownLatch(1)
+		val release = CountDownLatch(1)
+		`when`(client.submitIdentifier("test-identifier")).thenAnswer {
+			entered.countDown()
+			check(release.await(10, SECONDS))
+			TelegramAuthState.CODE_ENTRY
+		}
+		val session = TelegramAuthSessionImpl(client)
+		session.start()
+		val authWorker = Executors.newSingleThreadExecutor()
+		val uiThread = Executors.newSingleThreadExecutor()
+		val queuedIo = QueuedExecutor()
+		try {
+			val existing = uiThread.submit<StartupViewModel> {
+				createViewModel(queuedIo, session)
+			}.get(1, SECONDS)
+			val submission = authWorker.submit { session.submitIdentifier("test-identifier") }
+			assertTrue(entered.await(1, SECONDS))
+			// Continue then Back: teardown must finish while submission still holds the gate.
+			uiThread.submit {
+				val clear = StartupViewModel::class.java.getDeclaredMethod("onCleared")
+				clear.isAccessible = true
+				clear.invoke(existing)
+			}.get(1, SECONDS)
+			// Re-entering login must also finish without waiting for the old action.
+			uiThread.submit<StartupViewModel> {
+				createViewModel(queuedIo, session)
+			}.get(1, SECONDS)
+			assertFalse(submission.isDone)
+			assertEquals(TelegramAuthState.IDENTIFIER_ENTRY, session.getSnapshot().authState)
+			release.countDown()
+			submission.get(1, SECONDS)
+			assertEquals(TelegramAuthState.CODE_ENTRY, session.getSnapshot().authState)
+		} finally {
+			release.countDown()
+			authWorker.shutdownNow()
+			uiThread.shutdownNow()
+			assertTrue(authWorker.awaitTermination(2, SECONDS))
+			assertTrue(uiThread.awaitTermination(2, SECONDS))
+		}
 	}
 
 	private class FakeTelegramAuthSession : TelegramAuthSession {
