@@ -29,6 +29,7 @@ internal data class MatrixSetupState(
 	val busy: Boolean = false,
 	val actionFailed: Boolean = false,
 	val logoutFailed: Boolean = false,
+	val started: Boolean = false,
 )
 
 internal class MatrixSetupViewModel(
@@ -38,13 +39,10 @@ internal class MatrixSetupViewModel(
 ) : ViewModel() {
 	private val mutableState = MutableLiveData(MatrixSetupState())
 	val state: LiveData<MatrixSetupState> = mutableState
-	@Volatile
-	private var started = false
 
 	fun start() {
-		if (!enabled || started) return
-		started = true
-		runAction(onFailure = { started = false }) { session.start() }
+		if (!enabled || state.value?.started == true) return
+		runAction(startingSession = true) { session.start() }
 	}
 
 	fun submitHomeserver(homeserver: String) {
@@ -67,7 +65,7 @@ internal class MatrixSetupViewModel(
 
 	private fun runAction(
 		reconcileLogoutFailure: Boolean = false,
-		onFailure: () -> Unit = {},
+		startingSession: Boolean = false,
 		action: () -> Unit,
 	) {
 		if (!enabled || state.value?.busy == true) return
@@ -77,10 +75,11 @@ internal class MatrixSetupViewModel(
 			executor.execute {
 				val result = try {
 					action()
-					MatrixSetupState(session.getSnapshot())
+					MatrixSetupState(session.getSnapshot(), started = true)
 				} catch (_: Exception) {
-					onFailure()
 					// SDK exceptions may contain credentials or server responses. Do not log them.
+					// A failed start() must be retryable; a failed later action must not re-trigger start().
+					val stillStarted = if (startingSession) false else previous.started
 					if (reconcileLogoutFailure) {
 						val snapshot = try {
 							session.getSnapshot()
@@ -88,16 +87,17 @@ internal class MatrixSetupViewModel(
 							// An unreadable session must not be presented as connected.
 							null
 						}
-						failureState(MatrixSetupState(snapshot)).copy(logoutFailed = true)
+						failureState(MatrixSetupState(snapshot, started = stillStarted)).copy(logoutFailed = true)
 					} else {
-						failureState(previous)
+						failureState(previous.copy(started = stillStarted))
 					}
 				}
 				mutableState.postValue(result)
 			}
 		} catch (_: RuntimeException) {
-			onFailure()
-			mutableState.value = failureState(previous).copy(logoutFailed = reconcileLogoutFailure)
+			val stillStarted = if (startingSession) false else previous.started
+			mutableState.value = failureState(previous.copy(started = stillStarted))
+				.copy(logoutFailed = reconcileLogoutFailure)
 		}
 	}
 
@@ -107,5 +107,6 @@ internal class MatrixSetupViewModel(
 			RecoverableErrorDetail.NONE,
 		),
 		actionFailed = true,
+		started = previous.started,
 	)
 }
