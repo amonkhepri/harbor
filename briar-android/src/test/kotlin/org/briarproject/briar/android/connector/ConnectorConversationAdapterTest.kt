@@ -156,6 +156,16 @@ class ConnectorConversationAdapterTest {
 		assertEquals(true, view.performLongClick())
 		assertEquals(nonDollarId, clickedItem)
 
+		// Sent message from another connector (Telegram): triggers callback connector-neutrally
+		val telegramSent = received.copy(
+			connectorSource = ConnectorSources.TELEGRAM,
+			connectorMessageId = "42",
+			isOutgoing = true,
+		)
+		holder.bind(telegramSent)
+		assertEquals(true, view.performLongClick())
+		assertEquals(telegramSent, clickedItem)
+
 		// Connector without delete capability: no action
 		val holderNoDeleter = ConnectorConversationAdapter.MessageViewHolder(view, null)
 		holderNoDeleter.bind(sent)

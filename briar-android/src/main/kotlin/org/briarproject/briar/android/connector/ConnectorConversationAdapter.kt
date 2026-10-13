@@ -91,6 +91,8 @@ internal class ConnectorConversationAdapter(
 			date.visibility = if (item.dateMillis > 0) View.VISIBLE else View.GONE
 			date.text = if (item.dateMillis > 0) formatDate(date.context, item.dateMillis) else ""
 			itemView.setOnLongClickListener {
+				// Delete affordance is connector-neutral: own sent messages without pending
+				// local echo and not already deleted trigger the callback when delete is supported.
 				if (item.isOutgoing &&
 					item.localEchoStatus == null &&
 					item.type != ConnectorMessageType.DELETED &&
