@@ -24,6 +24,8 @@ class TelegramAuthSessionImplTest {
 		assertDisabledSessionClosed(session)
 		session.close()
 		assertDisabledSessionClosed(session)
+		assertEquals(true, session.closeAndConfirm())
+		assertDisabledSessionClosed(session)
 	}
 
 	private fun assertDisabledSessionClosed(session: TelegramAuthSessionImpl) {

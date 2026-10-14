@@ -26,6 +26,7 @@ import org.briarproject.nullsafety.NotNullByDefault;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.logging.Logger;
 
 import javax.inject.Inject;
 
@@ -49,6 +50,9 @@ import static org.briarproject.briar.android.login.StartupViewModel.State.TELEGR
 @NotNullByDefault
 public class StartupViewModel extends AndroidViewModel
 		implements EventListener {
+
+	private static final Logger LOG =
+			Logger.getLogger(StartupViewModel.class.getName());
 
 	enum State {SIGNED_OUT, TELEGRAM_LOGIN, SIGNED_IN, STARTING, MIGRATING, COMPACTING, STARTED}
 
@@ -331,7 +335,10 @@ public class StartupViewModel extends AndroidViewModel
 		if (passwordValidationInProgress.get()) return;
 		if (!accountDeletionInProgress.compareAndSet(false, true)) return;
 		telegramAuthExecutor.execute(() -> {
-			telegramAuthSession.close();
+			if (!telegramAuthSession.closeAndConfirm()) {
+				LOG.warning("Telegram TDLib close was not confirmed before" +
+						" account deletion");
+			}
 			accountManager.deleteAccount();
 			accountDeleted.postEvent(true);
 		});

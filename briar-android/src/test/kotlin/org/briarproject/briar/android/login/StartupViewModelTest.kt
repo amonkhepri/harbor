@@ -154,7 +154,7 @@ class StartupViewModelTest {
 		assertTrue(viewModel.isPasswordValidationInProgress)
 		viewModel.deleteAccount()
 		verify(accountManager, never()).deleteAccount()
-		assertEquals(0, telegramAuthSession.closeCalls)
+		assertEquals(0, telegramAuthSession.closeAndConfirmCalls)
 
 		executor.runNext()
 		assertFalse(viewModel.isPasswordValidationInProgress)
@@ -162,7 +162,32 @@ class StartupViewModelTest {
 		viewModel.deleteAccount()
 		executor.runNext()
 		verify(accountManager).deleteAccount()
-		assertEquals(1, telegramAuthSession.closeCalls)
+		assertEquals(1, telegramAuthSession.closeAndConfirmCalls)
+	}
+
+	@Test
+	fun testAccountDeletionWaitsForTelegramCloseConfirmation() {
+		val executor = QueuedExecutor()
+		viewModel = createViewModel(executor)
+
+		viewModel.deleteAccount()
+		executor.runNext()
+
+		assertEquals(1, telegramAuthSession.closeAndConfirmCalls)
+		verify(accountManager).deleteAccount()
+	}
+
+	@Test
+	fun testAccountDeletionProceedsAfterUnconfirmedTelegramClose() {
+		val executor = QueuedExecutor()
+		viewModel = createViewModel(executor)
+		telegramAuthSession.closeAndConfirmResult = false
+
+		viewModel.deleteAccount()
+		executor.runNext()
+
+		assertEquals(1, telegramAuthSession.closeAndConfirmCalls)
+		verify(accountManager).deleteAccount()
 	}
 
 	@Test
@@ -417,6 +442,8 @@ class StartupViewModelTest {
 		var currentAuthState = TelegramAuthState.CLOSED
 		var currentRecoverableErrorDetail = RecoverableErrorDetail.NONE
 		var closeCalls = 0
+		var closeAndConfirmCalls = 0
+		var closeAndConfirmResult = true
 		var startCalls = 0
 		var identifierSubmitCalls = 0
 		var onIdentifierSubmitted: () -> Unit = {}
@@ -466,6 +493,13 @@ class StartupViewModelTest {
 			closeCalls++
 			currentAuthState = TelegramAuthState.CLOSED
 			currentRecoverableErrorDetail = RecoverableErrorDetail.NONE
+		}
+
+		override fun closeAndConfirm(): Boolean {
+			closeAndConfirmCalls++
+			currentAuthState = TelegramAuthState.CLOSED
+			currentRecoverableErrorDetail = RecoverableErrorDetail.NONE
+			return closeAndConfirmResult
 		}
 	}
 
