@@ -24,10 +24,13 @@ class TelegramAuthSessionImpl(
 	@Volatile
 	private var currentState = TelegramAuthState.CLOSED
 
-	override fun getSnapshot(): Snapshot = accessGate.run(
-		Snapshot(TelegramAuthState.CLOSED, RecoverableErrorDetail.NONE),
-	) {
-		Snapshot(
+	override fun getSnapshot(): Snapshot {
+		if (accessGate.isStopped) {
+			return Snapshot(TelegramAuthState.CLOSED, RecoverableErrorDetail.NONE)
+		}
+		// UI construction and teardown must not wait for an in-flight TDLib action.
+		// These fields and the login client's snapshot fields are volatile reads.
+		return Snapshot(
 			currentState,
 			tdlibLoginClient.getRecoverableErrorDetail(),
 			tdlibLoginClient.getQrAuthorizationLink(),
