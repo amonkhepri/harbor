@@ -187,6 +187,27 @@ class MatrixSetupViewModelTest {
 		assertEquals(MatrixSetupStep.HOMESERVER, setupStep(model.state.value!!.snapshot!!))
 	}
 
+	@Test fun overlappingStartCallsDoNotPermanentlyStrandAfterFailure() {
+		val session = Session().apply { failStart = true }
+		val queue = QueueExecutor()
+		val model = MatrixSetupViewModel(session, queue, true)
+		model.start()
+		// A second call while the first is still in flight must collapse into the busy guard
+		// rather than setting its own "started" expectation that the first call's failure
+		// handling then has no way to undo.
+		model.start()
+		assertEquals(1, queue.actions.size)
+		queue.runNext()
+		assertEquals(1, session.starts)
+		assertFalse(model.state.value!!.started)
+		assertTrue(model.state.value!!.actionFailed)
+		session.failStart = false
+		model.start()
+		queue.runNext()
+		assertEquals(2, session.starts)
+		assertEquals(MatrixSetupStep.HOMESERVER, setupStep(model.state.value!!.snapshot!!))
+	}
+
 	@Test fun recoverableErrorsReturnToTheCorrectForm() {
 		val discoveryFailure = Snapshot(
 			MatrixAuthState.RECOVERABLE_ERROR,
