@@ -12,12 +12,14 @@ class TelegramTdlibAccessGate {
 	@Volatile
 	private var acceptingCalls = true
 	@Volatile
-	private var unconfirmedCancelledClose = false
+	private var unconfirmedClose = false
 
 	val isStopped: Boolean
 		get() = !acceptingCalls
 
 	fun isAcceptingCalls(): Boolean = acceptingCalls
+
+	fun hasUnconfirmedClose(): Boolean = unconfirmedClose
 
 	fun <T> run(fallback: T, call: () -> T): T {
 		if (!acceptingCalls) return fallback
@@ -29,17 +31,25 @@ class TelegramTdlibAccessGate {
 	fun start() = synchronized(lock) {
 		stopLatch = CountDownLatch(1)
 		acceptingCalls = true
-		unconfirmedCancelledClose = false
+		unconfirmedClose = false
 	}
 
 	/**
-	 * Records that a call aborted by [stop] could not confirm its TDLib
-	 * client had actually closed before giving up. [stop] surfaces this as a
-	 * failure so callers do not treat shutdown as safe to proceed with
-	 * (e.g. account deletion) while that client may still own the database.
+	 * Records that a TDLib client could not confirm its closure before giving
+	 * up. [stop] surfaces this as a failure so callers do not treat shutdown
+	 * as safe to proceed with (e.g. account deletion) while that client may
+	 * still own the database.
+	 */
+	fun reportUnconfirmedClose() {
+		unconfirmedClose = true
+	}
+
+	/**
+	 * Backward-compatible alias for [reportUnconfirmedClose] for cancellations
+	 * during shutdown.
 	 */
 	fun reportUnconfirmedCancelledClose() {
-		unconfirmedCancelledClose = true
+		reportUnconfirmedClose()
 	}
 
 	@Throws(ServiceException::class)
@@ -48,8 +58,8 @@ class TelegramTdlibAccessGate {
 		stopLatch.countDown()
 		synchronized(lock) {
 			close()
-			if (unconfirmedCancelledClose) {
-				unconfirmedCancelledClose = false
+			if (unconfirmedClose) {
+				unconfirmedClose = false
 				throw ServiceException()
 			}
 		}

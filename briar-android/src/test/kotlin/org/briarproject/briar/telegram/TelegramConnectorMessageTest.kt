@@ -14,6 +14,7 @@ import org.drinkless.tdlib.TdApi
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -688,6 +689,47 @@ class TelegramConnectorMessageTest {
 					"safe to delete the account",
 				stopFailure.get() is ServiceException,
 			)
+		} finally {
+			Client.setCloseAuthorizationUpdateEnabled(true)
+		}
+	}
+
+	@Test
+	fun testSessionStopReportsFailureWhenMessageClientCloseTimedOutPriorToStop() {
+		Client.resetTestState()
+		Client.setAuthorizationStateAfterTdlibParameters(TdApi.AuthorizationStateReady())
+		Client.setCloseAuthorizationUpdateEnabled(false)
+		val accessGate = TelegramTdlibAccessGate()
+		val client = configuredReflectiveMessageClient(
+			tdlibDirectory = testFolder.newFolder("tdlib-unconfirmed-close-prior"),
+			requestTimeoutMs = 100L,
+			accessGate = accessGate,
+		)
+		val loginClient = ReflectiveTelegramTdlibLoginClient(
+			tdlibDirectory = testFolder.newFolder("tdlib-login-unconfirmed-close-prior"),
+			apiId = 1,
+			apiHash = "x",
+			tdlibKeyProvider = StaticTelegramTdlibDatabaseKeyProvider(TDLIB_KEY),
+			authorizationUpdateTimeoutMs = 1_000L,
+			shutdownCloseTimeoutMs = 1_000L,
+			accessGate = accessGate,
+		)
+		val session = TelegramAuthSessionImpl(loginClient, accessGate)
+		try {
+			client.getRecentThreads(1)
+			assertTrue(
+				"Expected access gate to record unconfirmed message client close",
+				accessGate.hasUnconfirmedClose(),
+			)
+
+			Client.setCloseAuthorizationUpdateEnabled(true)
+			assertThrows(
+				"Expected stopService() to report failure when message-client close confirmation " +
+					"timed out prior to stopService",
+				ServiceException::class.java,
+			) {
+				session.stopService()
+			}
 		} finally {
 			Client.setCloseAuthorizationUpdateEnabled(true)
 		}

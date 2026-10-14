@@ -12,6 +12,7 @@ import org.briarproject.briar.api.telegram.TelegramConnector
 import java.io.File
 import java.util.LinkedHashSet
 import java.util.concurrent.atomic.AtomicReference
+import java.util.logging.Logger
 
 class ReflectiveTelegramTdlibMessageClient(
 	private val tdlibDirectory: File = File("harbor-telegram"),
@@ -23,6 +24,7 @@ class ReflectiveTelegramTdlibMessageClient(
 	private val accessGate: TelegramTdlibAccessGate = TelegramTdlibAccessGate(),
 ) : TelegramConnector {
 
+	private val log = Logger.getLogger(ReflectiveTelegramTdlibMessageClient::class.java.name)
 	private val tdlibReadLock = Any()
 
 	override val source: ConnectorSource = ConnectorSources.TELEGRAM
@@ -300,8 +302,9 @@ class ReflectiveTelegramTdlibMessageClient(
 		} catch (e: InterruptedException) {
 			Thread.currentThread().interrupt()
 		} finally {
-			if (!confirmedClosed && accessGate.isStopped) {
-				accessGate.reportUnconfirmedCancelledClose()
+			if (!confirmedClosed) {
+				log.warning("Telegram TDLib message client close was not confirmed before timeout")
+				accessGate.reportUnconfirmedClose()
 			}
 			pendingAuthorizationUpdate.set(null)
 		}
