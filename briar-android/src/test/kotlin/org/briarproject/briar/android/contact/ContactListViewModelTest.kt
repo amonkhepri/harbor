@@ -9,6 +9,7 @@ import org.briarproject.bramble.api.event.EventBus
 import org.briarproject.bramble.api.lifecycle.LifecycleManager
 import org.briarproject.bramble.api.system.AndroidExecutor
 import org.briarproject.bramble.test.ImmediateExecutor
+import org.briarproject.bramble.test.SettableClock
 import org.briarproject.briar.android.viewmodel.LiveDataTestUtil.getOrAwaitValue
 import org.briarproject.briar.api.android.AndroidNotificationManager
 import org.briarproject.briar.api.conversation.ConversationManager
@@ -37,6 +38,7 @@ import org.matrix.rustcomponents.sdk.FakeRoomSpec
 import java.util.concurrent.Executor
 import java.util.concurrent.FutureTask
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicLong
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -232,7 +234,7 @@ class ContactListViewModelTest {
 
 		fun connector(session: MatrixAuthSession): MatrixRoomConnector {
 			FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec("!room:example", "Room"))
-			return MatrixRoomConnector(client, session, client, client)
+			return MatrixRoomConnector(client, session, client, client, SettableClock(AtomicLong(0L)))
 		}
 
 		private fun newClient() = ReflectiveMatrixHomeserverDiscoveryClient(

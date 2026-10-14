@@ -27,6 +27,7 @@ import org.briarproject.bramble.api.plugin.TransportId;
 import org.briarproject.bramble.api.plugin.duplex.DuplexPluginFactory;
 import org.briarproject.bramble.api.plugin.simplex.SimplexPluginFactory;
 import org.briarproject.bramble.api.reporting.DevConfig;
+import org.briarproject.bramble.api.system.Clock;
 import org.briarproject.bramble.plugin.bluetooth.AndroidBluetoothPluginFactory;
 import org.briarproject.bramble.plugin.file.AndroidRemovableDrivePluginFactory;
 import org.briarproject.bramble.plugin.file.MailboxPluginFactory;
@@ -427,10 +428,12 @@ public class AppModule {
 	@Singleton
 	MatrixConnector provideMatrixConnector(
 			MatrixAuthSession matrixAuthSession,
-			@javax.annotation.Nullable ReflectiveMatrixHomeserverDiscoveryClient client) {
+			@javax.annotation.Nullable ReflectiveMatrixHomeserverDiscoveryClient client,
+			Clock clock) {
 		if (!BuildConfig.MATRIX_CONNECTOR_ENABLED) {
 			return new DisabledMatrixConnector();
 		}
-		return new MatrixRoomConnector(client, matrixAuthSession, client, client);
+		return new MatrixRoomConnector(client, matrixAuthSession, client, client, clock,
+				MatrixRoomConnector.DEFAULT_RECENT_THREADS_BUDGET_MS);
 	}
 }

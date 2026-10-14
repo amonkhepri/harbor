@@ -1,5 +1,7 @@
 package org.briarproject.briar.matrix
 
+import org.briarproject.bramble.api.system.Clock
+import org.briarproject.bramble.test.SettableClock
 import org.briarproject.briar.api.connector.ConnectorMessage
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult.LoadFailed
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult.Success
@@ -14,6 +16,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.util.concurrent.atomic.AtomicLong
 
 class MatrixRoomConnectorTest {
 
@@ -102,6 +105,40 @@ class MatrixRoomConnectorTest {
 		assertEquals(ConnectorMessageType.TEXT, thread.latestMessageType)
 		assertEquals("!a:example.org", messageSnapshotClient.lastRequestedRoomId)
 		assertEquals(1, messageSnapshotClient.lastRequestedLimit)
+	}
+
+	@Test
+	fun `getRecentThreads stops querying rooms once the overall preview budget is spent`() {
+		val roomSnapshotClient = FakeRoomSnapshotClient(
+			listOf(
+				MatrixRoomSnapshot("!a:example.org", "Alpha"),
+				MatrixRoomSnapshot("!b:example.org", "Beta"),
+				MatrixRoomSnapshot("!c:example.org", "Gamma"),
+			),
+		)
+		val clockMs = AtomicLong(0L)
+		val messageSnapshotClient = BudgetProbingMessageSnapshotClient(
+			clockMs = clockMs,
+			// Beta's call stalls past the budget; Gamma's call must never happen.
+			advanceOnRequestMs = mapOf("!a:example.org" to 0L, "!b:example.org" to 150L),
+		)
+		val connector = connector(
+			roomSnapshotClient = roomSnapshotClient,
+			messageSnapshotClient = messageSnapshotClient,
+			authSession = FakeMatrixAuthSession(MatrixAuthState.READY),
+			clock = SettableClock(clockMs),
+			recentThreadsBudgetMs = 100L,
+		)
+
+		val threads = connector.getRecentThreads(10)
+
+		assertEquals(3, threads.size)
+		assertEquals("reply from !a:example.org", threads[0].latestMessageText)
+		assertEquals("reply from !b:example.org", threads[1].latestMessageText)
+		assertEquals("", threads[2].latestMessageText)
+		assertEquals(0, threads[2].latestActivityDateSeconds)
+		assertFalse(threads[2].isLatestMessageOutgoing)
+		assertEquals(listOf("!a:example.org", "!b:example.org"), messageSnapshotClient.requestedRoomIds)
 	}
 
 	@Test
@@ -381,8 +418,16 @@ class MatrixRoomConnectorTest {
 		messageSnapshotClient: MatrixMessageSnapshotClient = FakeMessageSnapshotClient(emptyList()),
 		messageSendClient: MatrixMessageSendClient = FakeMessageSendClient(true),
 		authSession: MatrixAuthSession,
-	): MatrixRoomConnector =
-		MatrixRoomConnector(roomSnapshotClient, authSession, messageSnapshotClient, messageSendClient)
+		clock: Clock = SettableClock(AtomicLong(0L)),
+		recentThreadsBudgetMs: Long = MatrixRoomConnector.DEFAULT_RECENT_THREADS_BUDGET_MS,
+	): MatrixRoomConnector = MatrixRoomConnector(
+		roomSnapshotClient,
+		authSession,
+		messageSnapshotClient,
+		messageSendClient,
+		clock,
+		recentThreadsBudgetMs,
+	)
 
 	private class FakeRoomSnapshotClient(private val snapshots: List<MatrixRoomSnapshot>) :
 		MatrixRoomSnapshotClient {
@@ -406,6 +451,31 @@ class MatrixRoomConnectorTest {
 			lastRequestedRoomId = roomId
 			lastRequestedLimit = limit
 			return snapshots
+		}
+	}
+
+	/**
+	 * Advances [clockMs] by [advanceOnRequestMs]'s value for a room on its [getRecentMessages]
+	 * call, simulating a slow or stalled per-room round trip without an actual wait.
+	 */
+	private class BudgetProbingMessageSnapshotClient(
+		private val clockMs: AtomicLong,
+		private val advanceOnRequestMs: Map<String, Long>,
+	) : MatrixMessageSnapshotClient {
+		val requestedRoomIds = mutableListOf<String>()
+
+		override fun getRecentMessages(roomId: String, limit: Int): List<MatrixMessageSnapshot>? {
+			requestedRoomIds.add(roomId)
+			clockMs.addAndGet(advanceOnRequestMs.getValue(roomId))
+			return listOf(
+				MatrixMessageSnapshot(
+					eventId = "\$event:$roomId",
+					senderId = "@alice:example.org",
+					bodyText = "reply from $roomId",
+					originServerTimestampSeconds = 1L,
+					isOutgoing = false,
+				),
+			)
 		}
 	}
 

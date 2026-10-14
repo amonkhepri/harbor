@@ -4,6 +4,7 @@ import android.app.Application
 import android.view.LayoutInflater
 import android.widget.TextView
 import androidx.arch.core.executor.testing.InstantTaskExecutorRule
+import org.briarproject.bramble.test.SettableClock
 import org.briarproject.briar.R
 import org.briarproject.briar.api.connector.ConnectorImageSender
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult.Success
@@ -34,6 +35,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import java.io.ByteArrayInputStream
+import java.util.concurrent.atomic.AtomicLong
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [21], application = Application::class)
@@ -192,6 +194,6 @@ class ConnectorImageUploadTest {
 			override fun logout() {}
 			override fun close() {}
 		}
-		return MatrixRoomConnector(client, auth, client, client)
+		return MatrixRoomConnector(client, auth, client, client, SettableClock(AtomicLong(0L)))
 	}
 }
