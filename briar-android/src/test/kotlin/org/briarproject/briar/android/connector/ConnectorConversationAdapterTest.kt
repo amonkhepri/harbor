@@ -150,15 +150,25 @@ class ConnectorConversationAdapterTest {
 		assertEquals(true, view.performLongClick())
 		assertEquals(sent, clickedItem)
 
+		// Sent message with non-$ connectorMessageId: triggers callback without connector-specific id gating
+		val nonDollarId = received.copy(isOutgoing = true, connectorMessageId = "m.local.123")
+		holder.bind(nonDollarId)
+		assertEquals(true, view.performLongClick())
+		assertEquals(nonDollarId, clickedItem)
+
+		// Sent message from another connector (Telegram): triggers callback connector-neutrally
+		val telegramSent = received.copy(
+			connectorSource = ConnectorSources.TELEGRAM,
+			connectorMessageId = "42",
+			isOutgoing = true,
+		)
+		holder.bind(telegramSent)
+		assertEquals(true, view.performLongClick())
+		assertEquals(telegramSent, clickedItem)
+
 		// Connector without delete capability: no action
 		val holderNoDeleter = ConnectorConversationAdapter.MessageViewHolder(view, null)
 		holderNoDeleter.bind(sent)
 		assertEquals(false, view.performLongClick())
-
-		// Matrix local ID (not a confirmed event): no action
-		val localId = received.copy(isOutgoing = true, connectorMessageId = "m.local.123")
-		holder.bind(localId)
-		assertEquals(false, view.performLongClick())
-		assertEquals(sent, clickedItem) // clickedItem hasn't changed
 	}
 }
