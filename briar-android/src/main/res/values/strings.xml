@@ -171,6 +171,12 @@
 	<string name="connector_conversation_send">Send</string>
 	<string name="connector_conversation_send_failed">Message could not be sent</string>
 	<string name="connector_conversation_delete_failed">Message could not be deleted</string>
+	<string name="connector_conversation_find">Search loaded messages</string>
+	<string name="connector_conversation_find_hint">Search loaded messages</string>
+	<string name="connector_conversation_find_count">%1$d/%2$d</string>
+	<string name="connector_conversation_find_no_matches">No matches</string>
+	<string name="connector_conversation_find_previous">Previous match</string>
+	<string name="connector_conversation_find_next">Next match</string>
 	<string name="dialog_message_delete">Are you sure that you want to delete this message?</string>
 	<string name="connector_conversation_attach_image">Attach image</string>
 	<string name="connector_image_sent">Image sent</string>

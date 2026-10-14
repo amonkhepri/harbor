@@ -1,8 +1,10 @@
 package org.briarproject.briar.android.connector
 
 import android.app.Application
+import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.ImageButton
+import android.widget.TextView
 import androidx.recyclerview.widget.LinearLayoutManager
 import java.util.concurrent.Executor
 import org.briarproject.briar.R
@@ -93,6 +95,11 @@ class ConnectorReadMarkerTest {
 		set("composeBar", root)
 		set("attachButton", ImageButton(activity))
 		set("fileButton", ImageButton(activity))
+		set("findBar", FrameLayout(activity))
+		set("findQuery", EditText(activity))
+		set("findCount", TextView(activity))
+		set("findPrevious", ImageButton(activity))
+		set("findNext", ImageButton(activity))
 		set("connector", connector)
 		set("readMarker", connector as? ConnectorReadMarker)
 		set("sourceName", connector.source.displayName)

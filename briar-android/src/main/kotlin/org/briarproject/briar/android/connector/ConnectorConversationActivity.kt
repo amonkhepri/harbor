@@ -3,6 +3,8 @@ package org.briarproject.briar.android.connector
 import android.net.Uri
 import android.os.Bundle
 import android.os.Parcelable
+import android.text.Editable
+import android.text.TextWatcher
 import android.view.Menu
 import android.view.MenuItem
 import android.view.View
@@ -10,6 +12,7 @@ import android.webkit.MimeTypeMap
 import android.widget.Button
 import android.widget.EditText
 import android.widget.ImageButton
+import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.lifecycle.ViewModelProvider
@@ -36,6 +39,7 @@ import org.briarproject.briar.api.connector.ConnectorMessageReadResult
 import org.briarproject.briar.api.connector.ConnectorMessageType
 import org.briarproject.briar.api.connector.ConnectorReadMarker
 import org.briarproject.briar.api.connector.ConnectorRegistry
+import org.briarproject.briar.api.connector.ConnectorSources
 import org.briarproject.briar.api.connector.ConnectorTextSender
 import org.briarproject.briar.api.connector.ReadOnlyConnector
 import org.briarproject.nullsafety.MethodsNotNullByDefault
@@ -92,6 +96,7 @@ class ConnectorConversationActivity : BriarActivity() {
 		private const val STATE_LAYOUT_MANAGER = "layoutManager"
 		private const val DEFAULT_IMAGE_FILE_EXTENSION = "jpg"
 		private const val STATE_PENDING_IMAGE = "pendingImage"
+		private const val STATE_FIND_VISIBLE = "findVisible"
 
 		private fun emptyTextForState(state: ConnectorConversationAvailabilityState): Int = when (state) {
 			LOADING ->
@@ -108,6 +113,11 @@ class ConnectorConversationActivity : BriarActivity() {
 
 		private fun isManualRefreshAction(itemId: Int): Boolean =
 			itemId == R.id.action_refresh_connector_conversation
+
+		private fun isFindAction(itemId: Int): Boolean = itemId == R.id.action_find_connector_conversation
+
+		private fun shouldShowFindAction(sourceId: String?): Boolean =
+			sourceId == ConnectorSources.MATRIX_ID
 
 		private fun shouldShowManualRefreshAction(
 			connectorEnabled: Boolean,
@@ -164,6 +174,12 @@ class ConnectorConversationActivity : BriarActivity() {
 	private lateinit var attachButton: ImageButton
 	private var sendInFlight = false
 	private lateinit var imageUpload: ConnectorImageUploadState
+	private lateinit var findBar: View
+	private lateinit var findQuery: EditText
+	private lateinit var findCount: TextView
+	private lateinit var findPrevious: ImageButton
+	private lateinit var findNext: ImageButton
+	private var searchState = ConnectorConversationSearchState()
 
 	// Not restored across recreation: matches MX-015's local-only echo scope boundary.
 	private var pendingImageEchoId: String? = null
@@ -214,6 +230,23 @@ class ConnectorConversationActivity : BriarActivity() {
 		layoutManager = LinearLayoutManager(this).apply { stackFromEnd = true }
 		list.setLayoutManager(layoutManager)
 		list.setAdapter(adapter)
+
+		findBar = findViewById(R.id.connectorConversationFindBar)
+		findQuery = findViewById(R.id.connectorConversationFindQuery)
+		findCount = findViewById(R.id.connectorConversationFindCount)
+		findPrevious = findViewById(R.id.connectorConversationFindPrevious)
+		findNext = findViewById(R.id.connectorConversationFindNext)
+		findQuery.addTextChangedListener(object : TextWatcher {
+			override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+			override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
+			override fun afterTextChanged(s: Editable?) = onFindQueryChanged(s?.toString().orEmpty())
+		})
+		findPrevious.setOnClickListener { navigateFind(forward = false) }
+		findNext.setOnClickListener { navigateFind(forward = true) }
+		// EditText restores its own typed text across recreation by default; restore the find
+		// bar's visibility to match so a rotation can't leave that restored query search active
+		// but hidden.
+		if (state?.getBoolean(STATE_FIND_VISIBLE) == true) findBar.visibility = View.VISIBLE
 
 		composeBar = findViewById(R.id.connectorConversationComposeBar)
 		composeText = findViewById(R.id.connectorConversationComposeText)
@@ -294,6 +327,7 @@ class ConnectorConversationActivity : BriarActivity() {
 			layoutManagerStateToSave(layoutManagerState, layoutManager.onSaveInstanceState())
 		outState.putParcelable(STATE_LAYOUT_MANAGER, stateToSave)
 		outState.putString(STATE_PENDING_IMAGE, imageUpload.pendingImage)
+		outState.putBoolean(STATE_FIND_VISIBLE, findBar.visibility == View.VISIBLE)
 	}
 
 	override fun onRestoreInstanceState(savedInstanceState: Bundle) {
@@ -318,6 +352,8 @@ class ConnectorConversationActivity : BriarActivity() {
 				threadId,
 				messageState,
 			)
+		menu.findItem(R.id.action_find_connector_conversation)?.isVisible =
+			shouldShowFindAction(connector?.source?.id)
 		return super.onPrepareOptionsMenu(menu)
 	}
 
@@ -328,6 +364,9 @@ class ConnectorConversationActivity : BriarActivity() {
 			return true
 		} else if (isManualRefreshAction(itemId)) {
 			loadMessages()
+			return true
+		} else if (isFindAction(itemId)) {
+			toggleFind()
 			return true
 		}
 		return super.onOptionsItemSelected(item)
@@ -458,8 +497,54 @@ class ConnectorConversationActivity : BriarActivity() {
 				.show()
 		}
 		messageState = state
+		searchState = searchState.withMessages(state.messages)
+		updateFindUi()
 		invalidateOptionsMenu()
 		updateComposeBarVisibility()
+	}
+
+	private fun onFindQueryChanged(query: String) {
+		searchState = searchState.withQuery(query, messageState.messages)
+		updateFindUi()
+		scrollToSelectedMatch()
+	}
+
+	private fun navigateFind(forward: Boolean) {
+		searchState = if (forward) searchState.next() else searchState.previous()
+		updateFindUi()
+		scrollToSelectedMatch()
+	}
+
+	private fun toggleFind() {
+		if (findBar.visibility == View.VISIBLE) {
+			findBar.visibility = View.GONE
+			findQuery.setText("")
+			searchState = ConnectorConversationSearchState()
+			updateFindUi()
+		} else {
+			findBar.visibility = View.VISIBLE
+			findQuery.requestFocus()
+		}
+	}
+
+	private fun updateFindUi() {
+		findCount.text = when {
+			!searchState.isActive -> ""
+			searchState.matchCount == 0 -> getString(R.string.connector_conversation_find_no_matches)
+			else -> getString(
+				R.string.connector_conversation_find_count,
+				searchState.selectedIndex + 1,
+				searchState.matchCount,
+			)
+		}
+		findPrevious.isEnabled = searchState.matchCount > 0
+		findNext.isEnabled = searchState.matchCount > 0
+	}
+
+	private fun scrollToSelectedMatch() {
+		val id = searchState.selectedId ?: return
+		val index = messageState.messages.indexOfFirst { it.stableId == id }
+		if (index >= 0) list.scrollToPosition(index)
 	}
 
 	private fun updateComposeBarVisibility() {

@@ -7,4 +7,9 @@
 		android:title="@string/connector_conversation_refresh"
 		app:showAsAction="never" />
 
+	<item
+		android:id="@+id/action_find_connector_conversation"
+		android:title="@string/connector_conversation_find"
+		app:showAsAction="never" />
+
 </menu>
