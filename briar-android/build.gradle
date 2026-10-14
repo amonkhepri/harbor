@@ -99,6 +99,36 @@ if (telegramConnectorEnabled) {
 						"for ABI(s): ${missingTdlibAbis.join(', ')}")
 	}
 }
+// P364-001: same guarantee as requiredTdlibAbis above, but for the Matrix
+// connector's native library, which arrives via a resolved remote AAR
+// instead of a checked-in jniLibs directory. A future dependency bump that
+// drops to a partial-ABI artifact must fail the build, not silently ship an
+// APK that only initializes the Matrix connector on the ABI(s) present.
+// Deferred to afterEvaluate: resolving a configuration needs the android{}
+// block (e.g. compileSdk) already configured.
+def requiredMatrixSdkAbis = ['arm64-v8a', 'armeabi-v7a', 'x86', 'x86_64']
+if (matrixConnectorEnabled) {
+	project.afterEvaluate {
+		def matrixSdkAar = configurations.detachedConfiguration(
+				dependencies.create('org.matrix.rustcomponents:sdk-android:26.08.05'))
+				.resolve().find { it.name.endsWith('.aar') }
+		if (matrixSdkAar == null) {
+			throw new GradleException(
+					'Matrix connector sdk-android AAR could not be resolved for ABI verification')
+		}
+		def presentMatrixSdkAbis = zipTree(matrixSdkAar)
+				.matching { include 'jni/*/libmatrix_sdk_ffi.so' }
+				.files
+				.collect { it.parentFile.name }
+		def missingMatrixSdkAbis =
+				requiredMatrixSdkAbis.findAll { !presentMatrixSdkAbis.contains(it) }
+		if (!missingMatrixSdkAbis.isEmpty()) {
+			throw new GradleException(
+					'Matrix connector sdk-android AAR is missing libmatrix_sdk_ffi.so ' +
+							"for ABI(s): ${missingMatrixSdkAbis.join(', ')}")
+		}
+	}
+}
 def configuredTelegramApiHash =
 		telegramConfigValue(
 				['harbor.telegram.apiHash'],
