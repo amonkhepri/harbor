@@ -90,10 +90,12 @@ class GenericConnectorInboxThreadItemTest {
 		val view = LayoutInflater.from(RuntimeEnvironment.getApplication())
 			.inflate(R.layout.list_item_connector_thread, null)
 		val holder = ConnectorInboxThreadViewHolder(view)
-		holder.bind(loading) { _, _ -> }
-		assertEquals("Chat", view.findViewById<TextView>(R.id.connectorThreadTitle).text.toString())
-		holder.bind(loading.copy(title = "")) { _, _ -> }
-		assertEquals("Chat", view.findViewById<TextView>(R.id.connectorThreadTitle).text.toString())
+		for (blankTitle in listOf(" \t", "", "   ", "\n\n")) {
+			holder.bind(loading.copy(title = blankTitle)) { _, _ -> }
+			assertEquals("Chat", view.findViewById<TextView>(R.id.connectorThreadTitle).text.toString())
+		}
+		holder.bind(loading.copy(title = "Custom Room")) { _, _ -> }
+		assertEquals("Custom Room", view.findViewById<TextView>(R.id.connectorThreadTitle).text.toString())
 
 		val outgoingPhoto = GenericConnectorInboxThreadItem(
 			ConnectorThread(
