@@ -9,7 +9,6 @@ import org.briarproject.briar.api.matrix.MatrixHomeserverDiscoveryClient
 import org.briarproject.briar.api.matrix.MatrixHomeserverDiscoveryClient.DiscoveryResult
 import org.junit.After
 import java.util.concurrent.CountDownLatch
-import java.util.concurrent.atomic.AtomicInteger
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Rule
@@ -153,7 +152,8 @@ class MatrixAuthSessionImplTest {
 	@Test
 	fun `rapid close event during start does not leave lingering client or revive session`() {
 		val loginClient = FakeLoginClient(NONE)
-		val session = MatrixAuthSessionImpl(FakeDiscoveryClient(DiscoveryResult.Resolved("url")), loginClient)
+		val session =
+			MatrixAuthSessionImpl(FakeDiscoveryClient(DiscoveryResult.Resolved("url")), loginClient)
 		
 		session.close()
 		assertEquals(MatrixAuthState.CLOSED, session.getSnapshot().authState)
@@ -166,7 +166,8 @@ class MatrixAuthSessionImplTest {
 	@Test
 	fun `logout after close does not revive session`() {
 		val loginClient = FakeLoginClient(NONE)
-		val session = MatrixAuthSessionImpl(FakeDiscoveryClient(DiscoveryResult.Resolved("url")), loginClient)
+		val session =
+			MatrixAuthSessionImpl(FakeDiscoveryClient(DiscoveryResult.Resolved("url")), loginClient)
 		
 		session.close()
 		session.logout()
@@ -176,7 +177,8 @@ class MatrixAuthSessionImplTest {
 	@Test
 	fun `rapid close event during start prevents lingering client and session revival`() {
 		val loginClient = FakeLoginClient(NONE)
-		val session = MatrixAuthSessionImpl(FakeDiscoveryClient(DiscoveryResult.Resolved("url")), loginClient)
+		val session =
+			MatrixAuthSessionImpl(FakeDiscoveryClient(DiscoveryResult.Resolved("url")), loginClient)
 		
 		session.close()
 		assertEquals(MatrixAuthState.CLOSED, session.getSnapshot().authState)
@@ -204,7 +206,11 @@ class MatrixAuthSessionImplTest {
 	@Test
 	fun `rapid logout and login cycles maintain consistent state`() {
 		val loginClient = FakeLoginClient(NONE)
-		val session = MatrixAuthSessionImpl(FakeDiscoveryClient(DiscoveryResult.Resolved("https://matrix.example.org")), loginClient)
+		val session =
+			MatrixAuthSessionImpl(
+				FakeDiscoveryClient(DiscoveryResult.Resolved("https://matrix.example.org")),
+				loginClient,
+			)
 		
 		session.start()
 		
@@ -231,7 +237,11 @@ class MatrixAuthSessionImplTest {
 	@Test
 	fun `concurrent auth requests execute safely and maintain correct state`() {
 		val loginClient = FakeLoginClient(NONE)
-		val session = MatrixAuthSessionImpl(FakeDiscoveryClient(DiscoveryResult.Resolved("https://matrix.example.org")), loginClient)
+		val session =
+			MatrixAuthSessionImpl(
+				FakeDiscoveryClient(DiscoveryResult.Resolved("https://matrix.example.org")),
+				loginClient,
+			)
 		
 		session.start()
 		session.submitHomeserver("matrix.example.org")
