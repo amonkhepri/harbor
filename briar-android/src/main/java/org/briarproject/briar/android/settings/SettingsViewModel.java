@@ -82,8 +82,6 @@ class SettingsViewModel extends DbViewModel implements EventListener {
 	final ConnectionsManager connectionsManager;
 	final NotificationsManager notificationsManager;
 
-	private volatile Settings settings;
-
 	private final MutableLiveData<OwnIdentityInfo> ownIdentityInfo =
 			new MutableLiveData<>();
 	private final MutableLiveData<Boolean> screenLockEnabled =
@@ -140,7 +138,8 @@ class SettingsViewModel extends DbViewModel implements EventListener {
 		runOnDbThread(() -> {
 			try {
 				long start = now();
-				settings = settingsManager.getSettings(SETTINGS_NAMESPACE);
+				Settings settings =
+						settingsManager.getSettings(SETTINGS_NAMESPACE);
 				updateSettings(settings);
 				connectionsManager.updateBtSetting(
 						settingsManager.getSettings(BT_NAMESPACE));
@@ -179,7 +178,7 @@ class SettingsViewModel extends DbViewModel implements EventListener {
 			String namespace = s.getNamespace();
 			if (namespace.equals(SETTINGS_NAMESPACE)) {
 				LOG.info("Settings updated");
-				settings = s.getSettings();
+				Settings settings = s.getSettings();
 				updateSettings(settings);
 			} else if (namespace.equals(BT_NAMESPACE)) {
 				LOG.info("Bluetooth settings updated");
