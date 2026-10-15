@@ -157,7 +157,7 @@ public class TestDataCreatorImpl implements TestDataCreator {
 	public void createTestData(int numContacts, int numPrivateMsgs,
 			int avatarPercent, int numBlogPosts, int numForums,
 			int numForumPosts, int numPrivateGroups,
-			int numPrivateGroupMessages) {
+			int numPrivateGroupMessages, Runnable onComplete) {
 		if (numContacts == 0) throw new IllegalArgumentException();
 		if (avatarPercent < 0 || avatarPercent > 100)
 			throw new IllegalArgumentException();
@@ -168,6 +168,8 @@ public class TestDataCreatorImpl implements TestDataCreator {
 						numPrivateGroups, numPrivateGroupMessages);
 			} catch (DbException e) {
 				logException(LOG, WARNING, e);
+			} finally {
+				onComplete.run();
 			}
 		});
 	}
