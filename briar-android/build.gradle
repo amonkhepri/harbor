@@ -1,5 +1,12 @@
 import com.android.build.api.attributes.BuildTypeAttr
 
+// Single source of truth for the pinned sdk-android version: shared between
+// the real dependency declaration, the ABI-completeness check (P364-001)
+// and the Gradle Witness verification entry in witness.gradle, so a
+// version bump can't update one site but not the others. Must be set
+// before 'apply from: witness.gradle' below, which reads it.
+ext.matrixSdkVersion = '26.08.05'
+
 apply plugin: 'com.android.application'
 apply plugin: 'org.jetbrains.kotlin.android'
 apply plugin: 'witness'
@@ -68,10 +75,6 @@ def telegramConnectorEnabled =
 def matrixConnectorEnabled =
 		(project.findProperty('harbor.matrixConnector.enabled') ?: 'false')
 				.toString().toBoolean()
-// Single source of truth for the pinned sdk-android version: shared between
-// the real dependency declaration below and the ABI-completeness check
-// (P364-001) so a version bump can't update one site but not the other.
-def matrixSdkVersion = '26.08.05'
 def configuredTelegramApiId =
 		telegramConfigValue(
 				['harbor.telegram.apiId'],
