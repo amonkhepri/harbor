@@ -414,7 +414,7 @@ dependencyVerification {
 		'androidx.annotation:annotation-jvm:1.9.1:annotation-jvm-1.9.1.jar:1e343917ebf27ba96fe4dc52b1cad7fd32b738fbc6355bb6cd5b3b305d7212d0',
 		'net.java.dev.jna:jna:5.18.1:jna-5.18.1.aar:7f053e3ec99e14dd71259c82c1c8a02738d64a13c31226b2acc170f3060951e0',
 		'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3:kotlinx-coroutines-android-1.7.3.jar:59fffb26bee12c32dadcfa5d420c2a7db85d3253518128b170efda726613256d',
-		'org.matrix.rustcomponents:sdk-android:26.08.05:sdk-android-26.08.05.aar:89e78c7d457e522367f06d3145b58b67fb29ceffaa22d088e94240489a50ccd1',
+		"org.matrix.rustcomponents:sdk-android:${matrixSdkVersion}:sdk-android-${matrixSdkVersion}.aar:89e78c7d457e522367f06d3145b58b67fb29ceffaa22d088e94240489a50ccd1",
 	] : [
 		// androidx.annotation:annotation-jvm and the kotlinx-coroutines
 		// artifacts below resolve to these lower versions only while the
