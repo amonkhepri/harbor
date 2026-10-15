@@ -141,8 +141,25 @@ class ConnectorConversationActivity : BriarActivity() {
 			imageSender: ConnectorImageSender?,
 		): Boolean = imageSender != null && connectorEnabled && authorized && hasValidThreadId(threadId)
 
-		private fun titleText(title: String?, fallback: String): String =
-			if (title == null || title.trim().isEmpty()) fallback else title
+		internal fun titleText(title: String?, fallback: String): String {
+			if (title == null) return fallback
+			var index = 0
+			while (index < title.length) {
+				// Walk code points so visible supplementary-plane emoji stay intact.
+				val codePoint = title.codePointAt(index)
+				val type = Character.getType(codePoint).toByte()
+				if (!Character.isWhitespace(codePoint) &&
+					!Character.isSpaceChar(codePoint) &&
+					type != Character.FORMAT &&
+					type != Character.CONTROL &&
+					type != Character.SURROGATE
+				) {
+					return title
+				}
+				index += Character.charCount(codePoint)
+			}
+			return fallback
+		}
 	}
 
 	private val adapter = ConnectorConversationAdapter(::onDeleteMessageClicked)
