@@ -84,8 +84,15 @@ class ConnectorInboxThreadViewHolder(view: View) : RecyclerView.ViewHolder(view)
 			return true
 		}
 
+		/**
+		 * `Character.isWhitespace(int)` excludes the non-breaking-space-class
+		 * code points (e.g. U+00A0, U+2007, U+202F); Kotlin's `Char.isWhitespace()`
+		 * covers those by also OR-ing in `Character.isSpaceChar(int)`. Matching
+		 * that broader definition here keeps this guard at least as inclusive as
+		 * the old `title.trim().isEmpty()` check it replaces.
+		 */
 		fun isWhitespaceOrInvisible(codePoint: Int): Boolean {
-			if (Character.isWhitespace(codePoint)) return true
+			if (Character.isWhitespace(codePoint) || Character.isSpaceChar(codePoint)) return true
 			val type = Character.getType(codePoint).toByte()
 			return type == Character.FORMAT || type == Character.CONTROL || type == Character.SURROGATE
 		}

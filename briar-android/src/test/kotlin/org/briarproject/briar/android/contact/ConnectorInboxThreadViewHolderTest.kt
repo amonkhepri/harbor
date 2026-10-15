@@ -43,6 +43,25 @@ class ConnectorInboxThreadViewHolderTest {
 	}
 
 	@Test
+	fun testNonBreakingSpaceOnlyTitleFallsBackToPlaceholder() {
+		RuntimeEnvironment.getApplication().setTheme(R.style.BriarTheme)
+		EmojiManager.install(GoogleEmojiProvider())
+		val view = LayoutInflater.from(RuntimeEnvironment.getApplication())
+			.inflate(R.layout.list_item_connector_thread, null)
+		val holder = ConnectorInboxThreadViewHolder(view)
+		val titleView = view.findViewById<TextView>(R.id.connectorThreadTitle)
+
+		// U+00A0 NBSP, U+2007 FIGURE SPACE, and U+202F NARROW NO-BREAK SPACE are
+		// Character.isSpaceChar (category Zs) but not Character.isWhitespace, so
+		// they previously fell through title.trim().isEmpty() too.
+		val nonBreakingSpaceTitles = listOf(" ", " ", " ", "   ")
+		for (nonBreakingSpaceTitle in nonBreakingSpaceTitles) {
+			holder.bind(FakeConnectorInboxThreadItem(title = nonBreakingSpaceTitle)) { _, _ -> }
+			assertEquals("Chat", titleView.text.toString())
+		}
+	}
+
+	@Test
 	fun testSurrogatePairEmojiOnlyTitleIsNotTreatedAsInvisible() {
 		RuntimeEnvironment.getApplication().setTheme(R.style.BriarTheme)
 		EmojiManager.install(GoogleEmojiProvider())
