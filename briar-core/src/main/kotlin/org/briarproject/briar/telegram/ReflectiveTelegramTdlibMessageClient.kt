@@ -303,8 +303,15 @@ class ReflectiveTelegramTdlibMessageClient(
 			Thread.currentThread().interrupt()
 		} finally {
 			if (!confirmedClosed) {
-				log.warning("Telegram TDLib message client close was not confirmed before timeout")
-				accessGate.reportUnconfirmedClose()
+				if (accessGate.isStopped) {
+					log.warning("Telegram TDLib message client close was not confirmed before timeout")
+					accessGate.reportUnconfirmedClose()
+				} else {
+					log.warning(
+						"Telegram TDLib message client close was not confirmed before timeout" +
+							" (service not stopping, ignoring)",
+					)
+				}
 			}
 			pendingAuthorizationUpdate.set(null)
 		}
