@@ -50,11 +50,23 @@ class ConnectorInboxThreadViewHolder(view: View) : RecyclerView.ViewHolder(view)
 	private companion object {
 		fun titleText(resources: Resources, item: ConnectorInboxThreadItem): CharSequence {
 			val title = item.title
-			return if (title.trim().isEmpty()) {
+			return if (title.all(::isWhitespaceOrInvisible)) {
 				resources.getString(R.string.connector_thread_title_fallback)
 			} else {
 				title
 			}
+		}
+
+		/**
+		 * `CharSequence.trim()` only strips JDK-whitespace code points, so a title
+		 * made up solely of zero-width/format characters (e.g. U+200B, U+FEFF,
+		 * U+200E/U+200F, U+2060) would otherwise pass the blank-title guard and
+		 * render as an empty row with no accessible label.
+		 */
+		fun isWhitespaceOrInvisible(c: Char): Boolean {
+			if (c.isWhitespace()) return true
+			val type = Character.getType(c).toByte()
+			return type == Character.FORMAT || type == Character.CONTROL || type == Character.SURROGATE
 		}
 
 		fun sourceLabel(item: ConnectorInboxThreadItem): CharSequence = item.connectorSource.displayName
