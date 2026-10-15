@@ -84,10 +84,7 @@ internal data class ConnectorConversationMessageListState(
 			// Known IDs and history baselines protect pre-existing rows against clock skew.
 			val match = serverMessages.firstOrNull {
 				echo.completed &&
-					(
-						echo.item.localEchoStatus == ConnectorLocalEchoStatus.PENDING ||
-							echo.item.localEchoStatus == ConnectorLocalEchoStatus.SENT
-						) &&
+					echo.item.localEchoStatus == ConnectorLocalEchoStatus.SENT &&
 					it.stableId !in echo.knownIds &&
 					it.stableId !in consumed &&
 					it.connectorSource == echo.item.connectorSource &&
