@@ -113,6 +113,18 @@ class ContactListFragmentTest {
 	}
 
 	@Test
+	fun testAggregateAvailabilityStateEmptyWinsOverNoneWithoutConsensus() {
+		// This is a priority scan, not a consensus check: a single EMPTY
+		// connector wins even though another enabled connector is NONE.
+		assertEquals(
+			EMPTY,
+			ContactListFragment.aggregateAvailabilityState(
+				mapOf(ConnectorSources.TELEGRAM to NONE, ConnectorSources.MATRIX to EMPTY),
+			),
+		)
+	}
+
+	@Test
 	fun routesMatrixInboxClickToConnectorConversationActivityWithRoomExtras() {
 		val item = FakeConnectorInboxThreadItem(
 			connectorSource = ConnectorSources.MATRIX,

@@ -273,7 +273,9 @@ public class ContactListFragment extends BaseFragment
 	 * availability state. Pick the single most relevant one to drive the
 	 * shared empty-state text and refresh action, in order of urgency: an
 	 * in-progress load, then a failure, then an auth problem, then "empty"
-	 * only once every enabled connector agrees, else no special state.
+	 * if any enabled connector reports it, else no special state. This is a
+	 * priority scan, not a consensus check: a single EMPTY connector wins
+	 * even if another is NONE.
 	 */
 	static ConnectorInboxAvailabilityState aggregateAvailabilityState(
 			Map<ConnectorSource, ConnectorInboxAvailabilityState> states) {
