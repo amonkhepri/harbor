@@ -50,7 +50,7 @@ class ConnectorInboxThreadViewHolder(view: View) : RecyclerView.ViewHolder(view)
 	private companion object {
 		fun titleText(resources: Resources, item: ConnectorInboxThreadItem): CharSequence {
 			val title = item.title
-			return if (title.all(::isWhitespaceOrInvisible)) {
+			return if (title.codePoints().allMatch(::isWhitespaceOrInvisible)) {
 				resources.getString(R.string.connector_thread_title_fallback)
 			} else {
 				title
@@ -61,11 +61,14 @@ class ConnectorInboxThreadViewHolder(view: View) : RecyclerView.ViewHolder(view)
 		 * `CharSequence.trim()` only strips JDK-whitespace code points, so a title
 		 * made up solely of zero-width/format characters (e.g. U+200B, U+FEFF,
 		 * U+200E/U+200F, U+2060) would otherwise pass the blank-title guard and
-		 * render as an empty row with no accessible label.
+		 * render as an empty row with no accessible label. This must walk code
+		 * points rather than UTF-16 chars: a surrogate pair encoding a visible
+		 * supplementary-plane character (e.g. most emoji) would otherwise have
+		 * each half misclassified as [Character.SURROGATE] on its own.
 		 */
-		fun isWhitespaceOrInvisible(c: Char): Boolean {
-			if (c.isWhitespace()) return true
-			val type = Character.getType(c).toByte()
+		fun isWhitespaceOrInvisible(codePoint: Int): Boolean {
+			if (Character.isWhitespace(codePoint)) return true
+			val type = Character.getType(codePoint).toByte()
 			return type == Character.FORMAT || type == Character.CONTROL || type == Character.SURROGATE
 		}
 

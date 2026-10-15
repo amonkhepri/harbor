@@ -41,4 +41,20 @@ class ConnectorInboxThreadViewHolderTest {
 		holder.bind(FakeConnectorInboxThreadItem(title = "​Custom Room")) { _, _ -> }
 		assertEquals("​Custom Room", titleView.text.toString())
 	}
+
+	@Test
+	fun testSurrogatePairEmojiOnlyTitleIsNotTreatedAsInvisible() {
+		RuntimeEnvironment.getApplication().setTheme(R.style.BriarTheme)
+		EmojiManager.install(GoogleEmojiProvider())
+		val view = LayoutInflater.from(RuntimeEnvironment.getApplication())
+			.inflate(R.layout.list_item_connector_thread, null)
+		val holder = ConnectorInboxThreadViewHolder(view)
+		val titleView = view.findViewById<TextView>(R.id.connectorThreadTitle)
+
+		// U+1F600 GRINNING FACE is encoded as a UTF-16 surrogate pair; each half
+		// is individually classified as Character.SURROGATE, so a code-unit-wise
+		// blank check would wrongly treat this visible title as invisible-only.
+		holder.bind(FakeConnectorInboxThreadItem(title = "😀")) { _, _ -> }
+		assertEquals("😀", titleView.text.toString())
+	}
 }
