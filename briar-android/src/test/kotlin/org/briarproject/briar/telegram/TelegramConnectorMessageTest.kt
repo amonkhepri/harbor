@@ -8,10 +8,13 @@ import org.briarproject.briar.api.connector.ConnectorMessageReadResult.Success
 import org.briarproject.briar.api.connector.ConnectorSources
 import org.briarproject.briar.api.connector.ConnectorThread
 import org.briarproject.briar.api.telegram.TelegramConnector
+import org.briarproject.bramble.api.lifecycle.ServiceException
 import org.drinkless.tdlib.Client
 import org.drinkless.tdlib.TdApi
+import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
@@ -19,6 +22,7 @@ import java.io.File
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit.MILLISECONDS
 import java.util.concurrent.TimeUnit.SECONDS
+import java.util.concurrent.atomic.AtomicReference
 
 private fun telegramMessage(
 	chatId: Long,
@@ -58,6 +62,11 @@ private fun telegramThread(
 class TelegramConnectorMessageTest {
 	@get:Rule
 	val testFolder = TemporaryFolder()
+
+	@After
+	fun tearDown() {
+		Client.resetTestState()
+	}
 
 	private fun assertSentRequests(vararg requestNames: String) {
 		assertEquals(requestNames.toList(), Client.getSentRequestNames())
@@ -431,6 +440,526 @@ class TelegramConnectorMessageTest {
 		assertEquals(false, stopFinished.await(100L, MILLISECONDS))
 		assertEquals(true, readFinished.await(5L, SECONDS))
 		assertEquals(true, stopFinished.await(1L, SECONDS))
+	}
+
+	@Test
+	fun testSessionStopDuringSlowCallChainAbortsPromptly() {
+		Client.resetTestState()
+		Client.setAuthorizationStateAfterTdlibParameters(TdApi.AuthorizationStateReady())
+		val chats = (1L..10L).map { chat(it, 1_700_000_000 + it.toInt()) }.toTypedArray()
+		Client.setChats(*chats)
+		val accessGate = TelegramTdlibAccessGate()
+		val client = configuredReflectiveMessageClient(
+			tdlibDirectory = testFolder.newFolder("tdlib-slow-chain"),
+			requestTimeoutMs = 10_000L,
+			accessGate = accessGate,
+		)
+		val loginClient = ReflectiveTelegramTdlibLoginClient(
+			tdlibDirectory = testFolder.newFolder("tdlib-login-slow-chain"),
+			apiId = 1,
+			apiHash = "x",
+			tdlibKeyProvider = StaticTelegramTdlibDatabaseKeyProvider(TDLIB_KEY),
+			authorizationUpdateTimeoutMs = 1_000L,
+			shutdownCloseTimeoutMs = 1_000L,
+		)
+		val session = TelegramAuthSessionImpl(loginClient, accessGate)
+		Client.setGetChatResultDelayMs(30_000L)
+		val firstGetChatLatch = CountDownLatch(1)
+		Client.setOnGetChatRequest {
+			firstGetChatLatch.countDown()
+		}
+
+		val readFinished = CountDownLatch(1)
+		val stopFinished = CountDownLatch(1)
+		val readThread = Thread {
+			client.getRecentThreads(10)
+			readFinished.countDown()
+		}
+		readThread.start()
+
+		assertTrue(firstGetChatLatch.await(5L, SECONDS))
+		val stopThread = Thread {
+			session.stopService()
+			stopFinished.countDown()
+		}
+		stopThread.start()
+
+		assertTrue(stopFinished.await(2L, SECONDS))
+		assertTrue(readFinished.await(2L, SECONDS))
+		val getChatCalls = Client.getSentRequestNames().count { it == "GetChat" }
+		assertEquals(1, getChatCalls)
+		readThread.join(2_000L)
+		stopThread.join(2_000L)
+	}
+
+	@Test
+	fun testSessionStopDuringSleepResolvesPromptly() {
+		Client.resetTestState()
+		Client.setAuthorizationStateAfterTdlibParameters(TdApi.AuthorizationStateReady())
+		Client.prepareSetTdlibParametersAcceptedLatch()
+		val accessGate = TelegramTdlibAccessGate()
+		val client = configuredReflectiveMessageClient(
+			tdlibDirectory = testFolder.newFolder("tdlib-sleep-prompt"),
+			accessGate = accessGate,
+		)
+		val loginClient = ReflectiveTelegramTdlibLoginClient(
+			tdlibDirectory = testFolder.newFolder("tdlib-login-sleep-prompt"),
+			apiId = 1,
+			apiHash = "x",
+			tdlibKeyProvider = StaticTelegramTdlibDatabaseKeyProvider(TDLIB_KEY),
+			authorizationUpdateTimeoutMs = 1_000L,
+			shutdownCloseTimeoutMs = 1_000L,
+		)
+		val session = TelegramAuthSessionImpl(loginClient, accessGate)
+		val stopFinished = CountDownLatch(1)
+
+		val readThread = Thread {
+			client.getRecentThreads(1)
+		}
+		readThread.start()
+
+		assertTrue(Client.awaitSetTdlibParametersAccepted(1_000L))
+		val startTime = System.currentTimeMillis()
+		val stopThread = Thread {
+			session.stopService()
+			stopFinished.countDown()
+		}
+		stopThread.start()
+
+		assertTrue(stopFinished.await(2L, SECONDS))
+		val durationMs = System.currentTimeMillis() - startTime
+		assertTrue("Expected stop to finish faster than 3s sleep, took ${durationMs}ms", durationMs < 2_500L)
+		readThread.join(2_000L)
+		stopThread.join(2_000L)
+	}
+
+	@Test
+	fun testMessageClientInterruptedDuringSleepAbortsPromptly() {
+		Client.resetTestState()
+		Client.setAuthorizationStateAfterTdlibParameters(TdApi.AuthorizationStateReady())
+		Client.prepareSetTdlibParametersAcceptedLatch()
+		val accessGate = TelegramTdlibAccessGate()
+		val client = configuredReflectiveMessageClient(
+			tdlibDirectory = testFolder.newFolder("tdlib-sleep-interrupt"),
+			accessGate = accessGate,
+		)
+		val readFinished = CountDownLatch(1)
+		var threads: List<ConnectorThread> = emptyList()
+		val readThread = Thread {
+			threads = client.getRecentThreads(1)
+			readFinished.countDown()
+		}
+		readThread.start()
+
+		assertTrue(Client.awaitSetTdlibParametersAccepted(1_000L))
+		readThread.interrupt()
+		assertTrue(readFinished.await(2L, SECONDS))
+		readThread.join(2_000L)
+		assertTrue(threads.isEmpty())
+		assertTrue(readThread.isInterrupted)
+	}
+
+	@Test
+	fun testMessageClientInterruptedDuringGetChatAbortsPromptly() {
+		Client.resetTestState()
+		Client.setAuthorizationStateAfterTdlibParameters(TdApi.AuthorizationStateReady())
+		Client.setChats(*(1L..3L).map { chat(it, 1_700_000_000 + it.toInt()) }.toTypedArray())
+		Client.setGetChatResultDelayMs(2_000L)
+		val started = CountDownLatch(1)
+		Client.setOnGetChatRequest { started.countDown() }
+		val finished = CountDownLatch(1)
+		val accessGate = TelegramTdlibAccessGate()
+		val client = configuredReflectiveMessageClient(
+			tdlibDirectory = testFolder.newFolder("tdlib-chat-interrupt"),
+			requestTimeoutMs = 4_000L,
+			accessGate = accessGate,
+		)
+		val thread = Thread {
+			client.getRecentThreads(3)
+			finished.countDown()
+		}
+		thread.start()
+		assertTrue(started.await(5L, SECONDS))
+		thread.interrupt()
+		assertTrue(finished.await(2L, SECONDS))
+		thread.join(2_000L)
+		assertEquals(1, Client.getSentRequestNames().count { it == "GetChat" })
+		assertTrue(thread.isInterrupted)
+	}
+
+	@Test
+	fun testSessionStopDuringPendingAuthorizationStateAbortsPromptly() {
+		Client.resetTestState()
+		Client.prepareSetTdlibParametersAcceptedLatch()
+		val accessGate = TelegramTdlibAccessGate()
+		val client = configuredReflectiveMessageClient(
+			tdlibDirectory = testFolder.newFolder("tdlib-auth-stall"),
+			requestTimeoutMs = 10_000L,
+			accessGate = accessGate,
+		)
+		val loginClient = ReflectiveTelegramTdlibLoginClient(
+			tdlibDirectory = testFolder.newFolder("tdlib-login-auth-stall"),
+			apiId = 1,
+			apiHash = "x",
+			tdlibKeyProvider = StaticTelegramTdlibDatabaseKeyProvider(TDLIB_KEY),
+			authorizationUpdateTimeoutMs = 1_000L,
+			shutdownCloseTimeoutMs = 1_000L,
+		)
+		val session = TelegramAuthSessionImpl(loginClient, accessGate)
+		val readFinished = CountDownLatch(1)
+		val stopFinished = CountDownLatch(1)
+
+		val readThread = Thread {
+			client.getRecentThreads(1)
+			readFinished.countDown()
+		}
+		readThread.start()
+
+		assertTrue(Client.awaitSetTdlibParametersAccepted(5_000L))
+		val stopThread = Thread {
+			session.stopService()
+			stopFinished.countDown()
+		}
+		stopThread.start()
+
+		assertTrue(stopFinished.await(2L, SECONDS))
+		assertTrue(readFinished.await(2L, SECONDS))
+		readThread.join(2_000L)
+		stopThread.join(2_000L)
+	}
+
+	@Test
+	fun testSessionStopDuringSlowCallChainReportsFailureWhenCloseUnconfirmed() {
+		Client.resetTestState()
+		Client.setAuthorizationStateAfterTdlibParameters(TdApi.AuthorizationStateReady())
+		Client.setCloseAuthorizationUpdateEnabled(false)
+		val chats = (1L..5L).map { chat(it, 1_700_000_000 + it.toInt()) }.toTypedArray()
+		Client.setChats(*chats)
+		val accessGate = TelegramTdlibAccessGate()
+		val client = configuredReflectiveMessageClient(
+			tdlibDirectory = testFolder.newFolder("tdlib-unconfirmed-close"),
+			requestTimeoutMs = 10_000L,
+			accessGate = accessGate,
+		)
+		val loginClient = ReflectiveTelegramTdlibLoginClient(
+			tdlibDirectory = testFolder.newFolder("tdlib-login-unconfirmed-close"),
+			apiId = 1,
+			apiHash = "x",
+			tdlibKeyProvider = StaticTelegramTdlibDatabaseKeyProvider(TDLIB_KEY),
+			authorizationUpdateTimeoutMs = 1_000L,
+			shutdownCloseTimeoutMs = 1_000L,
+		)
+		val session = TelegramAuthSessionImpl(loginClient, accessGate)
+		Client.setGetChatResultDelayMs(30_000L)
+		val firstGetChatLatch = CountDownLatch(1)
+		Client.setOnGetChatRequest {
+			firstGetChatLatch.countDown()
+		}
+
+		val readFinished = CountDownLatch(1)
+		val stopFinished = CountDownLatch(1)
+		val stopFailure = AtomicReference<Throwable?>()
+		val readThread = Thread {
+			client.getRecentThreads(5)
+			readFinished.countDown()
+		}
+		readThread.start()
+
+		try {
+			assertTrue(firstGetChatLatch.await(5L, SECONDS))
+			val stopThread = Thread {
+				try {
+					session.stopService()
+				} catch (e: Throwable) {
+					stopFailure.set(e)
+				} finally {
+					stopFinished.countDown()
+				}
+			}
+			stopThread.start()
+
+			assertTrue(stopFinished.await(2L, SECONDS))
+			assertTrue(readFinished.await(2L, SECONDS))
+			readThread.join(2_000L)
+			stopThread.join(2_000L)
+			assertTrue(
+				"Expected stopService() to report failure when the connector's TDLib " +
+					"close could not be confirmed, so callers do not proceed as if it is " +
+					"safe to delete the account",
+				stopFailure.get() is ServiceException,
+			)
+		} finally {
+			Client.setCloseAuthorizationUpdateEnabled(true)
+		}
+	}
+
+	@Test
+	fun testSessionStopSucceedsWhenMessageClientCloseTimedOutDuringOrdinaryReadPriorToStop() {
+		Client.resetTestState()
+		Client.setAuthorizationStateAfterTdlibParameters(TdApi.AuthorizationStateReady())
+		Client.setCloseAuthorizationUpdateEnabled(false)
+		val accessGate = TelegramTdlibAccessGate()
+		val client = configuredReflectiveMessageClient(
+			tdlibDirectory = testFolder.newFolder("tdlib-unconfirmed-close-prior"),
+			requestTimeoutMs = 100L,
+			accessGate = accessGate,
+		)
+		val loginClient = ReflectiveTelegramTdlibLoginClient(
+			tdlibDirectory = testFolder.newFolder("tdlib-login-unconfirmed-close-prior"),
+			apiId = 1,
+			apiHash = "x",
+			tdlibKeyProvider = StaticTelegramTdlibDatabaseKeyProvider(TDLIB_KEY),
+			authorizationUpdateTimeoutMs = 1_000L,
+			shutdownCloseTimeoutMs = 1_000L,
+			accessGate = accessGate,
+		)
+		val session = TelegramAuthSessionImpl(loginClient, accessGate)
+		try {
+			client.getRecentThreads(1)
+			assertTrue(
+				"A message-client close timeout during an ordinary read (no stop in " +
+					"progress) must not poison the access gate for a later, unrelated stop",
+				!accessGate.hasUnconfirmedClose(),
+			)
+
+			Client.setCloseAuthorizationUpdateEnabled(true)
+			session.stopService()
+		} finally {
+			Client.setCloseAuthorizationUpdateEnabled(true)
+		}
+	}
+
+	@Test
+	fun testSessionStopDuringSlowCallChainReportsFailureWhenReaderInterruptedDuringClose() {
+		Client.resetTestState()
+		Client.setAuthorizationStateAfterTdlibParameters(TdApi.AuthorizationStateReady())
+		Client.setCloseAuthorizationUpdateEnabled(false)
+		val chats = (1L..5L).map { chat(it, 1_700_000_000 + it.toInt()) }.toTypedArray()
+		Client.setChats(*chats)
+		val accessGate = TelegramTdlibAccessGate()
+		val client = configuredReflectiveMessageClient(
+			tdlibDirectory = testFolder.newFolder("tdlib-unconfirmed-close-interrupted"),
+			requestTimeoutMs = 10_000L,
+			accessGate = accessGate,
+		)
+		val loginClient = ReflectiveTelegramTdlibLoginClient(
+			tdlibDirectory = testFolder.newFolder("tdlib-login-unconfirmed-close-interrupted"),
+			apiId = 1,
+			apiHash = "x",
+			tdlibKeyProvider = StaticTelegramTdlibDatabaseKeyProvider(TDLIB_KEY),
+			authorizationUpdateTimeoutMs = 1_000L,
+			shutdownCloseTimeoutMs = 1_000L,
+		)
+		val session = TelegramAuthSessionImpl(loginClient, accessGate)
+		Client.setGetChatResultDelayMs(30_000L)
+		val firstGetChatLatch = CountDownLatch(1)
+		Client.setOnGetChatRequest {
+			firstGetChatLatch.countDown()
+		}
+
+		val readFinished = CountDownLatch(1)
+		val stopFinished = CountDownLatch(1)
+		val stopFailure = AtomicReference<Throwable?>()
+		val readThread = Thread {
+			client.getRecentThreads(5)
+			readFinished.countDown()
+		}
+		readThread.start()
+
+		try {
+			assertTrue(firstGetChatLatch.await(5L, SECONDS))
+			val stopThread = Thread {
+				try {
+					session.stopService()
+				} catch (e: Throwable) {
+					stopFailure.set(e)
+				} finally {
+					stopFinished.countDown()
+				}
+			}
+			stopThread.start()
+
+			while (accessGate.isAcceptingCalls()) {
+				Thread.sleep(10L)
+			}
+			readThread.interrupt()
+
+			assertTrue(stopFinished.await(2L, SECONDS))
+			assertTrue(readFinished.await(2L, SECONDS))
+			readThread.join(2_000L)
+			stopThread.join(2_000L)
+			assertTrue(readThread.isInterrupted)
+			assertTrue(
+				"Expected stopService() to report failure when the connector's TDLib " +
+					"close confirmation was interrupted, so callers do not proceed as if it is " +
+					"safe to delete the account",
+				stopFailure.get() is ServiceException,
+			)
+		} finally {
+			Client.setCloseAuthorizationUpdateEnabled(true)
+		}
+	}
+
+	@Test
+	fun testSessionStopDuringSlowLoginOperationAbortsPromptly() {
+		Client.resetTestState()
+		Client.setAuthorizationStateAfterTdlibParameters(TdApi.AuthorizationStateWaitPhoneNumber())
+		val gate = TelegramTdlibAccessGate()
+		val loginClient = ReflectiveTelegramTdlibLoginClient(
+			tdlibDirectory = testFolder.newFolder("tdlib-login-slow-op"),
+			apiId = 1,
+			apiHash = "x",
+			tdlibKeyProvider = StaticTelegramTdlibDatabaseKeyProvider(TDLIB_KEY),
+			authorizationUpdateTimeoutMs = 4_000L,
+			shutdownCloseTimeoutMs = 1_000L,
+			accessGate = gate,
+		)
+		val session = TelegramAuthSessionImpl(loginClient, gate)
+		session.start()
+		Client.setPhoneNumberResultDelayMs(30_000L)
+		val authDone = CountDownLatch(1)
+		Thread {
+			session.submitIdentifier("test-identifier")
+			authDone.countDown()
+		}.start()
+
+		val deadline = System.nanoTime() + SECONDS.toNanos(2)
+		while (!Client.getSentRequestNames().contains("SetAuthenticationPhoneNumber") && System.nanoTime() < deadline) {
+			Thread.sleep(5L)
+		}
+		assertTrue(Client.getSentRequestNames().contains("SetAuthenticationPhoneNumber"))
+
+		val stopped = CountDownLatch(1)
+		val start = System.nanoTime()
+		Thread {
+			try {
+				session.stopService()
+			} finally {
+				stopped.countDown()
+			}
+		}.start()
+
+		assertTrue("stop completed within 1s", stopped.await(1L, SECONDS))
+		val stopDurationMs = MILLISECONDS.convert(System.nanoTime() - start, java.util.concurrent.TimeUnit.NANOSECONDS)
+		assertTrue("stop duration under 1000ms: ${stopDurationMs}ms", stopDurationMs < 1000L)
+		assertTrue(authDone.await(1L, SECONDS))
+	}
+
+	@Test
+	fun testSessionStopDuringSlowLoginOperationReportsFailureWhenCloseUnconfirmed() {
+		Client.resetTestState()
+		Client.setAuthorizationStateAfterTdlibParameters(TdApi.AuthorizationStateWaitPhoneNumber())
+		Client.setCloseAuthorizationUpdateEnabled(false)
+		val gate = TelegramTdlibAccessGate()
+		val loginClient = ReflectiveTelegramTdlibLoginClient(
+			tdlibDirectory = testFolder.newFolder("tdlib-login-unconfirmed-close"),
+			apiId = 1,
+			apiHash = "x",
+			tdlibKeyProvider = StaticTelegramTdlibDatabaseKeyProvider(TDLIB_KEY),
+			authorizationUpdateTimeoutMs = 4_000L,
+			shutdownCloseTimeoutMs = 1_000L,
+			accessGate = gate,
+		)
+		val session = TelegramAuthSessionImpl(loginClient, gate)
+		session.start()
+		Client.setPhoneNumberResultDelayMs(30_000L)
+		val authDone = CountDownLatch(1)
+		Thread {
+			session.submitIdentifier("test-identifier")
+			authDone.countDown()
+		}.start()
+
+		val deadline = System.nanoTime() + SECONDS.toNanos(2)
+		while (!Client.getSentRequestNames().contains("SetAuthenticationPhoneNumber") && System.nanoTime() < deadline) {
+			Thread.sleep(5L)
+		}
+		assertTrue(Client.getSentRequestNames().contains("SetAuthenticationPhoneNumber"))
+
+		val stopped = CountDownLatch(1)
+		val stopFailure = AtomicReference<Throwable?>()
+		Thread {
+			try {
+				session.stopService()
+			} catch (t: Throwable) {
+				stopFailure.set(t)
+			} finally {
+				stopped.countDown()
+			}
+		}.start()
+
+		try {
+			assertTrue("stop finished within 2s", stopped.await(2L, SECONDS))
+			assertTrue(authDone.await(2L, SECONDS))
+			assertTrue(
+				"Expected stopService() to report failure when login TDLib close was unconfirmed",
+				stopFailure.get() is ServiceException,
+			)
+		} finally {
+			Client.setCloseAuthorizationUpdateEnabled(true)
+		}
+	}
+
+	@Test
+	fun testSessionStopDuringOrdinaryCloseWaitAbortsPromptlyAndReportsFailure() {
+		Client.resetTestState()
+		Client.setCloseAuthorizationUpdateEnabled(false)
+		val gate = TelegramTdlibAccessGate()
+		val loginClient = ReflectiveTelegramTdlibLoginClient(
+			tdlibDirectory = testFolder.newFolder("tdlib-login-ordinary-close-stop"),
+			apiId = 1,
+			apiHash = "x",
+			tdlibKeyProvider = StaticTelegramTdlibDatabaseKeyProvider(TDLIB_KEY),
+			authorizationUpdateTimeoutMs = 10_000L,
+			shutdownCloseTimeoutMs = 1_000L,
+			accessGate = gate,
+		)
+		val session = TelegramAuthSessionImpl(loginClient, gate)
+		session.start()
+
+		val ordinaryCloseDone = CountDownLatch(1)
+		val ordinaryCloseThread = Thread {
+			session.close()
+			ordinaryCloseDone.countDown()
+		}
+		ordinaryCloseThread.start()
+
+		val deadline = System.nanoTime() + SECONDS.toNanos(2)
+		while (!Client.getSentRequestNames().contains("Close") && System.nanoTime() < deadline) {
+			Thread.sleep(5L)
+		}
+		assertTrue(Client.getSentRequestNames().contains("Close"))
+
+		val stopped = CountDownLatch(1)
+		val stopFailure = AtomicReference<Throwable?>()
+		val startStop = System.nanoTime()
+		val stopThread = Thread {
+			try {
+				session.stopService()
+			} catch (t: Throwable) {
+				stopFailure.set(t)
+			} finally {
+				stopped.countDown()
+			}
+		}
+		stopThread.start()
+
+		try {
+			assertTrue("stop finished within 2s", stopped.await(2L, SECONDS))
+			val stopDurationMs = MILLISECONDS.convert(
+				System.nanoTime() - startStop,
+				java.util.concurrent.TimeUnit.NANOSECONDS,
+			)
+			assertTrue("stop duration under 1500ms: ${stopDurationMs}ms", stopDurationMs < 1500L)
+			assertTrue("ordinary close finished within 2s", ordinaryCloseDone.await(2L, SECONDS))
+			assertTrue(
+				"Expected stopService() to report failure when login TDLib close was unconfirmed",
+				stopFailure.get() is ServiceException,
+			)
+		} finally {
+			Client.setCloseAuthorizationUpdateEnabled(true)
+			ordinaryCloseThread.join(2_000L)
+			stopThread.join(2_000L)
+		}
 	}
 
 	private fun readyReflectiveMessageClient(

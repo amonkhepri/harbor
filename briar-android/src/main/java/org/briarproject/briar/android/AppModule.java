@@ -27,6 +27,7 @@ import org.briarproject.bramble.api.plugin.TransportId;
 import org.briarproject.bramble.api.plugin.duplex.DuplexPluginFactory;
 import org.briarproject.bramble.api.plugin.simplex.SimplexPluginFactory;
 import org.briarproject.bramble.api.reporting.DevConfig;
+import org.briarproject.bramble.api.system.Clock;
 import org.briarproject.bramble.plugin.bluetooth.AndroidBluetoothPluginFactory;
 import org.briarproject.bramble.plugin.file.AndroidRemovableDrivePluginFactory;
 import org.briarproject.bramble.plugin.file.MailboxPluginFactory;
@@ -397,11 +398,14 @@ public class AppModule {
 
 	// Shared by provideMatrixAuthSession and provideMatrixConnector (MX-006A) so both consume the
 	// same retained/restored SDK client instead of opening the sqlite session store twice.
-	// Constructing this reflective client is cheap and touches no SDK class until a method is
-	// invoked, so building it unconditionally stays safe in the default-off build.
+	// Uses @Nullable to avoid unconditionally instantiating Matrix components in default-off builds.
 	@Provides
 	@Singleton
+	@javax.annotation.Nullable
 	ReflectiveMatrixHomeserverDiscoveryClient provideMatrixReflectiveClient() {
+		if (!BuildConfig.MATRIX_CONNECTOR_ENABLED) {
+			return null;
+		}
 		return new ReflectiveMatrixHomeserverDiscoveryClient();
 	}
 
@@ -410,7 +414,7 @@ public class AppModule {
 	MatrixAuthSession provideMatrixAuthSession(
 			DatabaseConfig databaseConfig,
 			AccountManager accountManager,
-			ReflectiveMatrixHomeserverDiscoveryClient client) {
+			@javax.annotation.Nullable ReflectiveMatrixHomeserverDiscoveryClient client) {
 		if (!BuildConfig.MATRIX_CONNECTOR_ENABLED) {
 			return new DisabledMatrixAuthSession();
 		}
@@ -424,10 +428,12 @@ public class AppModule {
 	@Singleton
 	MatrixConnector provideMatrixConnector(
 			MatrixAuthSession matrixAuthSession,
-			ReflectiveMatrixHomeserverDiscoveryClient client) {
+			@javax.annotation.Nullable ReflectiveMatrixHomeserverDiscoveryClient client,
+			Clock clock) {
 		if (!BuildConfig.MATRIX_CONNECTOR_ENABLED) {
 			return new DisabledMatrixConnector();
 		}
-		return new MatrixRoomConnector(client, matrixAuthSession, client);
+		return new MatrixRoomConnector(client, matrixAuthSession, client, client, clock,
+				MatrixRoomConnector.DEFAULT_RECENT_THREADS_BUDGET_MS);
 	}
 }

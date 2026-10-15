@@ -19,6 +19,7 @@ import org.briarproject.briar.android.blog.RssFeedImportFailedDialogFragment;
 import org.briarproject.briar.android.blog.RssFeedImportFragment;
 import org.briarproject.briar.android.blog.RssFeedManageFragment;
 import org.briarproject.briar.android.blog.WriteBlogPostActivity;
+import org.briarproject.briar.android.connector.ConnectorConversationActivity;
 import org.briarproject.briar.android.contact.ContactListFragment;
 import org.briarproject.briar.android.contact.add.nearby.AddNearbyContactActivity;
 import org.briarproject.briar.android.contact.add.nearby.AddNearbyContactErrorFragment;
@@ -83,7 +84,6 @@ import org.briarproject.briar.android.sharing.ShareForumActivity;
 import org.briarproject.briar.android.sharing.ShareForumFragment;
 import org.briarproject.briar.android.sharing.SharingModule;
 import org.briarproject.briar.android.splash.SplashScreenActivity;
-import org.briarproject.briar.android.telegram.TelegramConversationActivity;
 import org.briarproject.briar.android.test.TestDataActivity;
 
 import dagger.Component;
@@ -117,7 +117,9 @@ public interface ActivityComponent {
 
 	void inject(ConversationActivity activity);
 
-	void inject(TelegramConversationActivity activity);
+	void inject(ConnectorConversationActivity activity);
+
+	void inject(org.briarproject.briar.android.matrix.MatrixSetupActivity activity);
 
 	void inject(ImageActivity activity);
 

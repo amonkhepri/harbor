@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+	android:layout_width="match_parent"
+	android:layout_height="match_parent"
+	android:fillViewport="true">
+	<LinearLayout
+		android:layout_width="match_parent"
+		android:layout_height="wrap_content"
+		android:orientation="vertical"
+		android:padding="24dp">
+		<TextView
+			android:id="@+id/matrixStatus"
+			android:layout_width="match_parent"
+			android:layout_height="wrap_content"
+			android:accessibilityLiveRegion="polite" />
+		<EditText
+			android:id="@+id/matrixHomeserver"
+			android:layout_width="match_parent"
+			android:layout_height="wrap_content"
+			android:hint="@string/matrix_homeserver"
+			android:inputType="textUri"
+			android:singleLine="true" />
+		<EditText
+			android:id="@+id/matrixUsername"
+			android:layout_width="match_parent"
+			android:layout_height="wrap_content"
+			android:hint="@string/matrix_username"
+			android:inputType="textNoSuggestions"
+			android:singleLine="true" />
+		<EditText
+			android:id="@+id/matrixPassword"
+			android:layout_width="match_parent"
+			android:layout_height="wrap_content"
+			android:hint="@string/matrix_password"
+			android:importantForAutofill="no"
+			android:saveEnabled="false"
+			android:inputType="textPassword"
+			android:singleLine="true" />
+		<Button
+			android:id="@+id/matrixSubmit"
+			android:layout_width="match_parent"
+			android:layout_height="wrap_content"
+			android:text="@string/matrix_continue" />
+		<Button
+			android:id="@+id/matrixSignOut"
+			android:layout_width="match_parent"
+			android:layout_height="wrap_content"
+			android:visibility="gone"
+			android:text="@string/matrix_sign_out" />
+	</LinearLayout>
+</ScrollView>

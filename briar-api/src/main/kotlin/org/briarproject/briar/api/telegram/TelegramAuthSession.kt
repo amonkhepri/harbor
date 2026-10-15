@@ -33,4 +33,14 @@ interface TelegramAuthSession {
 	fun requestQrCodeAuthentication()
 	fun awaitQrAuthorizationUpdate()
 	fun close()
+
+	/**
+	 * Closes the session and blocks until the underlying TDLib client has
+	 * confirmed it released its database files, or a timeout elapses.
+	 * Returns whether the close was confirmed. Callers that are about to
+	 * delete the TDLib directory from disk (e.g. account deletion) must use
+	 * this instead of [close], which reports success without waiting for
+	 * that confirmation.
+	 */
+	fun closeAndConfirm(): Boolean
 }

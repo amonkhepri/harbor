@@ -10,7 +10,7 @@ import org.junit.Test
 class ConnectorConversationMessageItemTest {
 
 	@Test
-	fun testFromMessagesKeepsPhotoAndFileButSkipsBlankTextAndSortsByConnectorOrder() {
+	fun testFromMessagesKeepsPlaceholdersButSkipsBlankTextAndSortsByConnectorOrder() {
 		val items = ConnectorConversationMessageItem.fromMessages(
 			listOf(
 				connectorMessage("30", 30, true, "new", 30L),
@@ -20,6 +20,7 @@ class ConnectorConversationMessageItemTest {
 				connectorMessage("1", 10, false, "old", 1L),
 				connectorMessage("5", 26, false, "", 5L, ConnectorMessageType.FILE),
 				connectorMessage("20", 30, false, "same time", 20L),
+				connectorMessage("6", 27, false, "", 6L, ConnectorMessageType.DELETED),
 			),
 		)
 
@@ -40,6 +41,7 @@ class ConnectorConversationMessageItemTest {
 					26000L,
 					ConnectorMessageType.FILE,
 				),
+				connectorMessageItem("6", false, "", 27000L, ConnectorMessageType.DELETED),
 				connectorMessageItem("20", false, "same time", 30000L),
 				connectorMessageItem("30", true, "new", 30000L),
 			),

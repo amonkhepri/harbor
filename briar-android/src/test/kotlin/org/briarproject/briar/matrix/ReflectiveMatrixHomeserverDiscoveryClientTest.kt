@@ -71,8 +71,16 @@ class ReflectiveMatrixHomeserverDiscoveryClientTest {
 		loggedInClient.simulateTokenRefresh("refreshed-access-token")
 		assertEquals(1, FakeMatrixSdkState.tokenRefreshCallCount)
 
+		// Model a cold-process fixture in a path that has never been opened here.
+		client.close()
+		val coldStore = MatrixStoreConfiguration(
+			testFolder.newFolder("cold"),
+			storeConfiguration.databaseName,
+			storeConfiguration.copyEncryptionKey(),
+		)
+		storeConfiguration.directory.copyRecursively(coldStore.directory, overwrite = true)
 		val freshClient = newSessionClient()
-		val restoreResult = freshClient.restore(storeConfiguration)
+		val restoreResult = freshClient.restore(coldStore)
 
 		assertEquals(RestoreResult.Restored("https://matrix.example.org"), restoreResult)
 		assertEquals("refreshed-access-token", FakeMatrixSdkState.lastBuiltClient!!.session().accessToken)
@@ -267,8 +275,7 @@ class ReflectiveMatrixHomeserverDiscoveryClientTest {
 		assertEquals(DiscoveryResult.Failed(HOMESERVER_DISCOVERY_FAILED), result)
 		// The client has not arrived yet at the moment discover() gives up.
 		assertEquals(0, FakeMatrixSdkState.clientCloseCount)
-
-		awaitCondition(timeoutMs = 2_000L) { FakeMatrixSdkState.clientCloseCount == 1 }
+		FakeMatrixSdkState.awaitBuilds()
 		assertEquals(1, FakeMatrixSdkState.clientCloseCount)
 	}
 
@@ -354,6 +361,33 @@ class ReflectiveMatrixHomeserverDiscoveryClientTest {
 		val result = client.getJoinedRooms(10)
 
 		assertEquals("!noname:example.org", result.single().displayName)
+	}
+
+	@Test
+	fun `restore does not delete session file on transient failure`() {
+		val storeConfiguration = fakeStoreConfiguration()
+		val client = newSessionClient()
+		client.login("https://matrix.example.org", "alice", "swordfish", storeConfiguration)
+		client.close()
+
+		FakeMatrixSdkState.restoreSessionException = RuntimeException("Timeout")
+
+		val coldStore = MatrixStoreConfiguration(
+			testFolder.newFolder("cold-transient"),
+			storeConfiguration.databaseName,
+			storeConfiguration.copyEncryptionKey(),
+		)
+		storeConfiguration.directory.copyRecursively(coldStore.directory, overwrite = true)
+
+		val freshClient = newSessionClient()
+		val restoreResult = freshClient.restore(coldStore)
+
+		assertTrue(
+			"Expected Failed result for transient error, got $restoreResult",
+			restoreResult is MatrixLoginClient.RestoreResult.Failed,
+		)
+		val file = java.io.File(coldStore.directory, "session")
+		assertTrue("Session file should NOT be deleted on transient error", file.exists())
 	}
 
 	/** Polls until [condition] holds or [timeoutMs] elapses, for asserting on the fake's background completion thread. */

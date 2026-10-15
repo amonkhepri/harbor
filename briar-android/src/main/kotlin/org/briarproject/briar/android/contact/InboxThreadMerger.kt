@@ -16,7 +16,7 @@ object InboxThreadMerger {
 		val items = ArrayList<InboxThreadItem>(
 			briarItems.size + connectorItems.size,
 		)
-		briarItems.mapTo(items) { BriarInboxThreadItem(it) }
+		briarItems.mapTo(items, ::BriarInboxThreadItem)
 		items.addAll(connectorItems)
 		items.sortWith(byLatestActivity)
 		return items

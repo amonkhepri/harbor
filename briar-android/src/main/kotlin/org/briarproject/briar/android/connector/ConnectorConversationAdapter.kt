@@ -11,11 +11,12 @@ import org.briarproject.briar.R
 import org.briarproject.briar.android.util.UiUtils.formatDate
 import org.briarproject.briar.api.connector.ConnectorMessageType
 
-internal class ConnectorConversationAdapter :
-	ListAdapter<
-		ConnectorConversationMessageItem,
-		ConnectorConversationAdapter.MessageViewHolder,
-		>(MessageCallback()) {
+internal class ConnectorConversationAdapter(
+	private val onDeleteClicked: ((ConnectorConversationMessageItem) -> Unit)? = null,
+) : ListAdapter<
+	ConnectorConversationMessageItem,
+	ConnectorConversationAdapter.MessageViewHolder,
+	>(MessageCallback()) {
 
 	override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): MessageViewHolder {
 		val view = LayoutInflater.from(parent.context).inflate(
@@ -23,14 +24,17 @@ internal class ConnectorConversationAdapter :
 			parent,
 			false,
 		)
-		return MessageViewHolder(view)
+		return MessageViewHolder(view, onDeleteClicked)
 	}
 
 	override fun onBindViewHolder(holder: MessageViewHolder, position: Int) {
 		holder.bind(getItem(position))
 	}
 
-	class MessageViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
+	class MessageViewHolder(
+		itemView: View,
+		private val onDeleteClicked: ((ConnectorConversationMessageItem) -> Unit)? = null,
+	) : RecyclerView.ViewHolder(itemView) {
 		private val text: TextView =
 			itemView.findViewById(R.id.connectorMessageText)
 		private val direction: TextView =
@@ -42,6 +46,8 @@ internal class ConnectorConversationAdapter :
 			val messageText = when (item.type) {
 				ConnectorMessageType.PHOTO -> text.resources.getString(R.string.connector_message_photo)
 				ConnectorMessageType.FILE -> text.resources.getString(R.string.connector_message_file)
+				ConnectorMessageType.DELETED ->
+					text.resources.getString(R.string.connector_message_deleted)
 				else -> item.text
 			}
 			val replyText = if (item.isReply) {
@@ -71,14 +77,33 @@ internal class ConnectorConversationAdapter :
 				)
 			}
 			direction.setText(
-				if (item.isOutgoing) {
-					R.string.connector_conversation_direction_outgoing
-				} else {
-					R.string.connector_conversation_direction_incoming
+				when (item.localEchoStatus) {
+					ConnectorLocalEchoStatus.PENDING -> R.string.connector_message_sending
+					ConnectorLocalEchoStatus.SENT -> R.string.connector_message_sent
+					ConnectorLocalEchoStatus.FAILED -> R.string.connector_conversation_send_failed
+					null -> if (item.isOutgoing) {
+						R.string.connector_conversation_direction_outgoing
+					} else {
+						R.string.connector_conversation_direction_incoming
+					}
 				},
 			)
 			date.visibility = if (item.dateMillis > 0) View.VISIBLE else View.GONE
 			date.text = if (item.dateMillis > 0) formatDate(date.context, item.dateMillis) else ""
+			itemView.setOnLongClickListener {
+				// Delete affordance is connector-neutral: own sent messages without pending
+				// local echo and not already deleted trigger the callback when delete is supported.
+				if (item.isOutgoing &&
+					item.localEchoStatus == null &&
+					item.type != ConnectorMessageType.DELETED &&
+					onDeleteClicked != null
+				) {
+					onDeleteClicked.invoke(item)
+					true
+				} else {
+					false
+				}
+			}
 		}
 	}
 
@@ -98,6 +123,7 @@ internal class ConnectorConversationAdapter :
 			i1.type == i2.type &&
 			i1.isEdited == i2.isEdited &&
 			i1.isReply == i2.isReply &&
-			i1.reactions == i2.reactions
+			i1.reactions == i2.reactions &&
+			i1.localEchoStatus == i2.localEchoStatus
 	}
 }

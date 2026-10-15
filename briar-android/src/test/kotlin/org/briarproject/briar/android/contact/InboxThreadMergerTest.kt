@@ -1,13 +1,32 @@
 package org.briarproject.briar.android.contact
 
+import org.briarproject.bramble.test.TestUtils.getContact
+import org.briarproject.briar.api.client.MessageTracker.GroupCount
 import org.briarproject.briar.api.connector.ConnectorMessageType
 import org.briarproject.briar.api.connector.ConnectorSource
 import org.briarproject.briar.api.connector.ConnectorSources
 import org.briarproject.briar.api.connector.ConnectorThread
+import org.briarproject.briar.api.identity.AuthorInfo
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class InboxThreadMergerTest {
+
+	@Test
+	fun testMergeWrapsBriarContactsWithStableIdAndTimestamp() {
+		val contact = getContact()
+		val briarItem = ContactListItem(
+			contact,
+			AuthorInfo(AuthorInfo.Status.VERIFIED),
+			true,
+			GroupCount(1, 0, 5000L),
+		)
+
+		val items = InboxThreadMerger.merge(listOf(briarItem), listOf(connectorItem("c", 1L)))
+
+		assertEquals(listOf("briar:${contact.id.int}", "m:c"), items.map { it.stableId })
+		assertEquals(5000L, items[0].latestActivityMillis)
+	}
 
 	@Test
 	fun testTelegramRowsMapSecondsToMillis() {

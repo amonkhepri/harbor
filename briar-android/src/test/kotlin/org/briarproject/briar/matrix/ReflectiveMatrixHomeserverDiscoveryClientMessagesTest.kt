@@ -41,6 +41,49 @@ class ReflectiveMatrixHomeserverDiscoveryClientMessagesTest {
 	}
 
 	@Test
+	fun `redacted events remain between surrounding messages with identity and direction intact`() {
+		val client = loggedInClient()
+		FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec("!room:example.org"))
+		val deleted = TimelineItem(
+			FakeTimelineEventSpec(
+				EventOrTransactionId.EventId("\$deleted:example.org"),
+				"@bob:example.org",
+				null,
+				2_000uL,
+				own = true,
+				redacted = true,
+			),
+		)
+		FakeMatrixSdkState.timelineDiffsToReturn = listOf(
+			TimelineDiff.Reset(
+				listOf(
+					remoteEvent("\$before:example.org", "before", 1_000uL),
+					deleted,
+					remoteEvent("\$after:example.org", "after", 3_000uL),
+				),
+			),
+		)
+
+		assertEquals(
+			listOf(
+				MatrixMessageSnapshot("\$before:example.org", "@alice:example.org", "before", 1L, false),
+				MatrixMessageSnapshot(
+					"\$deleted:example.org",
+					"@bob:example.org",
+					"",
+					2L,
+					true,
+					type = ConnectorMessageType.DELETED,
+				),
+				MatrixMessageSnapshot("\$after:example.org", "@alice:example.org", "after", 3L, false),
+			),
+			client.getRecentMessages("!room:example.org", 3),
+		)
+		assertEquals(3, FakeMatrixSdkState.eventTimelineItemDestroyCount)
+		assertEquals(2, FakeMatrixSdkState.messageContentDestroyCount)
+	}
+
+	@Test
 	fun `getRecentMessages maps Matrix images to connector photo placeholders`() {
 		val client = loggedInClient()
 		FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec("!room:example.org"))
@@ -127,7 +170,7 @@ class ReflectiveMatrixHomeserverDiscoveryClientMessagesTest {
 	}
 
 	@Test
-	fun `getRecentMessages maps Matrix video, audio, and file to connector file placeholders`() {
+	fun `getRecentMessages maps video, audio, file, gallery to FILE placeholders`() {
 		val client = loggedInClient()
 		FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec("!room:example.org"))
 		FakeMatrixSdkState.timelineDiffsToReturn = listOf(
@@ -151,6 +194,101 @@ class ReflectiveMatrixHomeserverDiscoveryClientMessagesTest {
 						4_000uL,
 						messageType = MessageType.File,
 					),
+					remoteEvent(
+						"\$gallery:example.org",
+						"private gallery body",
+						5_000uL,
+						messageType = MessageType.Gallery,
+					),
+				),
+			),
+		)
+
+		val result = client.getRecentMessages("!room:example.org", 4)
+
+		assertEquals(
+			listOf(
+				ConnectorMessageType.FILE,
+				ConnectorMessageType.FILE,
+				ConnectorMessageType.FILE,
+				ConnectorMessageType.FILE,
+			),
+			result?.map { it.type },
+		)
+	}
+
+	@Test
+	fun `getRecentMessages maps Location, Notice, Emote, and Other to connector text`() {
+		val client = loggedInClient()
+		FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec("!room:example.org"))
+		FakeMatrixSdkState.timelineDiffsToReturn = listOf(
+			TimelineDiff.Reset(
+				listOf(
+					remoteEvent(
+						"\$location:example.org",
+						"private location body",
+						6_000uL,
+						messageType = MessageType.Location,
+					),
+					remoteEvent(
+						"\$notice:example.org",
+						"private notice body",
+						7_000uL,
+						messageType = MessageType.Notice,
+					),
+					remoteEvent(
+						"\$emote:example.org",
+						"private emote body",
+						8_000uL,
+						messageType = MessageType.Emote,
+					),
+					remoteEvent(
+						"\$other:example.org",
+						"private other body",
+						9_000uL,
+						messageType = MessageType.Other,
+					),
+				),
+			),
+		)
+
+		val result = client.getRecentMessages("!room:example.org", 4)
+
+		assertEquals(
+			List(4) { ConnectorMessageType.TEXT },
+			result?.map { it.type },
+		)
+	}
+
+	@Test
+	fun `getRecentMessages preserves edited and reply flags independently of message type`() {
+		val client = loggedInClient()
+		FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec("!room:example.org"))
+		FakeMatrixSdkState.timelineDiffsToReturn = listOf(
+			TimelineDiff.Reset(
+				listOf(
+					remoteEvent(
+						"\$file:example.org",
+						"private file body",
+						2_000uL,
+						messageType = MessageType.File,
+						edited = true,
+						isReply = true,
+					),
+					remoteEvent(
+						"\$image:example.org",
+						"private image body",
+						3_000uL,
+						messageType = MessageType.Image,
+						edited = true,
+					),
+					remoteEvent(
+						"\$notice:example.org",
+						"private notice body",
+						4_000uL,
+						messageType = MessageType.Notice,
+						isReply = true,
+					),
 				),
 			),
 		)
@@ -158,9 +296,12 @@ class ReflectiveMatrixHomeserverDiscoveryClientMessagesTest {
 		val result = client.getRecentMessages("!room:example.org", 3)
 
 		assertEquals(
-			listOf(ConnectorMessageType.FILE, ConnectorMessageType.FILE, ConnectorMessageType.FILE),
+			listOf(ConnectorMessageType.FILE, ConnectorMessageType.PHOTO, ConnectorMessageType.TEXT),
 			result?.map { it.type },
 		)
+		assertEquals(listOf(true, true, false), result?.map { it.isEdited })
+		assertEquals(listOf(true, false, true), result?.map { it.isReply })
+		assertEquals(2, FakeMatrixSdkState.inReplyToDetailsDestroyCount)
 	}
 
 	@Test
@@ -366,7 +507,7 @@ class ReflectiveMatrixHomeserverDiscoveryClientMessagesTest {
 		body: String,
 		timestamp: ULong,
 		own: Boolean = false,
-		messageType: MessageType = MessageType.Text,
+		messageType: MessageType = MessageType.Text(),
 		edited: Boolean = false,
 		isReply: Boolean = false,
 		reactions: List<Reaction> = emptyList(),

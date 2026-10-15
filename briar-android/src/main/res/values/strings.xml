@@ -142,30 +142,49 @@
 	<string name="telegram_origin_label">Telegram</string>
 	<string name="connector_thread_source_content_description">%1$s source</string>
 	<string name="connector_thread_default_source_content_description">Connector source</string>
-	<string name="connector_thread_title_fallback">Telegram chat</string>
+	<string name="connector_thread_title_fallback">Chat</string>
 	<string name="connector_thread_preview_loading">Loading preview...</string>
 	<string name="connector_thread_preview_empty">No recent text</string>
 	<string name="connector_thread_preview_outgoing">Outgoing: %1$s</string>
 	<string name="connector_message_photo">Photo</string>
 	<string name="connector_message_file">File</string>
+	<string name="connector_message_deleted">Message deleted</string>
 	<string name="connector_message_edited">%1$s (edited)</string>
 	<string name="connector_message_reply">↩ %1$s</string>
 	<string name="connector_message_reaction_summary">%1$s %2$d</string>
 	<string name="connector_message_with_reactions">%1$s\n%2$s</string>
-	<string name="telegram_inbox_loading">Loading Telegram inbox...</string>
-	<string name="telegram_inbox_account_unavailable">Telegram account unavailable</string>
-	<string name="telegram_inbox_empty">No recent Telegram chats</string>
-	<string name="telegram_inbox_load_failed">Telegram inbox unavailable</string>
-	<string name="telegram_conversation_title">Telegram conversation</string>
-	<string name="telegram_conversation_loading">Loading Telegram messages...</string>
-	<string name="telegram_conversation_empty">No Telegram text messages</string>
-	<string name="telegram_conversation_disabled">Telegram connector unavailable in this build</string>
-	<string name="telegram_conversation_account_unavailable">Telegram account unavailable</string>
-	<string name="telegram_conversation_load_failed">Telegram messages could not be loaded</string>
-	<string name="telegram_conversation_refresh">Refresh Telegram messages</string>
+	<string name="connector_inbox_loading">Loading connector inbox...</string>
+	<string name="connector_inbox_account_unavailable">Connector account unavailable</string>
+	<string name="connector_inbox_empty">No recent connector chats</string>
+	<string name="connector_inbox_load_failed">Connector inbox unavailable</string>
+	<string name="connector_conversation_label">Conversation</string>
+	<string name="connector_conversation_title">%1$s conversation</string>
+	<string name="connector_conversation_loading">Loading %1$s messages...</string>
+	<string name="connector_conversation_empty">No %1$s text messages</string>
+	<string name="connector_conversation_disabled">%1$s connector unavailable in this build</string>
+	<string name="connector_conversation_account_unavailable">%1$s account unavailable</string>
+	<string name="connector_conversation_load_failed">%1$s messages could not be loaded</string>
+	<string name="connector_conversation_refresh">Refresh messages</string>
 	<string name="connector_conversation_direction_incoming">Incoming</string>
 	<string name="connector_conversation_direction_outgoing">Outgoing</string>
-	<string name="telegram_inbox_refresh">Refresh Telegram inbox</string>
+	<string name="connector_conversation_compose_hint">Message %1$s</string>
+	<string name="connector_conversation_send">Send</string>
+	<string name="connector_conversation_send_failed">Message could not be sent</string>
+	<string name="connector_conversation_delete_failed">Message could not be deleted</string>
+	<string name="connector_conversation_find">Search loaded messages</string>
+	<string name="connector_conversation_find_hint">Search loaded messages</string>
+	<string name="connector_conversation_find_count">%1$d/%2$d</string>
+	<string name="connector_conversation_find_no_matches">No matches</string>
+	<string name="connector_conversation_find_previous">Previous match</string>
+	<string name="connector_conversation_find_next">Next match</string>
+	<string name="dialog_message_delete">Are you sure that you want to delete this message?</string>
+	<string name="connector_conversation_attach_image">Attach image</string>
+	<string name="connector_image_sent">Image sent</string>
+	<string name="connector_image_retry">Retry image</string>
+	<string name="connector_image_failed">Image could not be sent. Retry or choose another image (up to 10 MB).</string>
+	<string name="connector_message_sending">Sending…</string>
+	<string name="connector_message_sent">Sent</string>
+	<string name="connector_inbox_refresh">Refresh connector inbox</string>
 
 	<!-- Notifications -->
 	<string name="reminder_notification_title">Signed out of Harbor</string>
@@ -990,4 +1009,7 @@
 	<!-- This is a message to be used in screenshots. -->
 	<string name="screenshot_message_3">No problem, hope you like it 😀</string>
 
+    <string name="connector_conversation_attach_file">Send file (up to 10 MiB)</string>
+    <string name="connector_file_sent">File sent</string>
+    <string name="connector_file_failed">Could not send file. Choose a non-empty file up to 10 MiB and try again.</string>
 </resources>

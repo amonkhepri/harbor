@@ -18,6 +18,8 @@ import org.briarproject.bramble.api.system.AndroidExecutor
 import org.briarproject.briar.api.android.AndroidNotificationManager
 import org.briarproject.briar.api.connector.ConnectorRegistry
 import org.briarproject.briar.api.connector.ConnectorSource
+import org.briarproject.briar.api.connector.ConnectorSources
+import org.briarproject.briar.api.matrix.MatrixAuthSession
 import org.briarproject.briar.api.conversation.ConversationManager
 import org.briarproject.briar.api.identity.AuthorManager
 import org.briarproject.briar.android.contact.ConnectorInboxAvailabilityState.ACCOUNT_UNAVAILABLE
@@ -42,6 +44,7 @@ internal class ContactListViewModel @Inject constructor(
 	private val notificationManager: AndroidNotificationManager,
 	private val connectorRegistry: ConnectorRegistry,
 	@IoExecutor private val ioExecutor: Executor,
+	private val matrixAuthSession: MatrixAuthSession,
 ) : ContactsViewModel(
 	application,
 	dbExecutor,
@@ -108,6 +111,7 @@ internal class ContactListViewModel @Inject constructor(
 			val states = LinkedHashMap<ConnectorSource, ConnectorInboxAvailabilityState>()
 			connectors.forEach { connector ->
 				try {
+					if (connector.source == ConnectorSources.MATRIX) matrixAuthSession.start()
 					if (!connector.isAuthorized()) {
 						states[connector.source] = ACCOUNT_UNAVAILABLE
 						return@forEach

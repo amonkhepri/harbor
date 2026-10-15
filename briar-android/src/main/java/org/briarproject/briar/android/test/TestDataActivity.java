@@ -114,12 +114,17 @@ public class TestDataActivity extends BriarActivity {
 	}
 
 	private void createTestData() {
+		findViewById(R.id.buttonCreateTestData).setEnabled(false);
 		testDataCreator.createTestData(contactsSeekBar.getProgress() + 1,
 				messagesSeekBar.getProgress(), avatarsSeekBar.getProgress(),
 				blogPostsSeekBar.getProgress(), forumsSeekBar.getProgress(),
 				forumPostsSeekBar.getProgress(),
 				privateGroupsSeekBar.getProgress(),
-				privateGroupPostsSeekBar.getProgress());
+				privateGroupPostsSeekBar.getProgress(),
+				() -> runOnUiThreadUnlessDestroyed(this::goToEntryActivity));
+	}
+
+	private void goToEntryActivity() {
 		Intent intent = new Intent(this, ENTRY_ACTIVITY);
 		intent.addFlags(FLAG_ACTIVITY_CLEAR_TOP);
 		startActivity(intent);

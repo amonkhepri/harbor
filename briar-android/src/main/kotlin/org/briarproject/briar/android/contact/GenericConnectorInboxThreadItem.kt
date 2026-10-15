@@ -33,4 +33,6 @@ data class GenericConnectorInboxThreadItem(
 	)
 }
 
-internal fun cleanPreviewText(text: String): String = text.replace(Regex("\\s+"), " ").trim()
+private val whitespaceRegex = Regex("\\s+")
+
+internal fun cleanPreviewText(text: String): String = text.replace(whitespaceRegex, " ").trim()

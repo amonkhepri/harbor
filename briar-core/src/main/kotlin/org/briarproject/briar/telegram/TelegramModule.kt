@@ -92,7 +92,10 @@ class TelegramModule {
 		telegramConnector: TelegramConnector,
 		matrixConnector: MatrixConnector,
 	): ConnectorRegistry = object : ConnectorRegistry {
-		override val connectors = listOf(telegramConnector, matrixConnector)
+		override val connectors = listOfNotNull(
+			telegramConnector.takeIf { it.isEnabled() },
+			matrixConnector.takeIf { it.isEnabled() },
+		)
 	}
 
 	@Provides
@@ -112,6 +115,7 @@ class TelegramModule {
 					featureFlags.getTelegramApiId(),
 					featureFlags.getTelegramApiHash(),
 					tdlibKeyProvider,
+					accessGate = accessGate,
 				),
 				accessGate,
 			)

@@ -38,7 +38,11 @@ sealed class ClientException(message: String) : Exception(message) {
 
 enum class SlidingSyncVersion { NONE, NATIVE }
 
+enum class EncryptionState { NOT_ENCRYPTED, ENCRYPTED, UNKNOWN }
+
 enum class Membership { INVITED, JOINED, LEFT, KNOCKED, BANNED }
+
+enum class ReceiptType { READ, READ_PRIVATE, FULLY_READ }
 
 /** Mirrors the pinned AAR's real shape: synchronous `id()`/`displayName()`/`isSpace()`/`membership()`. */
 class Room(
@@ -51,6 +55,7 @@ class Room(
 	fun displayName(): String? = roomDisplayName
 	fun isSpace(): Boolean = space
 	fun membership(): Membership = roomMembership
+	fun encryptionState(): EncryptionState = FakeMatrixSdkState.encryptionState
 
 	suspend fun timeline(): Timeline {
 		FakeMatrixSdkState.timelineCallCount++
@@ -69,6 +74,13 @@ class Room(
 	fun close() {
 		FakeMatrixSdkState.roomCloseCount++
 		FakeMatrixSdkState.closedRoomHandles.add(roomId)
+	}
+
+	suspend fun markAsRead(receiptType: ReceiptType) {
+		FakeMatrixSdkState.markAsReadCallCount++
+		FakeMatrixSdkState.lastMarkAsReadRoomId = roomId
+		FakeMatrixSdkState.lastMarkAsReadReceiptType = receiptType
+		FakeMatrixSdkState.markAsReadFailureToThrow?.let { throw it }
 	}
 }
 
@@ -102,6 +114,47 @@ class Timeline {
 		FakeMatrixSdkState.timelineOperationOrder.add("paginateBackwards")
 		FakeMatrixSdkState.paginationFailureToThrow?.let { throw it }
 		return FakeMatrixSdkState.paginationHitTimelineStart
+	}
+
+	/** Mirrors the pinned AAR's real shape: synchronous, builds an owned closeable value. */
+	fun createMessageContent(messageType: MessageType): RoomMessageEventContentWithoutRelation {
+		FakeMatrixSdkState.createMessageContentCallCount++
+		FakeMatrixSdkState.lastCreatedMessageType = messageType
+		return RoomMessageEventContentWithoutRelation(messageType)
+	}
+
+	suspend fun send(content: RoomMessageEventContentWithoutRelation): SendHandle {
+		FakeMatrixSdkState.sendCallCount++
+		FakeMatrixSdkState.lastSentContent = content
+		FakeMatrixSdkState.sendFailureToThrow?.let { throw it }
+		val handle = SendHandle()
+		if (!FakeMatrixSdkState.sendSuspendAsynchronously) return handle
+		return suspendCoroutine { continuation ->
+			Thread {
+				if (FakeMatrixSdkState.sendDelayMs > 0) Thread.sleep(FakeMatrixSdkState.sendDelayMs)
+				continuation.resume(handle)
+			}.start()
+		}
+	}
+
+	fun sendFile(params: UploadParameters, info: FileInfo): SendAttachmentJoinHandle {
+		FakeMatrixSdkState.sendFileCallCount++
+		FakeMatrixSdkState.lastSendFileParams = params
+		FakeMatrixSdkState.lastSendFileInfo = info
+		return SendAttachmentJoinHandle()
+	}
+
+	/** Mirrors the pinned AAR's real shape: synchronous, returns an owned join handle (MX-014). */
+	fun sendImage(
+		params: UploadParameters,
+		thumbnailSource: UploadSource?,
+		imageInfo: ImageInfo,
+	): SendAttachmentJoinHandle {
+		FakeMatrixSdkState.sendImageCallCount++
+		FakeMatrixSdkState.lastSendImageParams = params
+		FakeMatrixSdkState.lastSendImageThumbnailSource = thumbnailSource
+		FakeMatrixSdkState.lastSendImageInfo = imageInfo
+		return SendAttachmentJoinHandle()
 	}
 
 	fun close() {
@@ -151,13 +204,16 @@ data class FakeTimelineEventSpec(
 	val body: String?,
 	val timestamp: ULong,
 	val own: Boolean = false,
-	val messageType: MessageType = MessageType.Text,
+	val messageType: MessageType = MessageType.Text(),
 	val edited: Boolean = false,
 	val isReply: Boolean = false,
 	val reactions: List<Reaction> = emptyList(),
+	val redacted: Boolean = false,
 ) {
 	fun toEventTimelineItem(): EventTimelineItem {
-		val content = if (body == null) {
+		val content = if (redacted) {
+			TimelineItemContent.MsgLike(MsgLikeContent(MsgLikeKind.Redacted))
+		} else if (body == null) {
 			TimelineItemContent.Other
 		} else {
 			TimelineItemContent.MsgLike(
@@ -232,22 +288,161 @@ class InReplyToDetails {
 sealed class MsgLikeKind {
 	abstract fun destroy()
 
+	object Redacted : MsgLikeKind() {
+		override fun destroy() = Unit
+	}
+
 	class Message(val content: MessageContent) : MsgLikeKind() {
 		override fun destroy() = content.destroy()
 	}
 }
 
 sealed class MessageType {
-	object Text : MessageType()
+	/**
+	 * Mirrors the pinned AAR's real shape (MX-013): a class carrying a [TextMessageContent], not
+	 * a parameterless singleton, since `Timeline.createMessageContent` requires building one from
+	 * plain text to send. The default keeps every pre-existing `MessageType.Text` incoming-message
+	 * fixture usage compiling unchanged.
+	 */
+	class Text(val content: TextMessageContent = TextMessageContent("", null)) : MessageType()
 	object Image : MessageType()
 	object Video : MessageType()
 	object Audio : MessageType()
 	object File : MessageType()
+	object Gallery : MessageType()
+	object Location : MessageType()
+	object Notice : MessageType()
+	object Emote : MessageType()
+	object Other : MessageType()
 }
+
+/** Mirrors the pinned AAR's real shape: `TextMessageContent(String body, FormattedBody formatted)`. */
+class TextMessageContent(val body: String, val formatted: FormattedBody?)
+
+/** Mirrors the pinned AAR's real shape: `FormattedBody(MessageFormat format, String body)`. Not
+ * exercised by any current send path, which always passes a null `formatted` body. */
+class FormattedBody(val format: Any? = null, val body: String = "")
 
 class MessageContent(val msgType: MessageType, val body: String, val isEdited: Boolean) {
 	fun destroy() {
 		FakeMatrixSdkState.messageContentDestroyCount++
+	}
+}
+
+/** Mirrors the pinned AAR's real shape: an owned closeable value `Timeline.send` consumes. */
+class RoomMessageEventContentWithoutRelation(val messageType: MessageType) {
+	fun close() {
+		FakeMatrixSdkState.roomMessageEventContentCloseCount++
+	}
+}
+
+/** Mirrors the pinned AAR's real shape: an owned closeable value `Timeline.send` returns. */
+class SendHandle {
+	fun close() {
+		FakeMatrixSdkState.sendHandleCloseCount++
+	}
+}
+
+/**
+ * Mirrors the pinned AAR's real shape (MX-014): `UploadSource.Data(bytes, filename)` is the only
+ * variant any current send path constructs.
+ */
+sealed class UploadSource {
+	class Data(val bytes: ByteArray, val filename: String) : UploadSource()
+}
+
+/**
+ * Mirrors the pinned AAR's real shape (MX-014): `UploadParameters(source, caption,
+ * formattedCaption, mentions, inReplyTo, extraContentJson)`; only [source] is non-nullable.
+ * [caption], [mentions], [inReplyTo], and [extraContentJson] are not exercised by any current send
+ * path, which always passes null for them.
+ */
+class UploadParameters(
+	val source: UploadSource,
+	val caption: String?,
+	val formattedCaption: FormattedBody?,
+	val mentions: Mentions?,
+	val inReplyTo: String?,
+	val extraContentJson: String?,
+)
+
+/** Unconstructed stand-in for the pinned AAR's `Mentions`; no current send path sends mentions. */
+class Mentions
+
+/** Unconstructed stand-in for the pinned AAR's `ThumbnailInfo`; MX-014 sends no thumbnail. */
+class ThumbnailInfo
+
+/** Unconstructed stand-in for the pinned AAR's `MediaSource`; MX-014 sends no thumbnail source. */
+class MediaSource
+
+/** FileInfo has the same synthetic ULong constructor marker as ImageInfo in the pinned AAR. */
+class FileInfo(
+	val mimetype: String?,
+	val size: ULong?,
+	val thumbnailInfo: ThumbnailInfo?,
+	val thumbnailSource: MediaSource?,
+) {
+	fun destroy() {
+		FakeMatrixSdkState.fileInfoDestroyCount++
+	}
+}
+
+/**
+ * Mirrors the pinned AAR's real shape (MX-014): `ImageInfo`'s public constructor takes an unused
+ * `DefaultConstructorMarker` parameter after every real field, verified over javap against the
+ * pinned AAR -- not a normal Kotlin default-argument bitmask constructor, so the reflective
+ * production caller passes `null` positionally for it, the same as every other nullable field.
+ */
+class ImageInfo(
+	val height: ULong?,
+	val width: ULong?,
+	val mimetype: String?,
+	val size: ULong?,
+	val thumbnailInfo: ThumbnailInfo?,
+	val thumbnailSource: MediaSource?,
+	val blurhash: String?,
+	val isAnimated: Boolean?,
+) {
+	fun destroy() {
+		FakeMatrixSdkState.imageInfoDestroyCount++
+	}
+}
+
+/**
+ * Mirrors the pinned AAR's real shape (MX-014): `RoomException` is an abstract sealed base with no
+ * public constructor; `Generic` is the concrete variant this fake exercises.
+ */
+sealed class RoomException(message: String) : Exception(message) {
+	class Generic(val msg: String) : RoomException(msg)
+}
+
+/**
+ * Mirrors the pinned AAR's real shape (MX-014): an owned closeable value `Timeline.sendImage`
+ * returns, whose suspend `join()` throws [RoomException] on failure instead of returning one.
+ */
+class SendAttachmentJoinHandle {
+	fun cancel() {
+		FakeMatrixSdkState.imageCancelCount++
+	}
+
+	suspend fun join() {
+		FakeMatrixSdkState.joinCallCount++
+		FakeMatrixSdkState.joinFailureToThrow?.let { throw it }
+		if (!FakeMatrixSdkState.joinSuspendAsynchronously) {
+			FakeMatrixSdkState.onImageJoined?.invoke()
+			return
+		}
+		return suspendCoroutine { continuation ->
+			Thread {
+				if (FakeMatrixSdkState.joinDelayMs > 0) Thread.sleep(FakeMatrixSdkState.joinDelayMs)
+				continuation.resume(Unit)
+				FakeMatrixSdkState.joinFinished.countDown()
+			}.start()
+		}
+	}
+
+	fun close() {
+		FakeMatrixSdkState.sendAttachmentJoinHandleCloseCount++
 	}
 }
 
@@ -305,14 +500,23 @@ sealed class TimelineDiff {
 }
 
 class Session(
-	val accessToken: String,
+	accessToken: String,
 	val refreshToken: String?,
 	val userId: String,
 	val deviceId: String,
 	val homeserverUrl: String,
 	val oauthData: String?,
 	val slidingSyncVersion: SlidingSyncVersion,
-)
+) {
+	init {
+		FakeMatrixSdkState.onSessionConstruct?.invoke()
+	}
+	private val token = accessToken
+	val accessToken: String get() {
+		FakeMatrixSdkState.onSessionRead?.invoke()
+		return token
+	}
+}
 
 /**
  * Mirrors the pinned SDK's `ClientSessionDelegate`: the app-supplied keychain bridge the SDK
@@ -368,19 +572,23 @@ class Client internal constructor(
 			slidingSyncVersion = SlidingSyncVersion.NATIVE,
 		)
 		sessionDelegate?.saveSessionInKeychain(session!!)
+		FakeMatrixSdkState.onLogin?.invoke()
 	}
 
 	suspend fun restoreSession(session: Session) {
 		FakeMatrixSdkState.restoreSessionCallCount++
+		FakeMatrixSdkState.restoreSessionException?.let { throw it }
 		this.session = session
 	}
 
 	suspend fun logout() {
+		FakeMatrixSdkState.onDispose?.invoke()
 		FakeMatrixSdkState.logoutCallCount++
 		session = null
 	}
 
 	fun close() {
+		FakeMatrixSdkState.onDispose?.invoke()
 		FakeMatrixSdkState.clientCloseCount++
 	}
 
@@ -463,7 +671,10 @@ class ClientBuilder : AutoCloseable {
 				} else {
 					continuation.resume(newClient())
 				}
-			}.start()
+			}.also {
+				FakeMatrixSdkState.builds.add(it)
+				it.start()
+			}
 		}
 	}
 
@@ -520,6 +731,14 @@ class MalformedRoom(
 }
 
 object FakeMatrixSdkState {
+	val builds = mutableListOf<Thread>()
+	fun awaitBuilds() {
+		builds.forEach {
+			it.join(3000)
+			check(!it.isAlive)
+		}
+		builds.clear()
+	}
 	var lastServerName: String? = null
 	var inMemoryStoreCalled = false
 	var sqliteStoreCalled = false
@@ -538,9 +757,14 @@ object FakeMatrixSdkState {
 	var lastPassphrase: String? = null
 	var loginCallCount = 0
 	var restoreSessionCallCount = 0
+	var restoreSessionException: Exception? = null
 	var logoutCallCount = 0
 	var tokenRefreshCallCount = 0
 	var lastSessionDelegate: ClientSessionDelegate? = null
+	var onSessionConstruct: (() -> Unit)? = null
+	var onSessionRead: (() -> Unit)? = null
+	var onLogin: (() -> Unit)? = null
+	var onDispose: (() -> Unit)? = null
 	var lastBuiltClient: Client? = null
 	var roomsToReturn: List<FakeRoomSpec> = emptyList()
 	var roomCloseCount = 0
@@ -568,8 +792,44 @@ object FakeMatrixSdkState {
 	var messageContentDestroyCount = 0
 	var otherContentDestroyCount = 0
 	var inReplyToDetailsDestroyCount = 0
+	var createMessageContentCallCount = 0
+	var lastCreatedMessageType: MessageType? = null
+	var sendCallCount = 0
+	var lastSentContent: RoomMessageEventContentWithoutRelation? = null
+	var sendFailureToThrow: ClientException? = null
+	var sendSuspendAsynchronously = false
+	var sendDelayMs = 0L
+	var roomMessageEventContentCloseCount = 0
+	var sendHandleCloseCount = 0
+	var encryptionState = EncryptionState.NOT_ENCRYPTED
+	var onImageJoined: (() -> Unit)? = null
+	var joinFinished = java.util.concurrent.CountDownLatch(1)
+	var imageCancelCount = 0
+	var sendFileCallCount = 0
+	var lastSendFileParams: UploadParameters? = null
+	var lastSendFileInfo: FileInfo? = null
+	var fileInfoDestroyCount = 0
+	var sendImageCallCount = 0
+	var lastSendImageParams: UploadParameters? = null
+	var lastSendImageThumbnailSource: UploadSource? = null
+	var lastSendImageInfo: ImageInfo? = null
+	var imageInfoDestroyCount = 0
+	var joinCallCount = 0
+	var joinFailureToThrow: RoomException? = null
+	var joinSuspendAsynchronously = false
+	var joinDelayMs = 0L
+	var sendAttachmentJoinHandleCloseCount = 0
+	var markAsReadCallCount = 0
+	var lastMarkAsReadRoomId: String? = null
+	var lastMarkAsReadReceiptType: ReceiptType? = null
+	var markAsReadFailureToThrow: ClientException? = null
 
 	fun reset() {
+		awaitBuilds()
+		onSessionConstruct = null
+		onSessionRead = null
+		onLogin = null
+		onDispose = null
 		lastServerName = null
 		inMemoryStoreCalled = false
 		sqliteStoreCalled = false
@@ -588,6 +848,7 @@ object FakeMatrixSdkState {
 		lastPassphrase = null
 		loginCallCount = 0
 		restoreSessionCallCount = 0
+		restoreSessionException = null
 		logoutCallCount = 0
 		tokenRefreshCallCount = 0
 		lastSessionDelegate = null
@@ -618,5 +879,36 @@ object FakeMatrixSdkState {
 		messageContentDestroyCount = 0
 		otherContentDestroyCount = 0
 		inReplyToDetailsDestroyCount = 0
+		createMessageContentCallCount = 0
+		lastCreatedMessageType = null
+		sendCallCount = 0
+		lastSentContent = null
+		sendFailureToThrow = null
+		sendSuspendAsynchronously = false
+		sendDelayMs = 0L
+		roomMessageEventContentCloseCount = 0
+		sendHandleCloseCount = 0
+		encryptionState = EncryptionState.NOT_ENCRYPTED
+		onImageJoined = null
+		joinFinished = java.util.concurrent.CountDownLatch(1)
+		imageCancelCount = 0
+		sendFileCallCount = 0
+		lastSendFileParams = null
+		lastSendFileInfo = null
+		fileInfoDestroyCount = 0
+		sendImageCallCount = 0
+		lastSendImageParams = null
+		lastSendImageThumbnailSource = null
+		lastSendImageInfo = null
+		imageInfoDestroyCount = 0
+		joinCallCount = 0
+		joinFailureToThrow = null
+		joinSuspendAsynchronously = false
+		joinDelayMs = 0L
+		sendAttachmentJoinHandleCloseCount = 0
+		markAsReadCallCount = 0
+		lastMarkAsReadRoomId = null
+		lastMarkAsReadReceiptType = null
+		markAsReadFailureToThrow = null
 	}
 }

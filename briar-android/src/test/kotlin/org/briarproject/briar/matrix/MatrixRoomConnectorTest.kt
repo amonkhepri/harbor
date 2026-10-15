@@ -1,5 +1,7 @@
 package org.briarproject.briar.matrix
 
+import org.briarproject.bramble.api.system.Clock
+import org.briarproject.bramble.test.SettableClock
 import org.briarproject.briar.api.connector.ConnectorMessage
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult.LoadFailed
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult.Success
@@ -11,8 +13,10 @@ import org.briarproject.briar.api.matrix.MatrixAuthSession.RecoverableErrorDetai
 import org.briarproject.briar.api.matrix.MatrixAuthState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.util.concurrent.atomic.AtomicLong
 
 class MatrixRoomConnectorTest {
 
@@ -101,6 +105,40 @@ class MatrixRoomConnectorTest {
 		assertEquals(ConnectorMessageType.TEXT, thread.latestMessageType)
 		assertEquals("!a:example.org", messageSnapshotClient.lastRequestedRoomId)
 		assertEquals(1, messageSnapshotClient.lastRequestedLimit)
+	}
+
+	@Test
+	fun `getRecentThreads stops querying rooms once the overall preview budget is spent`() {
+		val roomSnapshotClient = FakeRoomSnapshotClient(
+			listOf(
+				MatrixRoomSnapshot("!a:example.org", "Alpha"),
+				MatrixRoomSnapshot("!b:example.org", "Beta"),
+				MatrixRoomSnapshot("!c:example.org", "Gamma"),
+			),
+		)
+		val clockMs = AtomicLong(0L)
+		val messageSnapshotClient = BudgetProbingMessageSnapshotClient(
+			clockMs = clockMs,
+			// Beta's call stalls past the budget; Gamma's call must never happen.
+			advanceOnRequestMs = mapOf("!a:example.org" to 0L, "!b:example.org" to 150L),
+		)
+		val connector = connector(
+			roomSnapshotClient = roomSnapshotClient,
+			messageSnapshotClient = messageSnapshotClient,
+			authSession = FakeMatrixAuthSession(MatrixAuthState.READY),
+			clock = SettableClock(clockMs),
+			recentThreadsBudgetMs = 100L,
+		)
+
+		val threads = connector.getRecentThreads(10)
+
+		assertEquals(3, threads.size)
+		assertEquals("reply from !a:example.org", threads[0].latestMessageText)
+		assertEquals("reply from !b:example.org", threads[1].latestMessageText)
+		assertEquals("", threads[2].latestMessageText)
+		assertEquals(0, threads[2].latestActivityDateSeconds)
+		assertFalse(threads[2].isLatestMessageOutgoing)
+		assertEquals(listOf("!a:example.org", "!b:example.org"), messageSnapshotClient.requestedRoomIds)
 	}
 
 	@Test
@@ -233,12 +271,163 @@ class MatrixRoomConnectorTest {
 		assertEquals(null, messageSnapshotClient.lastRequestedRoomId)
 	}
 
+	@Test
+	fun `sendText fails closed without invoking the send client when not authorized`() {
+		val messageSendClient = FakeMessageSendClient(true)
+		val connector = connector(
+			messageSendClient = messageSendClient,
+			authSession = FakeMatrixAuthSession(MatrixAuthState.HOMESERVER_ENTRY),
+		)
+
+		val sent = connector.sendText("!a:example.org", "hello")
+
+		assertFalse(sent)
+		assertEquals(null, messageSendClient.lastRequestedRoomId)
+	}
+
+	@Test
+	fun `sendText delegates to the send client and returns its result when authorized`() {
+		val messageSendClient = FakeMessageSendClient(true)
+		val connector = connector(
+			messageSendClient = messageSendClient,
+			authSession = FakeMatrixAuthSession(MatrixAuthState.READY),
+		)
+
+		val sent = connector.sendText("!a:example.org", "hello")
+
+		assertTrue(sent)
+		assertEquals("!a:example.org", messageSendClient.lastRequestedRoomId)
+		assertEquals("hello", messageSendClient.lastRequestedText)
+	}
+
+	@Test
+	fun `sendText reports the send client's failure`() {
+		val connector = connector(
+			messageSendClient = FakeMessageSendClient(false),
+			authSession = FakeMatrixAuthSession(MatrixAuthState.READY),
+		)
+
+		assertFalse(connector.sendText("!a:example.org", "hello"))
+	}
+
+	@Test
+	fun `sendImage fails closed without invoking the send client when not authorized`() {
+		val messageSendClient = FakeMessageSendClient(true)
+		val connector = connector(
+			messageSendClient = messageSendClient,
+			authSession = FakeMatrixAuthSession(MatrixAuthState.HOMESERVER_ENTRY),
+		)
+
+		val sent = connector.sendImage("!a:example.org", byteArrayOf(1, 2, 3), "image.jpg", "image/jpeg")
+
+		assertFalse(sent)
+		assertEquals(null, messageSendClient.lastRequestedRoomId)
+	}
+
+	@Test
+	fun `sendImage delegates to the send client and returns its result when authorized`() {
+		val messageSendClient = FakeMessageSendClient(true)
+		val connector = connector(
+			messageSendClient = messageSendClient,
+			authSession = FakeMatrixAuthSession(MatrixAuthState.READY),
+		)
+		val imageBytes = byteArrayOf(1, 2, 3)
+
+		val sent = connector.sendImage("!a:example.org", imageBytes, "image.jpg", "image/jpeg")
+
+		assertTrue(sent)
+		assertEquals("!a:example.org", messageSendClient.lastRequestedRoomId)
+		assertEquals(imageBytes, messageSendClient.lastRequestedImageBytes)
+		assertEquals("image.jpg", messageSendClient.lastRequestedFileName)
+		assertEquals("image/jpeg", messageSendClient.lastRequestedMimeType)
+	}
+
+	@Test
+	fun `sendImage reports the send client's failure`() {
+		val connector = connector(
+			messageSendClient = FakeMessageSendClient(false),
+			authSession = FakeMatrixAuthSession(MatrixAuthState.READY),
+		)
+
+		assertFalse(connector.sendImage("!a:example.org", byteArrayOf(1), "image.jpg", "image/jpeg"))
+	}
+
+	@Test
+	fun `markThreadRead fails closed without invoking the send client when not authorized`() {
+		val messageSendClient = FakeMessageSendClient(true)
+		val connector = connector(
+			messageSendClient = messageSendClient,
+			authSession = FakeMatrixAuthSession(MatrixAuthState.HOMESERVER_ENTRY),
+		)
+
+		val marked = connector.markThreadRead("!a:example.org")
+
+		assertFalse(marked)
+		assertEquals(null, messageSendClient.lastMarkReadRoomId)
+	}
+
+	@Test
+	fun `markThreadRead delegates to the send client and returns its result when authorized`() {
+		val messageSendClient = FakeMessageSendClient(true)
+		val connector = connector(
+			messageSendClient = messageSendClient,
+			authSession = FakeMatrixAuthSession(MatrixAuthState.READY),
+		)
+
+		val marked = connector.markThreadRead("!a:example.org")
+
+		assertTrue(marked)
+		assertEquals("!a:example.org", messageSendClient.lastMarkReadRoomId)
+	}
+
+	@Test
+	fun `markThreadRead reports the send client's failure`() {
+		val connector = connector(
+			messageSendClient = FakeMessageSendClient(false),
+			authSession = FakeMatrixAuthSession(MatrixAuthState.READY),
+		)
+
+		assertFalse(connector.markThreadRead("!a:example.org"))
+	}
+
+	@Test
+	fun `markThreadRead respects authorization revocation`() {
+		val messageSendClient = FakeMessageSendClient(true)
+		val authSession = FakeMatrixAuthSession(MatrixAuthState.READY)
+		val connector = connector(
+			messageSendClient = messageSendClient,
+			authSession = authSession,
+		)
+
+		// Authorized call reaches the fake receipt client
+		val markedAuthorized = connector.markThreadRead("!a:example.org")
+		assertTrue(markedAuthorized)
+		assertEquals("!a:example.org", messageSendClient.lastMarkReadRoomId)
+
+		// Revoke authorization
+		authSession.state = MatrixAuthState.HOMESERVER_ENTRY
+
+		// Call through the same connector returns failure and makes no further client call
+		val markedRevoked = connector.markThreadRead("!b:example.org")
+		assertFalse(markedRevoked)
+		// Should still be the old one, verifying no further call
+		assertEquals("!a:example.org", messageSendClient.lastMarkReadRoomId)
+	}
 	private fun connector(
 		roomSnapshotClient: MatrixRoomSnapshotClient = FakeRoomSnapshotClient(emptyList()),
 		messageSnapshotClient: MatrixMessageSnapshotClient = FakeMessageSnapshotClient(emptyList()),
+		messageSendClient: MatrixMessageSendClient = FakeMessageSendClient(true),
 		authSession: MatrixAuthSession,
-	): MatrixRoomConnector =
-		MatrixRoomConnector(roomSnapshotClient, authSession, messageSnapshotClient)
+		clock: Clock = SettableClock(AtomicLong(0L)),
+		recentThreadsBudgetMs: Long = MatrixRoomConnector.DEFAULT_RECENT_THREADS_BUDGET_MS,
+	): MatrixRoomConnector = MatrixRoomConnector(
+		roomSnapshotClient,
+		authSession,
+		messageSnapshotClient,
+		messageSendClient,
+		clock,
+		recentThreadsBudgetMs,
+	)
 
 	private class FakeRoomSnapshotClient(private val snapshots: List<MatrixRoomSnapshot>) :
 		MatrixRoomSnapshotClient {
@@ -262,6 +451,115 @@ class MatrixRoomConnectorTest {
 			lastRequestedRoomId = roomId
 			lastRequestedLimit = limit
 			return snapshots
+		}
+	}
+
+	/**
+	 * Advances [clockMs] by [advanceOnRequestMs]'s value for a room on its [getRecentMessages]
+	 * call, simulating a slow or stalled per-room round trip without an actual wait.
+	 */
+	private class BudgetProbingMessageSnapshotClient(
+		private val clockMs: AtomicLong,
+		private val advanceOnRequestMs: Map<String, Long>,
+	) : MatrixMessageSnapshotClient {
+		val requestedRoomIds = mutableListOf<String>()
+
+		override fun getRecentMessages(roomId: String, limit: Int): List<MatrixMessageSnapshot>? {
+			requestedRoomIds.add(roomId)
+			clockMs.addAndGet(advanceOnRequestMs.getValue(roomId))
+			return listOf(
+				MatrixMessageSnapshot(
+					eventId = "\$event:$roomId",
+					senderId = "@alice:example.org",
+					bodyText = "reply from $roomId",
+					originServerTimestampSeconds = 1L,
+					isOutgoing = false,
+				),
+			)
+		}
+	}
+
+	@Test
+	fun `deleteMessage returns false when not authorized`() {
+		val authSession = FakeMatrixAuthSession(MatrixAuthState.CREDENTIAL_ENTRY)
+		val messageSendClient = FakeMessageSendClient(true)
+		val connector = connector(authSession = authSession, messageSendClient = messageSendClient)
+
+		val sent = connector.deleteMessage("!room:example.org", "\$event")
+
+		assertFalse(sent)
+		assertNull(messageSendClient.lastRequestedRoomId)
+		assertNull(messageSendClient.lastDeletedEventId)
+	}
+
+	@Test
+	fun `deleteMessage bridges roomId and eventId to SDK client when authorized`() {
+		val authSession = FakeMatrixAuthSession(MatrixAuthState.READY)
+		val messageSendClient = FakeMessageSendClient(true)
+		val connector = connector(authSession = authSession, messageSendClient = messageSendClient)
+
+		val sent = connector.deleteMessage("!room:example.org", "\$event")
+
+		assertTrue(sent)
+		assertEquals("!room:example.org", messageSendClient.lastRequestedRoomId)
+		assertEquals("\$event", messageSendClient.lastDeletedEventId)
+	}
+
+	@Test
+	fun `deleteMessage reports the send client's failure`() {
+		val connector = connector(
+			messageSendClient = FakeMessageSendClient(false),
+			authSession = FakeMatrixAuthSession(MatrixAuthState.READY),
+		)
+
+		assertFalse(connector.deleteMessage("!room:example.org", "\$event"))
+	}
+
+	private class FakeMessageSendClient(private val result: Boolean) : MatrixMessageSendClient {
+		var lastRequestedRoomId: String? = null
+			private set
+		var lastRequestedText: String? = null
+			private set
+		var lastRequestedImageBytes: ByteArray? = null
+			private set
+		var lastRequestedFileName: String? = null
+			private set
+		var lastRequestedMimeType: String? = null
+			private set
+		var lastMarkReadRoomId: String? = null
+			private set
+
+		var lastDeletedEventId: String? = null
+			private set
+
+		override fun sendTextMessage(roomId: String, text: String): Boolean {
+			lastRequestedRoomId = roomId
+			lastRequestedText = text
+			return result
+		}
+
+		override fun deleteMessage(roomId: String, eventId: String): Boolean {
+			lastRequestedRoomId = roomId
+			lastDeletedEventId = eventId
+			return result
+		}
+
+		override fun sendImageMessage(
+			roomId: String,
+			imageBytes: ByteArray,
+			fileName: String,
+			mimeType: String,
+		): Boolean {
+			lastRequestedRoomId = roomId
+			lastRequestedImageBytes = imageBytes
+			lastRequestedFileName = fileName
+			lastRequestedMimeType = mimeType
+			return result
+		}
+
+		override fun markRead(roomId: String): Boolean {
+			lastMarkReadRoomId = roomId
+			return result
 		}
 	}
 

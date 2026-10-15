@@ -15,13 +15,22 @@ class TelegramAuthSessionImpl(
 ) : TelegramAuthSession,
 	Service {
 
+	init {
+		if (tdlibLoginClient is ReflectiveTelegramTdlibLoginClient) {
+			tdlibLoginClient.accessGate = accessGate
+		}
+	}
+
 	@Volatile
 	private var currentState = TelegramAuthState.CLOSED
 
-	override fun getSnapshot(): Snapshot = accessGate.run(
-		Snapshot(TelegramAuthState.CLOSED, RecoverableErrorDetail.NONE),
-	) {
-		Snapshot(
+	override fun getSnapshot(): Snapshot {
+		if (accessGate.isStopped) {
+			return Snapshot(TelegramAuthState.CLOSED, RecoverableErrorDetail.NONE)
+		}
+		// UI construction and teardown must not wait for an in-flight TDLib action.
+		// These fields and the login client's snapshot fields are volatile reads.
+		return Snapshot(
 			currentState,
 			tdlibLoginClient.getRecoverableErrorDetail(),
 			tdlibLoginClient.getQrAuthorizationLink(),
@@ -47,6 +56,14 @@ class TelegramAuthSessionImpl(
 		updateState(tdlibLoginClient::awaitQrAuthorizationUpdate)
 
 	override fun close() = updateState(tdlibLoginClient::close)
+
+	override fun closeAndConfirm(): Boolean {
+		var confirmed = false
+		updateState {
+			tdlibLoginClient.closeForShutdown().also { confirmed = it == TelegramAuthState.CLOSED }
+		}
+		return confirmed
+	}
 
 	private fun updateState(call: () -> TelegramAuthState) {
 		accessGate.run(Unit) {
@@ -96,6 +113,8 @@ class ReflectiveTelegramTdlibLoginClient(
 	private val shutdownCloseTimeoutMs: Long = 60_000L,
 	private val qrAuthorizationTimeoutMs: Long = 300_000L,
 	private val qrAuthorizationPollMs: Long = 1_000L,
+	@Volatile
+	var accessGate: TelegramTdlibAccessGate = TelegramTdlibAccessGate(),
 ) : TelegramTdlibLoginClient {
 
 	private val log = Logger.getLogger(ReflectiveTelegramTdlibLoginClient::class.java.name)
@@ -128,7 +147,7 @@ class ReflectiveTelegramTdlibLoginClient(
 
 	override fun start(): TelegramAuthState {
 		closeTdlibClient()
-		if (!tdlibClientClassExists()) {
+		if (!tdlibClientClassExists() || accessGate.isStopped) {
 			return recoverableError(RecoverableErrorDetail.MISSING_TDLIB)
 		}
 		return mapAuthorizationStateClassName(awaitAuthorizationStateClassName(true))
@@ -137,6 +156,9 @@ class ReflectiveTelegramTdlibLoginClient(
 	override fun getRecoverableErrorDetail(): RecoverableErrorDetail = recoverableErrorDetail
 
 	override fun submitIdentifier(identifier: String): TelegramAuthState {
+		if (accessGate.isStopped) {
+			return recoverableError(RecoverableErrorDetail.NONE)
+		}
 		if (!hasText(identifier)) {
 			return recoverableError(RecoverableErrorDetail.NONE)
 		}
@@ -276,6 +298,7 @@ class ReflectiveTelegramTdlibLoginClient(
 	}
 
 	override fun awaitQrAuthorizationUpdate(): TelegramAuthState {
+		if (accessGate.isStopped) return recoverableErrorAfterClientFailure()
 		val observedState = lastAuthorizationStateClassName
 		if (observedState != QR_AUTHORIZATION_STATE) {
 			return mapAuthorizationStateClassName(observedState)
@@ -290,7 +313,7 @@ class ReflectiveTelegramTdlibLoginClient(
 			(remainingNanos / NANOS_PER_MS).coerceAtLeast(1L),
 		)
 		return try {
-			val state = prepareAuthorizationUpdate().await(waitMs)
+			val state = prepareAuthorizationUpdate().await(waitMs, accessGate)
 			if (state == null) {
 				if (System.nanoTime() >= qrAuthorizationDeadlineNanos) {
 					recoverableErrorAfterClientFailure()
@@ -314,6 +337,9 @@ class ReflectiveTelegramTdlibLoginClient(
 		createRequest: (String) -> Any,
 		invalidDetail: RecoverableErrorDetail,
 	): TelegramAuthState {
+		if (accessGate.isStopped) {
+			return recoverableError(RecoverableErrorDetail.NONE)
+		}
 		if (!hasText(credential) ||
 			tdlibClient == null ||
 			lastAuthorizationStateClassName != expectedAuthorizationState
@@ -354,6 +380,7 @@ class ReflectiveTelegramTdlibLoginClient(
 		}
 
 	private fun awaitAuthorizationStateClassName(createClient: Boolean): String {
+		if (accessGate.isStopped) return ""
 		val pendingAuthorizationUpdate = prepareAuthorizationUpdate()
 		return try {
 			if (createClient) tdlibClient = createTdlibClient()
@@ -381,7 +408,7 @@ class ReflectiveTelegramTdlibLoginClient(
 	private fun awaitPreparedAuthorizationStateClassName(
 		pendingAuthorizationUpdate: PendingAuthorizationUpdate,
 	): String {
-		if (tdlibClient == null) {
+		if (tdlibClient == null || accessGate.isStopped) {
 			closeTdlibClient()
 			return ""
 		}
@@ -394,7 +421,8 @@ class ReflectiveTelegramTdlibLoginClient(
 	private fun awaitAuthorizationUpdate(
 		pendingAuthorizationUpdate: PendingAuthorizationUpdate,
 		timeoutMs: Long = authorizationUpdateTimeoutMs,
-	): String = (pendingAuthorizationUpdate.await(timeoutMs) ?: "").also {
+		gate: TelegramTdlibAccessGate? = accessGate,
+	): String = (pendingAuthorizationUpdate.await(timeoutMs, gate) ?: "").also {
 		lastAuthorizationStateClassName = it
 	}
 
@@ -446,10 +474,12 @@ class ReflectiveTelegramTdlibLoginClient(
 
 	@Throws(ReflectiveOperationException::class, InterruptedException::class)
 	private fun sendForResult(request: Any): CommandResult {
+		if (accessGate.isStopped) return CommandResult.TIMEOUT
 		val result = sendReflectiveTdlibRequest(
 			tdlibClient!!,
 			request,
 			authorizationUpdateTimeoutMs,
+			accessGate,
 		)
 		if (!result.completed) {
 			closeTdlibClient()
@@ -538,24 +568,29 @@ class ReflectiveTelegramTdlibLoginClient(
 		var confirmed = false
 		try {
 			closeReflectiveTdlibClient(client)
-			do {
-				val timeoutMs = if (waitUntilConfirmed) {
+			if (waitUntilConfirmed) {
+				do {
 					val remainingNanos = shutdownDeadlineNanos - System.nanoTime()
 					if (remainingNanos <= 0L) break
-					minOf(
+					val timeoutMs = minOf(
 						maxOf(1L, authorizationUpdateTimeoutMs),
 						(remainingNanos + NANOS_PER_MS - 1L) / NANOS_PER_MS,
 					)
-				} else {
-					authorizationUpdateTimeoutMs
-				}
+					confirmed = try {
+						awaitAuthorizationUpdate(closeUpdate, timeoutMs, gate = null).isNotEmpty()
+					} catch (_: InterruptedException) {
+						interrupted = true
+						break
+					}
+				} while (!confirmed)
+			} else {
 				confirmed = try {
-					awaitAuthorizationUpdate(closeUpdate, timeoutMs).isNotEmpty()
+					awaitAuthorizationClose(closeUpdate) != null
 				} catch (_: InterruptedException) {
 					interrupted = true
 					false
 				}
-			} while (waitUntilConfirmed && !confirmed)
+			}
 		} catch (_: ReflectiveOperationException) {
 		} catch (_: LinkageError) {
 		} finally {
@@ -563,12 +598,25 @@ class ReflectiveTelegramTdlibLoginClient(
 			if (pendingAuthorizationUpdate === closeUpdate) {
 				pendingAuthorizationUpdate = null
 			}
+			if (!confirmed && accessGate.isStopped) {
+				accessGate.reportUnconfirmedCancelledClose()
+			}
 		}
 		if (waitUntilConfirmed && !confirmed) {
 			log.warning("Telegram TDLib close was not confirmed before shutdown timeout")
 		}
 		return confirmed
 	}
+
+	@Throws(InterruptedException::class)
+	private fun awaitAuthorizationClose(closeUpdate: PendingAuthorizationUpdate): String? =
+		awaitAuthorizationClose(
+			closeUpdate = closeUpdate,
+			accessGate = accessGate,
+			timeoutMs = authorizationUpdateTimeoutMs,
+		)?.also {
+			lastAuthorizationStateClassName = it
+		}
 
 	private fun completePendingAuthorizationUpdate(className: String) {
 		pendingAuthorizationUpdate?.let {

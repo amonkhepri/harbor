@@ -385,5 +385,12 @@ class TelegramLoginPlaceholderFragmentTest {
 			currentAuthState = TelegramAuthState.CLOSED
 			currentRecoverableErrorDetail = RecoverableErrorDetail.NONE
 		}
+
+		override fun closeAndConfirm(): Boolean {
+			closeCalls++
+			currentAuthState = TelegramAuthState.CLOSED
+			currentRecoverableErrorDetail = RecoverableErrorDetail.NONE
+			return true
+		}
 	}
 }

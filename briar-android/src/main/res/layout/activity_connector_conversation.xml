@@ -1,7 +1,104 @@
 <?xml version="1.0" encoding="utf-8"?>
-<org.briarproject.briar.android.view.BriarRecyclerView xmlns:android="http://schemas.android.com/apk/res/android"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
 	xmlns:app="http://schemas.android.com/apk/res-auto"
-	android:id="@+id/connectorConversationList"
 	android:layout_width="match_parent"
 	android:layout_height="match_parent"
-	app:scrollToEnd="false" />
+	android:orientation="vertical">
+
+	<LinearLayout
+		android:id="@+id/connectorConversationFindBar"
+		android:layout_width="match_parent"
+		android:layout_height="wrap_content"
+		android:background="@color/card_background"
+		android:gravity="center_vertical"
+		android:orientation="horizontal"
+		android:padding="8dp"
+		android:visibility="gone">
+
+		<EditText
+			android:id="@+id/connectorConversationFindQuery"
+			android:layout_width="0dp"
+			android:layout_height="wrap_content"
+			android:layout_weight="1"
+			android:hint="@string/connector_conversation_find_hint"
+			android:inputType="text"
+			android:maxLines="1" />
+		<TextView
+			android:id="@+id/connectorConversationFindCount"
+			android:layout_width="wrap_content"
+			android:layout_height="wrap_content"
+			android:layout_marginStart="8dp"
+			android:gravity="center" />
+		<ImageButton
+			android:id="@+id/connectorConversationFindPrevious"
+			android:layout_width="40dp"
+			android:layout_height="40dp"
+			android:background="?attr/selectableItemBackgroundBorderless"
+			android:contentDescription="@string/connector_conversation_find_previous"
+			android:src="@drawable/chevron_up_white"
+			android:tint="?attr/colorControlNormal" />
+		<ImageButton
+			android:id="@+id/connectorConversationFindNext"
+			android:layout_width="40dp"
+			android:layout_height="40dp"
+			android:background="?attr/selectableItemBackgroundBorderless"
+			android:contentDescription="@string/connector_conversation_find_next"
+			android:src="@drawable/chevron_down_white"
+			android:tint="?attr/colorControlNormal" />
+
+	</LinearLayout>
+
+	<org.briarproject.briar.android.view.BriarRecyclerView
+		android:id="@+id/connectorConversationList"
+		android:layout_width="match_parent"
+		android:layout_height="0dp"
+		android:layout_weight="1"
+		app:scrollToEnd="false" />
+
+	<LinearLayout
+		android:id="@+id/connectorConversationComposeBar"
+		android:layout_width="match_parent"
+		android:layout_height="wrap_content"
+		android:background="@color/card_background"
+		android:orientation="horizontal"
+		android:padding="8dp"
+		android:visibility="gone">
+
+		<ImageButton
+			android:id="@+id/connectorConversationAttachButton"
+			android:layout_width="48dp"
+			android:layout_height="48dp"
+			android:layout_gravity="bottom"
+			android:background="?attr/selectableItemBackgroundBorderless"
+			android:contentDescription="@string/connector_conversation_attach_image"
+			android:src="@drawable/ic_image"
+			android:visibility="gone" />
+
+		<ImageButton
+			android:id="@+id/connectorConversationFileButton"
+			android:layout_width="48dp"
+			android:layout_height="48dp"
+			android:layout_gravity="bottom"
+			android:background="?attr/selectableItemBackgroundBorderless"
+			android:contentDescription="@string/connector_conversation_attach_file"
+			android:src="@drawable/ic_file"
+			android:visibility="gone" />
+
+		<EditText
+			android:id="@+id/connectorConversationComposeText"
+			android:layout_width="0dp"
+			android:layout_height="wrap_content"
+			android:layout_weight="1"
+			android:inputType="textCapSentences|textMultiLine"
+			android:maxLines="4" />
+
+		<Button
+			android:id="@+id/connectorConversationSendButton"
+			android:layout_width="wrap_content"
+			android:layout_height="wrap_content"
+			android:layout_gravity="bottom"
+			android:text="@string/connector_conversation_send" />
+
+	</LinearLayout>
+
+</LinearLayout>

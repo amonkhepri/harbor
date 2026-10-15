@@ -1,11 +1,11 @@
-package org.briarproject.briar.android.telegram
+package org.briarproject.briar.android.connector
 
 import android.os.Parcel
 import android.os.Parcelable
 import org.junit.Assert.assertSame
 import org.junit.Test
 
-class TelegramConversationActivityLayoutStateTest {
+class ConnectorConversationActivityLayoutStateTest {
 
 	private class FakeParcelable : Parcelable {
 		override fun describeContents(): Int = 0

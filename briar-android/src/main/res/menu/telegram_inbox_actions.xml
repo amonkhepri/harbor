@@ -4,8 +4,8 @@
 	xmlns:tools="http://schemas.android.com/tools">
 
 	<item
-		android:id="@+id/action_refresh_telegram_threads"
-		android:title="@string/telegram_inbox_refresh"
+		android:id="@+id/action_refresh_connector_threads"
+		android:title="@string/connector_inbox_refresh"
 		android:visible="false"
 		app:showAsAction="never"
 		tools:visible="true" />

@@ -12,6 +12,7 @@ import org.briarproject.briar.api.telegram.TelegramConnector
 import java.io.File
 import java.util.LinkedHashSet
 import java.util.concurrent.atomic.AtomicReference
+import java.util.logging.Logger
 
 class ReflectiveTelegramTdlibMessageClient(
 	private val tdlibDirectory: File = File("harbor-telegram"),
@@ -23,6 +24,7 @@ class ReflectiveTelegramTdlibMessageClient(
 	private val accessGate: TelegramTdlibAccessGate = TelegramTdlibAccessGate(),
 ) : TelegramConnector {
 
+	private val log = Logger.getLogger(ReflectiveTelegramTdlibMessageClient::class.java.name)
 	private val tdlibReadLock = Any()
 
 	override val source: ConnectorSource = ConnectorSources.TELEGRAM
@@ -36,9 +38,15 @@ class ReflectiveTelegramTdlibMessageClient(
 		if (safeLimit == 0) return emptyList()
 		return accessGate.run(emptyList()) {
 			withReadyClient(emptyList()) { client ->
-				loadRecentChatIds(client, safeLimit).take(safeLimit).mapNotNull { chatId ->
-					sendAndAwait(client, createGetChatRequest(chatId))?.let { mapChat(it) }
+				val chatIds = loadRecentChatIds(client, safeLimit)
+				if (accessGate.isStopped) return@withReadyClient emptyList()
+				val threads = mutableListOf<ConnectorThread>()
+				for (chatId in chatIds.take(safeLimit)) {
+					if (accessGate.isStopped) return@withReadyClient emptyList()
+					val chat = sendAndAwait(client, createGetChatRequest(chatId))?.let { mapChat(it) }
+					if (chat != null) threads += chat
 				}
+				threads
 			}
 		}
 	}
@@ -54,6 +62,7 @@ class ReflectiveTelegramTdlibMessageClient(
 				var fromMessageId = 0L
 				var requestCount = 0
 				while (messages.size < safeLimit && requestCount < MAX_TDLIB_HISTORY_REQUESTS) {
+					if (accessGate.isStopped) return@withReadyClient if (messages.isEmpty()) LoadFailed else Success(messages)
 					val historyPage = sendAndAwait(
 						client,
 						createGetChatHistoryRequest(chatId, fromMessageId, safeLimit),
@@ -88,7 +97,9 @@ class ReflectiveTelegramTdlibMessageClient(
 		var chatIds = LongArray(0)
 		var requestCount = 0
 		while (chatIds.size < safeLimit && requestCount < MAX_TDLIB_CHAT_LOAD_REQUESTS) {
+			if (accessGate.isStopped) break
 			val loadResult = sendAndAwait(client, createLoadChatsRequest(safeLimit))
+			if (accessGate.isStopped) break
 			val loadedChatIds = sendAndAwait(client, createGetChatsRequest(safeLimit))
 				?.let { getLongArrayField(it, "chatIds") }
 				?: break
@@ -101,13 +112,14 @@ class ReflectiveTelegramTdlibMessageClient(
 	}
 
 	private fun <T> withReadyClient(fallback: T, read: (Any) -> T): T = synchronized(tdlibReadLock) {
-		if (!tdlibClientClassExists()) return fallback
+		if (!tdlibClientClassExists() || accessGate.isStopped) return fallback
 		var client: Any? = null
 		val pendingAuthorizationUpdate = AtomicReference<PendingAuthorizationUpdate?>()
 		return try {
 			val firstUpdate = prepareAuthorizationUpdate(pendingAuthorizationUpdate)
 			client = createTdlibClient(pendingAuthorizationUpdate)
 			var authorizationState = awaitPreparedAuthorizationStateClassName(firstUpdate)
+			if (accessGate.isStopped) return fallback
 			if (authorizationState == "AuthorizationStateWaitTdlibParameters") {
 				if (apiId <= 0 || !hasText(apiHash)) return fallback
 				val parametersRequest = createTelegramTdlibParametersRequest(
@@ -118,10 +130,12 @@ class ReflectiveTelegramTdlibMessageClient(
 				) ?: return fallback
 				val readyUpdate = prepareAuthorizationUpdate(pendingAuthorizationUpdate)
 				if (sendAndAwait(client, parametersRequest) == null) return fallback
+				if (accessGate.isStopped) return fallback
 				authorizationState = awaitPreparedAuthorizationStateClassName(readyUpdate)
 			}
-			if (authorizationState != "AuthorizationStateReady") return fallback
-			Thread.sleep(3_000L)
+			if (authorizationState != "AuthorizationStateReady" || accessGate.isStopped) return fallback
+			accessGate.sleepUnlessStopped(3_000L)
+			if (accessGate.isStopped) return fallback
 			read(client)
 		} catch (e: ReflectiveOperationException) {
 			fallback
@@ -145,7 +159,7 @@ class ReflectiveTelegramTdlibMessageClient(
 	@Throws(InterruptedException::class)
 	private fun awaitPreparedAuthorizationStateClassName(
 		pendingAuthorizationUpdate: PendingAuthorizationUpdate,
-	): String = pendingAuthorizationUpdate.await(requestTimeoutMs) ?: ""
+	): String = pendingAuthorizationUpdate.await(requestTimeoutMs, accessGate) ?: ""
 
 	@Throws(ReflectiveOperationException::class)
 	private fun createTdlibClient(
@@ -185,7 +199,8 @@ class ReflectiveTelegramTdlibMessageClient(
 
 	@Throws(ReflectiveOperationException::class, InterruptedException::class)
 	private fun sendAndAwait(client: Any, request: Any): Any? {
-		val result = sendReflectiveTdlibRequest(client, request, requestTimeoutMs)
+		if (accessGate.isStopped) return null
+		val result = sendReflectiveTdlibRequest(client, request, requestTimeoutMs, accessGate)
 		return result.value.takeIf { result.completed && it?.javaClass?.simpleName != "Error" }
 	}
 
@@ -270,18 +285,34 @@ class ReflectiveTelegramTdlibMessageClient(
 		client: Any,
 		pendingAuthorizationUpdate: AtomicReference<PendingAuthorizationUpdate?>,
 	) {
+		var confirmedClosed = false
 		try {
 			val closeUpdate = prepareAuthorizationUpdate(
 				pendingAuthorizationUpdate,
 				"AuthorizationStateClosed",
 			)
 			closeReflectiveTdlibClient(client)
-			awaitPreparedAuthorizationStateClassName(closeUpdate)
+			confirmedClosed = awaitAuthorizationClose(
+				closeUpdate = closeUpdate,
+				accessGate = accessGate,
+				timeoutMs = requestTimeoutMs,
+			) != null
 		} catch (_: ReflectiveOperationException) {
 		} catch (_: LinkageError) {
 		} catch (e: InterruptedException) {
 			Thread.currentThread().interrupt()
 		} finally {
+			if (!confirmedClosed) {
+				if (accessGate.isStopped) {
+					log.warning("Telegram TDLib message client close was not confirmed before timeout")
+					accessGate.reportUnconfirmedClose()
+				} else {
+					log.warning(
+						"Telegram TDLib message client close was not confirmed before timeout" +
+							" (service not stopping, ignoring)",
+					)
+				}
+			}
 			pendingAuthorizationUpdate.set(null)
 		}
 	}

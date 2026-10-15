@@ -7,6 +7,8 @@ import org.briarproject.briar.api.matrix.MatrixAuthSession.RecoverableErrorDetai
 import org.briarproject.briar.api.matrix.MatrixAuthSession.RecoverableErrorDetail.NONE
 import org.briarproject.briar.api.matrix.MatrixHomeserverDiscoveryClient
 import org.briarproject.briar.api.matrix.MatrixHomeserverDiscoveryClient.DiscoveryResult
+import org.briarproject.briar.api.connector.ConnectorFileSender
+import org.briarproject.briar.api.connector.ConnectorImageSender
 import org.briarproject.briar.api.connector.ConnectorMessageType
 import org.briarproject.briar.api.connector.ConnectorReactionSummary
 import java.io.ByteArrayInputStream
@@ -33,7 +35,8 @@ import kotlin.coroutines.intrinsics.COROUTINE_SUSPENDED
 
 /**
  * Production [MatrixHomeserverDiscoveryClient], [MatrixLoginClient], [MatrixRoomSnapshotClient],
- * and [MatrixMessageSnapshotClient] that invoke the pinned
+ * [MatrixMessageSnapshotClient], and [MatrixMessageSendClient] (text send MX-013, image send
+ * MX-014, read marker MX-019) that invoke the pinned
  * `org.matrix.rustcomponents:sdk-android` `ClientBuilder.serverName(...).build()`
  * discovery path entirely over reflection, so `:briar-matrix` keeps zero
  * compile-time dependency on the SDK (see this module's `build.gradle` and
@@ -67,9 +70,13 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 ) : MatrixHomeserverDiscoveryClient,
 	MatrixLoginClient,
 	MatrixRoomSnapshotClient,
-	MatrixMessageSnapshotClient {
+	MatrixMessageSnapshotClient,
+	MatrixMessageSendClient {
 
 	private var loginClient: Any? = null
+	private val lifecycleLock = Any()
+	private var activeGeneration: Any? = null
+	private var activeStore: MatrixStoreConfiguration? = null
 
 	override fun discover(serverName: String): DiscoveryResult {
 		// `serverName(...)` and `inMemoryStore()` each return their own
@@ -116,9 +123,18 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		password: String,
 		storeConfiguration: MatrixStoreConfiguration?,
 	): RecoverableErrorDetail {
+		val sessionGeneration = Any()
+		beginGeneration(sessionGeneration)
 		val builders = ArrayList<Any>(4)
 		var client: Any? = null
+		var success = false
+		var claimedStore = false
+		var failureDetail: RecoverableErrorDetail? = null
 		return try {
+			if (storeConfiguration != null) {
+				claimStore(storeConfiguration)
+				claimedStore = true
+			}
 			val builderClass = Class.forName(CLIENT_BUILDER_CLASS_NAME)
 			var builder = track(builders, builderClass.getConstructor().newInstance())
 			builder = track(
@@ -127,7 +143,11 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			)
 			builder = track(builders, applyStore(builders, builder, builderClass, storeConfiguration))
 			if (storeConfiguration != null) {
-				builder = track(builders, installSessionDelegate(builder, builderClass, storeConfiguration))
+				builder =
+					track(
+						builders,
+						installSessionDelegate(builder, builderClass, storeConfiguration, sessionGeneration),
+					)
 			}
 			client = buildClient(builder, builderClass)
 			invokeUnit(
@@ -136,13 +156,16 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 				arrayOf(String::class.java, String::class.java, String::class.java, String::class.java),
 				arrayOf(username, password, DEVICE_NAME, null),
 			)
-			if (storeConfiguration != null) persistSession(client, storeConfiguration)
-			close()
+			if (storeConfiguration != null) persistSession(client, storeConfiguration, sessionGeneration)
+			activeStore = storeConfiguration
 			loginClient = client
 			client = null
+			success = true
 			NONE
 		} catch (e: InvocationTargetException) {
-			mapLoginFailure(e.targetException ?: e)
+			val mapped = mapLoginFailure(e.targetException ?: e)
+			failureDetail = mapped
+			mapped
 		} catch (e: InterruptedException) {
 			Thread.currentThread().interrupt()
 			LOGIN_FAILED
@@ -151,8 +174,21 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		} catch (e: LinkageError) {
 			LOGIN_FAILED
 		} catch (e: Exception) {
-			mapLoginFailure(e)
+			val mapped = mapLoginFailure(e)
+			failureDetail = mapped
+			mapped
 		} finally {
+			if (!success) {
+				synchronized(lifecycleLock) {
+					if (activeGeneration === sessionGeneration) activeGeneration = null
+					// Per Class D scope decision (MX-011): only a proven invalid/revoked
+					// credential result deletes the sidecar. A transient/generic failure
+					// (network, server error) must retain it rather than sign the user out.
+					if (claimedStore && storeConfiguration != null && failureDetail == INVALID_CREDENTIALS) {
+						sessionFile(storeConfiguration).delete()
+					}
+				}
+			}
 			closeQuietly(client)
 			for (i in builders.indices.reversed()) closeQuietly(builders[i])
 		}
@@ -163,19 +199,34 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 	 * sidecar file and feeds it back through `Client.restoreSession(Session,
 	 * Continuation)` on a client freshly built against the same store. A missing
 	 * sidecar file yields [MatrixLoginClient.RestoreResult.NotFound], not a
-	 * failure; the store itself is not opened in that case.
+	 * failure; the store itself is not opened in that case. A store already opened in
+	 * this process is quarantined until process exit, since close cannot prove quiescence;
+	 * that surfaces as [MatrixLoginClient.RestoreResult.Failed] with `LOGIN_FAILED` (the
+	 * same detail [login] reports for the identical collision), never [NotFound], so an
+	 * intact on-disk session already claimed by this process is never mistaken for one
+	 * that never existed.
 	 */
 	@Synchronized
 	override fun restore(
 		storeConfiguration: MatrixStoreConfiguration,
 	): MatrixLoginClient.RestoreResult {
+		val sessionGeneration = Any()
+		beginGeneration(sessionGeneration)
 		val file = sessionFile(storeConfiguration)
-		if (!file.isFile) return MatrixLoginClient.RestoreResult.NotFound
+		if (!file.isFile) {
+			synchronized(lifecycleLock) { activeGeneration = null }
+			return MatrixLoginClient.RestoreResult.NotFound
+		}
 		val builders = ArrayList<Any>(4)
 		var client: Any? = null
+		var success = false
+		var claimedStore = false
+		var failureDetail: RecoverableErrorDetail? = null
 		return try {
 			val sessionClass = Class.forName(SESSION_CLASS_NAME)
 			val session = readSessionFile(file, sessionClass, storeConfiguration)
+			claimStore(storeConfiguration)
+			claimedStore = true
 			val builderClass = Class.forName(CLIENT_BUILDER_CLASS_NAME)
 			var builder = track(builders, builderClass.getConstructor().newInstance())
 			builder = track(
@@ -184,17 +235,28 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 					.invoke(builder, sessionClass.getMethod("getHomeserverUrl").invoke(session)),
 			)
 			builder = track(builders, applyStore(builders, builder, builderClass, storeConfiguration))
-			builder = track(builders, installSessionDelegate(builder, builderClass, storeConfiguration))
+			builder =
+				track(
+					builders,
+					installSessionDelegate(builder, builderClass, storeConfiguration, sessionGeneration),
+				)
 			client = buildClient(builder, builderClass)
 			invokeUnit(client, "restoreSession", arrayOf(sessionClass), arrayOf(session))
 			val homeserverUrl = readHomeserverUrl(client)
+			activeStore = storeConfiguration
 			loginClient = client
 			client = null
+			success = true
 			MatrixLoginClient.RestoreResult.Restored(homeserverUrl)
+		} catch (e: StoreAlreadyClaimedException) {
+			failureDetail = LOGIN_FAILED
+			MatrixLoginClient.RestoreResult.Failed(LOGIN_FAILED)
 		} catch (e: DiscoveryAdapterFailure) {
 			MatrixLoginClient.RestoreResult.NotFound
 		} catch (e: InvocationTargetException) {
-			MatrixLoginClient.RestoreResult.Failed(mapThrowable(e.targetException ?: e))
+			val mapped = mapThrowable(e.targetException ?: e)
+			failureDetail = mapped
+			MatrixLoginClient.RestoreResult.Failed(mapped)
 		} catch (e: ReflectiveOperationException) {
 			MatrixLoginClient.RestoreResult.NotFound
 		} catch (e: LinkageError) {
@@ -205,6 +267,15 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		} catch (e: IOException) {
 			MatrixLoginClient.RestoreResult.NotFound
 		} finally {
+			if (!success) {
+				synchronized(lifecycleLock) {
+					if (activeGeneration === sessionGeneration) activeGeneration = null
+					// Per Class D scope decision (MX-011): only a proven invalid/revoked
+					// credential result deletes the sidecar. A transient/generic failure
+					// (network, server error) must retain it rather than sign the user out.
+					if (claimedStore && failureDetail == INVALID_CREDENTIALS) file.delete()
+				}
+			}
 			closeQuietly(client)
 			for (i in builders.indices.reversed()) closeQuietly(builders[i])
 		}
@@ -246,10 +317,45 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 
 	private fun encodeHex(bytes: ByteArray): String = bytes.joinToString("") { "%02x".format(it) }
 
-	/** Reads [client]'s post-login `Session` and persists it to [storeConfiguration]'s sidecar file. */
-	private fun persistSession(client: Any, storeConfiguration: MatrixStoreConfiguration) {
+	/** Reads [client]'s post-login `Session` and persists it to [store]'s sidecar file. */
+	private fun persistSession(client: Any, store: MatrixStoreConfiguration, generation: Any) {
 		val session = client.javaClass.getMethod("session").invoke(client)
-		writeSessionFile(sessionFile(storeConfiguration), session, storeConfiguration)
+		saveSession(session, store, generation)
+	}
+
+	// SDK getters may block or re-enter lifecycle methods. Only local I/O and generation
+	// validation run under this lock; never call native code while holding it.
+	private fun saveSession(session: Any, store: MatrixStoreConfiguration, generation: Any) {
+		synchronized(lifecycleLock) { requireGeneration(generation) }
+		val bytes = serializeSession(session)
+		try {
+			synchronized(lifecycleLock) {
+				requireGeneration(generation)
+				writeEncryptedAtomic(sessionFile(store), bytes, store)
+			}
+		} finally {
+			bytes.fill(0)
+		}
+	}
+
+	private fun requireGeneration(generation: Any) {
+		if (activeGeneration !== generation) throw IOException("Stale delegate callback")
+	}
+
+	private fun beginGeneration(generation: Any) {
+		synchronized(lifecycleLock) { activeGeneration = generation }
+		val previous = loginClient
+		loginClient = null
+		activeStore = null
+		closeQuietly(previous)
+	}
+
+	private fun claimStore(store: MatrixStoreConfiguration) = synchronized(openedStores) {
+		// A wrapper's close does not establish native quiescence. Keep the directory
+		// quarantined until process exit, including failed builds and failed restores.
+		if (!openedStores.add(store.directory.canonicalPath)) {
+			throw StoreAlreadyClaimedException()
+		}
 	}
 
 	/**
@@ -262,44 +368,35 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		builder: Any,
 		builderClass: Class<*>,
 		storeConfiguration: MatrixStoreConfiguration,
+		generation: Any,
 	): Any {
 		val delegateClass = Class.forName(SESSION_DELEGATE_CLASS_NAME)
 		val factory = sessionDelegateFactory ?: Class.forName(SESSION_DELEGATE_FACTORY_CLASS_NAME)
 			.getConstructor()
 			.newInstance() as MatrixClientSessionDelegateFactory
 		val delegate = factory.create(
-			saveSession = { session ->
-				writeSessionFile(sessionFile(storeConfiguration), session, storeConfiguration)
+			saveSession = { session -> saveSession(session, storeConfiguration, generation) },
+			retrieveSession = {
+				val bytes = synchronized(lifecycleLock) {
+					requireGeneration(generation)
+					readDecrypted(sessionFile(storeConfiguration), storeConfiguration)
+				}
+				try {
+					val session = deserializeSession(bytes, Class.forName(SESSION_CLASS_NAME))
+					synchronized(lifecycleLock) {
+						requireGeneration(generation)
+						session
+					}
+				} finally {
+					bytes.fill(0)
+				}
 			},
-			retrieveSession = { readSessionFileOrThrow(storeConfiguration) },
 		)
 		return builderClass.getMethod("setSessionDelegate", delegateClass).invoke(builder, delegate)
 	}
 
-	private fun readSessionFileOrThrow(storeConfiguration: MatrixStoreConfiguration): Any {
-		val file = sessionFile(storeConfiguration)
-		if (!file.isFile) throw IOException("no persisted Matrix session")
-		return try {
-			readSessionFile(file, Class.forName(SESSION_CLASS_NAME), storeConfiguration)
-		} catch (e: IOException) {
-			throw IOException("persisted Matrix session sidecar could not be read", e)
-		} catch (e: ReflectiveOperationException) {
-			throw IOException("persisted Matrix session sidecar could not be reconstructed", e)
-		}
-	}
-
-	/**
-	 * Serializes an SDK `Session`'s fields via its public getters, AES-256-GCM-encrypts them
-	 * under [storeConfiguration]'s own encryption key, and writes the result atomically (temp
-	 * file in the same directory + [File.renameTo]) so a crash or concurrent
-	 * `saveSessionInKeychain` callback can never observe a partially written or plaintext file.
-	 * Never logs field values.
-	 */
-	private fun writeSessionFile(
-		file: File,
-		session: Any,
-		storeConfiguration: MatrixStoreConfiguration,
-	) {
+	/** Copies SDK fields outside the lifecycle lock; [saveSession] fences the encrypted commit. */
+	private fun serializeSession(session: Any): ByteArray {
 		val sessionClass = session.javaClass
 		val accessToken = sessionClass.getMethod("getAccessToken").invoke(session) as String
 		val refreshToken = sessionClass.getMethod("getRefreshToken").invoke(session) as String?
@@ -321,7 +418,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 				out.writeUTF(slidingSyncVersionName)
 			}
 		}.toByteArray()
-		writeEncryptedAtomic(file, plaintext, storeConfiguration)
+		return plaintext
 	}
 
 	private fun writeNullableUtf(out: DataOutputStream, value: String?) {
@@ -370,14 +467,22 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		}
 	}
 
-	/** Reconstructs an SDK `Session` reflectively from [file], matching [writeSessionFile]'s layout. */
+	/** Reconstructs an SDK `Session` reflectively from [file], matching [serializeSession]'s layout. */
 	private fun readSessionFile(
 		file: File,
 		sessionClass: Class<*>,
 		storeConfiguration: MatrixStoreConfiguration,
 	): Any {
 		val plaintext = readDecrypted(file, storeConfiguration)
-		return DataInputStream(ByteArrayInputStream(plaintext)).use { input ->
+		return try {
+			deserializeSession(plaintext, sessionClass)
+		} finally {
+			plaintext.fill(0)
+		}
+	}
+
+	private fun deserializeSession(plaintext: ByteArray, sessionClass: Class<*>): Any =
+		DataInputStream(ByteArrayInputStream(plaintext)).use { input ->
 			val accessToken = input.readUTF()
 			val refreshToken = readNullableUtf(input)
 			val userId = input.readUTF()
@@ -406,7 +511,6 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 				slidingSyncVersion,
 			)
 		}
-	}
 
 	private fun readDecrypted(file: File, storeConfiguration: MatrixStoreConfiguration): ByteArray {
 		val bytes = file.readBytes()
@@ -528,6 +632,267 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		} catch (e: LinkageError) {
 			initialSnapshot
 		} finally {
+			closeQuietly(timeline)
+			closeQuietly(room)
+		}
+	}
+
+	/**
+	 * Sends [text] as a plain-text message into [roomId] (MX-013). `Timeline
+	 * .createMessageContent` is a synchronous call that builds a
+	 * `RoomMessageEventContentWithoutRelation` from `MessageType.Text(TextMessageContent(body,
+	 * formatted))`; the suspend `Timeline.send(content)` then fires it, returning an owned
+	 * `SendHandle` bridged the same way [getRecentMessages] bridges `Room.timeline()`. Returns
+	 * false, never throwing, when no session is retained, [roomId] cannot be found, or any step
+	 * fails.
+	 */
+	@Synchronized
+	override fun sendTextMessage(roomId: String, text: String): Boolean {
+		val client = loginClient ?: return false
+		var room: Any? = null
+		var timeline: Any? = null
+		var content: Any? = null
+		var sendHandle: Any? = null
+		return try {
+			room = client.javaClass.getMethod("getRoom", String::class.java).invoke(client, roomId)
+				?: throw SnapshotAdapterFailure()
+			val loadedTimeline =
+				invokeCloseableValue(room, "timeline", emptyArray(), emptyArray(), ::closeQuietly)
+			timeline = loadedTimeline
+			val formattedBodyClass = Class.forName(FORMATTED_BODY_CLASS_NAME)
+			val textContent = Class.forName(TEXT_MESSAGE_CONTENT_CLASS_NAME)
+				.getConstructor(String::class.java, formattedBodyClass)
+				.newInstance(text, null)
+			val messageType = Class.forName(MESSAGE_TYPE_TEXT_CLASS_NAME)
+				.getConstructor(textContent.javaClass)
+				.newInstance(textContent)
+			val createdContent = loadedTimeline.javaClass
+				.getMethod("createMessageContent", Class.forName(MESSAGE_TYPE_CLASS_NAME))
+				.invoke(loadedTimeline, messageType)
+				?: throw SnapshotAdapterFailure()
+			content = createdContent
+			sendHandle = invokeCloseableValue(
+				loadedTimeline,
+				"send",
+				arrayOf(Class.forName(ROOM_MESSAGE_EVENT_CONTENT_CLASS_NAME)),
+				arrayOf(createdContent),
+				::closeQuietly,
+			)
+			true
+		} catch (e: InterruptedException) {
+			Thread.currentThread().interrupt()
+			false
+		} catch (e: Exception) {
+			false
+		} catch (e: LinkageError) {
+			false
+		} finally {
+			closeQuietly(sendHandle)
+			closeQuietly(content)
+			closeQuietly(timeline)
+			closeQuietly(room)
+		}
+	}
+
+	@Synchronized
+	override fun prepareFileMessage(roomId: String): ConnectorFileSender.PreparedFileSend? {
+		val capturedClient = loginClient ?: return null
+		return ConnectorFileSender.PreparedFileSend { bytes, name, mime ->
+			synchronized(this) {
+				loginClient === capturedClient &&
+					sendAttachment(roomId, bytes, name, mime, false)
+			}
+		}
+	}
+
+	/**
+	 * Marks [roomId] read via the pinned AAR's suspend `Room.markAsRead(ReceiptType)` (MX-019),
+	 * bridged the same way [invokeUnit] bridges `login`/`logout`. Sends `ReceiptType.READ_PRIVATE`
+	 * (a private read receipt) to prevent metadata leak. Returns false, never throwing, when
+	 * no session is retained, [roomId] cannot be found, or the SDK call fails.
+	 */
+	@Synchronized
+	override fun markRead(roomId: String): Boolean {
+		val client = loginClient ?: return false
+		var room: Any? = null
+		return try {
+			room = client.javaClass.getMethod("getRoom", String::class.java).invoke(client, roomId)
+				?: throw SnapshotAdapterFailure()
+			val receiptTypeClass = Class.forName(RECEIPT_TYPE_CLASS_NAME)
+			val readReceiptType = receiptTypeClass.getField("READ_PRIVATE").get(null)
+			invokeUnit(room, "markAsRead", arrayOf(receiptTypeClass), arrayOf(readReceiptType))
+			true
+		} catch (e: InterruptedException) {
+			Thread.currentThread().interrupt()
+			false
+		} catch (e: Exception) {
+			false
+		} catch (e: LinkageError) {
+			false
+		} finally {
+			closeQuietly(room)
+		}
+	}
+
+	@Synchronized
+	override fun deleteMessage(roomId: String, eventId: String): Boolean {
+		val client = loginClient ?: return false
+		var room: Any? = null
+		var timeline: Any? = null
+		return try {
+			room = client.javaClass.getMethod("getRoom", String::class.java).invoke(client, roomId)
+				?: throw SnapshotAdapterFailure()
+			val loadedTimeline =
+				invokeCloseableValue(room, "timeline", emptyArray(), emptyArray(), ::closeQuietly)
+			timeline = loadedTimeline
+
+			val eventIdClass = Class.forName(EVENT_ID_CLASS_NAME)
+			val eventIdObj = eventIdClass.getConstructor(String::class.java).newInstance(eventId)
+
+			invokeUnit(
+				loadedTimeline,
+				"redactEvent",
+				arrayOf(
+					Class.forName(EVENT_OR_TRANSACTION_ID_CLASS_NAME),
+					String::class.java,
+				),
+				arrayOf(eventIdObj, null),
+			)
+			true
+		} catch (e: InterruptedException) {
+			Thread.currentThread().interrupt()
+			false
+		} catch (e: Exception) {
+			false
+		} catch (e: LinkageError) {
+			false
+		} finally {
+			closeQuietly(timeline)
+			closeQuietly(room)
+		}
+	}
+
+	/** Uploads one image and awaits SDK completion; cancels an abandoned join before closing it. */
+	@Synchronized
+	override fun sendImageMessage(
+		roomId: String,
+		imageBytes: ByteArray,
+		fileName: String,
+		mimeType: String,
+	): Boolean = sendAttachment(roomId, imageBytes, fileName, mimeType, true)
+
+	// Both SDK calls return an owned join handle. Await join, cancel on failure, then release
+	// the handle, metadata, timeline and room. UploadSource.Data creates no temporary file.
+	private fun sendAttachment(
+		roomId: String,
+		bytes: ByteArray,
+		fileName: String,
+		mimeType: String,
+		image: Boolean,
+	): Boolean {
+		val cap = if (image) ConnectorImageSender.MAX_IMAGE_BYTES else ConnectorFileSender.MAX_FILE_BYTES
+		if (bytes.isEmpty() ||
+			bytes.size > cap ||
+			(image && !mimeType.startsWith("image/")) ||
+			(!image && !mimeType.matches(Regex("[A-Za-z0-9.+_-]+/[A-Za-z0-9.+_-]+"))) ||
+			fileName.isBlank() ||
+			roomId.isBlank()
+		) {
+			return false
+		}
+		val client = loginClient ?: return false
+		var room: Any? = null
+		var timeline: Any? = null
+		var attachmentInfo: Any? = null
+		var joinHandle: Any? = null
+		var completed = false
+		return try {
+			room = client.javaClass.getMethod("getRoom", String::class.java).invoke(client, roomId)
+				?: throw SnapshotAdapterFailure()
+			val membership = room.javaClass.getMethod("membership").invoke(room) as? Enum<*>
+			val encryption = room.javaClass.getMethod("encryptionState").invoke(room) as? Enum<*>
+			if (membership?.name != "JOINED" || encryption?.name != "NOT_ENCRYPTED") return false
+			val loadedTimeline =
+				invokeCloseableValue(room, "timeline", emptyArray(), emptyArray(), ::closeQuietly)
+			timeline = loadedTimeline
+			val uploadSourceClass = Class.forName(UPLOAD_SOURCE_CLASS_NAME)
+			val uploadSource = Class.forName(UPLOAD_SOURCE_DATA_CLASS_NAME)
+				.getConstructor(ByteArray::class.java, String::class.java)
+				.newInstance(bytes, fileName)
+			val uploadParameters = Class.forName(UPLOAD_PARAMETERS_CLASS_NAME)
+				.getConstructor(
+					uploadSourceClass,
+					String::class.java,
+					Class.forName(FORMATTED_BODY_CLASS_NAME),
+					Class.forName(MENTIONS_CLASS_NAME),
+					String::class.java,
+					String::class.java,
+				)
+				.newInstance(uploadSource, null, null, null, null, null)
+			val uLongClass = Class.forName(ULONG_CLASS_NAME)
+			val createdInfo = if (image) {
+				Class.forName(IMAGE_INFO_CLASS_NAME)
+					.getConstructor(
+						uLongClass,
+						uLongClass,
+						String::class.java,
+						uLongClass,
+						Class.forName(THUMBNAIL_INFO_CLASS_NAME),
+						Class.forName(MEDIA_SOURCE_CLASS_NAME),
+						String::class.java,
+						java.lang.Boolean::class.java,
+						Class.forName(DEFAULT_CONSTRUCTOR_MARKER_CLASS_NAME),
+					)
+					.newInstance(null, null, mimeType, bytes.size.toULong(), null, null, null, null, null)
+			} else {
+				Class.forName("org.matrix.rustcomponents.sdk.FileInfo")
+					.getConstructor(
+						String::class.java,
+						uLongClass,
+						Class.forName(THUMBNAIL_INFO_CLASS_NAME),
+						Class.forName(MEDIA_SOURCE_CLASS_NAME),
+						Class.forName(DEFAULT_CONSTRUCTOR_MARKER_CLASS_NAME),
+					)
+					.newInstance(mimeType, bytes.size.toULong(), null, null, null)
+			}
+			attachmentInfo = createdInfo
+			val createdJoinHandle = if (image) {
+				loadedTimeline.javaClass
+					.getMethod(
+						"sendImage",
+						Class.forName(UPLOAD_PARAMETERS_CLASS_NAME),
+						uploadSourceClass,
+						Class.forName(IMAGE_INFO_CLASS_NAME),
+					)
+					.invoke(loadedTimeline, uploadParameters, null, createdInfo)
+			} else {
+				loadedTimeline.javaClass.getMethod(
+					"sendFile",
+					Class.forName(UPLOAD_PARAMETERS_CLASS_NAME),
+					createdInfo.javaClass,
+				).invoke(loadedTimeline, uploadParameters, createdInfo)
+			}
+			if (createdJoinHandle == null) throw SnapshotAdapterFailure()
+			joinHandle = createdJoinHandle
+			invokeUnit(createdJoinHandle, "join", emptyArray(), emptyArray())
+			completed = true
+			true
+		} catch (e: InterruptedException) {
+			Thread.currentThread().interrupt()
+			false
+		} catch (e: Exception) {
+			false
+		} catch (e: LinkageError) {
+			false
+		} finally {
+			if (!completed && joinHandle != null) {
+				try {
+					joinHandle.javaClass.getMethod("cancel").invoke(joinHandle)
+				} catch (ignored: Exception) {
+				}
+			}
+			closeQuietly(joinHandle)
+			destroyQuietly(attachmentInfo)
 			closeQuietly(timeline)
 			closeQuietly(room)
 		}
@@ -697,6 +1062,18 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			if (content.javaClass.simpleName != "MsgLike") return null
 			val msgLike = content.javaClass.getMethod("getContent").invoke(content)
 			val kind = msgLike.javaClass.getMethod("getKind").invoke(msgLike)
+			// sdk-android:26.08.05 exposes Redacted as a payload-free singleton.
+			if (kind.javaClass.simpleName == "Redacted") {
+				val timestamp = eventClass.getMethod(TIMESTAMP_GETTER_NAME).invoke(event) as Long
+				return MatrixMessageSnapshot(
+					eventId = identifier.javaClass.getMethod("getEventId").invoke(identifier) as String,
+					senderId = eventClass.getMethod("getSender").invoke(event) as String,
+					bodyText = "",
+					originServerTimestampSeconds = (timestamp.toULong() / 1_000uL).toLong(),
+					isOutgoing = eventClass.getMethod("isOwn").invoke(event) as Boolean,
+					type = ConnectorMessageType.DELETED,
+				)
+			}
 			if (kind.javaClass.simpleName != "Message") return null
 			val message = kind.javaClass.getMethod("getContent").invoke(kind)
 			val messageType = message.javaClass.getMethod("getMsgType").invoke(message)
@@ -729,6 +1106,11 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 
 	@Synchronized
 	override fun logout() {
+		synchronized(lifecycleLock) {
+			activeGeneration = null
+			activeStore?.let { sessionFile(it).delete() }
+		}
+		activeStore = null
 		val client = loginClient ?: return
 		loginClient = null
 		try {
@@ -744,8 +1126,11 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 
 	@Synchronized
 	override fun close() {
-		closeQuietly(loginClient)
+		synchronized(lifecycleLock) { activeGeneration = null }
+		val client = loginClient
 		loginClient = null
+		activeStore = null
+		closeQuietly(client)
 	}
 
 	/**
@@ -928,7 +1313,17 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 	private class DiscoveryAdapterFailure : Exception()
 	private class SnapshotAdapterFailure : Exception()
 
+	/**
+	 * [claimStore] found its directory already in [openedStores]. Kept distinct from a
+	 * generic [IOException] so [restore] can report it as a recoverable [LOGIN_FAILED]
+	 * failure instead of folding it into the same catch clause that maps a genuinely
+	 * missing or unreadable sidecar to [MatrixLoginClient.RestoreResult.NotFound].
+	 */
+	private class StoreAlreadyClaimedException :
+		IOException("Matrix store already opened in this process")
+
 	private companion object {
+		val openedStores = HashSet<String>()
 		const val CLIENT_BUILDER_CLASS_NAME = "org.matrix.rustcomponents.sdk.ClientBuilder"
 		const val SQLITE_STORE_BUILDER_CLASS_NAME = "org.matrix.rustcomponents.sdk.SqliteStoreBuilder"
 		const val SESSION_CLASS_NAME = "org.matrix.rustcomponents.sdk.Session"
@@ -936,6 +1331,24 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		const val SESSION_DELEGATE_FACTORY_CLASS_NAME =
 			"org.briarproject.briar.matrix.DirectMatrixClientSessionDelegateFactory"
 		const val TIMELINE_LISTENER_CLASS_NAME = "org.matrix.rustcomponents.sdk.TimelineListener"
+		const val FORMATTED_BODY_CLASS_NAME = "org.matrix.rustcomponents.sdk.FormattedBody"
+		const val TEXT_MESSAGE_CONTENT_CLASS_NAME = "org.matrix.rustcomponents.sdk.TextMessageContent"
+		const val MESSAGE_TYPE_CLASS_NAME = "org.matrix.rustcomponents.sdk.MessageType"
+		const val MESSAGE_TYPE_TEXT_CLASS_NAME = "org.matrix.rustcomponents.sdk.MessageType\$Text"
+		const val ROOM_MESSAGE_EVENT_CONTENT_CLASS_NAME =
+			"org.matrix.rustcomponents.sdk.RoomMessageEventContentWithoutRelation"
+		const val UPLOAD_SOURCE_CLASS_NAME = "org.matrix.rustcomponents.sdk.UploadSource"
+		const val UPLOAD_SOURCE_DATA_CLASS_NAME = "org.matrix.rustcomponents.sdk.UploadSource\$Data"
+		const val UPLOAD_PARAMETERS_CLASS_NAME = "org.matrix.rustcomponents.sdk.UploadParameters"
+		const val MENTIONS_CLASS_NAME = "org.matrix.rustcomponents.sdk.Mentions"
+		const val IMAGE_INFO_CLASS_NAME = "org.matrix.rustcomponents.sdk.ImageInfo"
+		const val THUMBNAIL_INFO_CLASS_NAME = "org.matrix.rustcomponents.sdk.ThumbnailInfo"
+		const val EVENT_OR_TRANSACTION_ID_CLASS_NAME = "org.matrix.rustcomponents.sdk.EventOrTransactionId"
+		const val EVENT_ID_CLASS_NAME = "org.matrix.rustcomponents.sdk.EventOrTransactionId\$EventId"
+		const val MEDIA_SOURCE_CLASS_NAME = "org.matrix.rustcomponents.sdk.MediaSource"
+		const val RECEIPT_TYPE_CLASS_NAME = "org.matrix.rustcomponents.sdk.ReceiptType"
+		const val ULONG_CLASS_NAME = "kotlin.ULong"
+		const val DEFAULT_CONSTRUCTOR_MARKER_CLASS_NAME = "kotlin.jvm.internal.DefaultConstructorMarker"
 		const val PAGINATE_BACKWARDS_METHOD_NAME = "paginateBackwards-vckuEUM"
 		const val TIMESTAMP_GETTER_NAME = "getTimestamp-s-VKNKU"
 		const val MAX_UNSIGNED_SHORT = 0xFFFF

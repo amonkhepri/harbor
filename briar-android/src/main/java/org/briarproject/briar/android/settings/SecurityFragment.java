@@ -58,7 +58,7 @@ public class SecurityFragment extends PreferenceFragmentCompat {
 		screenLockTimeout.setSummaryProvider(preference -> {
 			CharSequence timeout = screenLockTimeout.getValue();
 			String never = getString(R.string.pref_lock_timeout_value_never);
-			if (timeout.equals(never)) {
+			if (never.equals(timeout)) {
 				return getString(R.string.pref_lock_timeout_never_summary);
 			} else {
 				return getString(R.string.pref_lock_timeout_summary,

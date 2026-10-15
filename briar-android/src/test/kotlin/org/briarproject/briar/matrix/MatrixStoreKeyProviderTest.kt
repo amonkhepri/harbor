@@ -67,6 +67,8 @@ class MatrixStoreKeyProviderTest {
 		val expectedKey = ByteArray(SecretKey.LENGTH) { it.toByte() }
 		val sourceKey = expectedKey.copyOf()
 		var requestedStoreDirectory: File? = null
+		val legacyDir = File(databaseDirectory, "matrix-sdk").also { it.mkdirs() }
+		File(legacyDir, "session").writeText("legacy")
 		val provider = ProtectedMatrixStoreConfigurationProvider(
 			config(databaseDirectory = databaseDirectory),
 			fakeAccountManager(),
@@ -94,6 +96,109 @@ class MatrixStoreKeyProviderTest {
 		)
 
 		assertEquals(null, provider.getStoreConfiguration())
+	}
+
+	@Test
+	fun testSelectionSurvivesProviderRecreationAndLogoutNeverFallsBackToLegacy() {
+		val database = testFolder.newFolder("selection")
+		val key = ByteArray(32) { it.toByte() }
+		fun provider() = ProtectedMatrixStoreConfigurationProvider(
+			config(databaseDirectory = database),
+			fakeAccountManager(),
+			keyProvider(key),
+		)
+		val legacy = File(database, "matrix-sdk").also { it.mkdirs() }
+		File(legacy, "session").writeText("encrypted legacy session")
+		val migrated = checkNotNull(provider().getStoreConfiguration())
+		assertEquals(legacy, migrated.directory)
+		assertArrayEquals(key, migrated.copyEncryptionKey())
+		assertEquals(legacy, provider().getStoreConfiguration()!!.directory)
+		provider().invalidateStore()
+		assertNull(provider().getStoreConfiguration())
+		assertEquals(true, File(legacy, "session").isFile)
+		val replacement = provider().newStoreConfiguration()!!
+		assertNotEquals(legacy, replacement.directory)
+		assertEquals(replacement.directory, provider().getStoreConfiguration()!!.directory)
+		val next = provider().newStoreConfiguration()!!
+		assertNotEquals(replacement.directory, next.directory)
+		assertArrayEquals(key, next.copyEncryptionKey())
+	}
+
+	@Test
+	fun testLegacyMigrationKeepsProtectedKeyAndEncryptedSessionRestorable() {
+		val database = testFolder.newFolder("migration")
+		val keys = testFolder.newFolder("migration-keys")
+		val config = config(keyDirectory = keys, databaseDirectory = database)
+		val account = fakeAccountManager()
+		val legacy = File(database, "matrix-sdk")
+		val key = ProtectedMatrixStoreKeyProvider(config, account).getStoreEncryptionKey(legacy)!!
+		// Generate an encrypted fixture elsewhere so the legacy path models a cold process.
+		val fixture = MatrixStoreConfiguration(testFolder.newFolder("fixture"), "matrix-sdk", key)
+		val client = ReflectiveMatrixHomeserverDiscoveryClient(
+			sessionDelegateFactory = DirectMatrixClientSessionDelegateFactory(),
+		)
+		assertEquals(
+			org.briarproject.briar.api.matrix.MatrixAuthSession.RecoverableErrorDetail.NONE,
+			client.login("https://matrix.example.org", "alice", "password", fixture),
+		)
+		client.close()
+		legacy.mkdirs()
+		File(fixture.directory, "session").copyTo(File(legacy, "session"))
+		val provider = ProtectedMatrixStoreConfigurationProvider(config, account)
+		val migrated = provider.getStoreConfiguration()!!
+		assertArrayEquals(key, migrated.copyEncryptionKey())
+		assertEquals(
+			MatrixLoginClient.RestoreResult.Restored("https://matrix.example.org"),
+			client.restore(migrated),
+		)
+		client.logout()
+		provider.invalidateStore()
+		assertNull(ProtectedMatrixStoreConfigurationProvider(config, account).getStoreConfiguration())
+		assertEquals(false, File(legacy, "session").exists())
+		org.matrix.rustcomponents.sdk.FakeMatrixSdkState.reset()
+	}
+
+	// Verified: Bypassing pruneOrphanedStores() or deleting the active store correctly fails this test.
+	@Test
+	fun testOrphanedStoreDirectoriesArePrunedOnColdStart() {
+		val database = testFolder.newFolder("database-prune")
+		val keyDirectory = testFolder.newFolder("keys-prune")
+		val config = config(databaseDirectory = database, keyDirectory = keyDirectory)
+		val account = fakeAccountManager()
+		val provider = ProtectedMatrixStoreConfigurationProvider(config, account)
+
+		val activeConfig = checkNotNull(provider.newStoreConfiguration())
+		val activeStoreName = activeConfig.directory.name
+		activeConfig.directory.mkdirs()
+		val activeSentinel = File(activeConfig.directory, "active-sentinel")
+		activeSentinel.writeText("active")
+
+		val abandonedDir = File(database, "matrix-sdk-00000000-0000-0000-0000-000000000000")
+		abandonedDir.mkdirs()
+		File(abandonedDir, "some-file").writeText("abandoned")
+
+		val siblingDir = File(database, "non-matrix-sdk")
+		siblingDir.mkdirs()
+		val siblingSentinel = File(siblingDir, "sibling-file")
+		siblingSentinel.writeText("sibling")
+
+		val coldStartProvider = ProtectedMatrixStoreConfigurationProvider(config, account)
+
+		assertEquals(false, abandonedDir.exists())
+
+		val activeConfigOnColdStart = checkNotNull(coldStartProvider.getStoreConfiguration())
+		assertEquals(activeStoreName, activeConfigOnColdStart.directory.name)
+		assertEquals(true, activeConfigOnColdStart.directory.exists())
+		assertEquals("active", File(activeConfigOnColdStart.directory, "active-sentinel").readText())
+
+		assertEquals(true, siblingDir.exists())
+		assertEquals("sibling", siblingSentinel.readText())
+
+		val secondColdStartProvider = ProtectedMatrixStoreConfigurationProvider(config, account)
+		assertEquals(true, activeConfigOnColdStart.directory.exists())
+		assertEquals("active", File(activeConfigOnColdStart.directory, "active-sentinel").readText())
+		val secondColdStartConfig = checkNotNull(secondColdStartProvider.getStoreConfiguration())
+		assertEquals(activeStoreName, secondColdStartConfig.directory.name)
 	}
 
 	private fun config(
