@@ -14,7 +14,6 @@ import org.drinkless.tdlib.TdApi
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -695,7 +694,7 @@ class TelegramConnectorMessageTest {
 	}
 
 	@Test
-	fun testSessionStopReportsFailureWhenMessageClientCloseTimedOutPriorToStop() {
+	fun testSessionStopSucceedsWhenMessageClientCloseTimedOutDuringOrdinaryReadPriorToStop() {
 		Client.resetTestState()
 		Client.setAuthorizationStateAfterTdlibParameters(TdApi.AuthorizationStateReady())
 		Client.setCloseAuthorizationUpdateEnabled(false)
@@ -718,18 +717,13 @@ class TelegramConnectorMessageTest {
 		try {
 			client.getRecentThreads(1)
 			assertTrue(
-				"Expected access gate to record unconfirmed message client close",
-				accessGate.hasUnconfirmedClose(),
+				"A message-client close timeout during an ordinary read (no stop in " +
+					"progress) must not poison the access gate for a later, unrelated stop",
+				!accessGate.hasUnconfirmedClose(),
 			)
 
 			Client.setCloseAuthorizationUpdateEnabled(true)
-			assertThrows(
-				"Expected stopService() to report failure when message-client close confirmation " +
-					"timed out prior to stopService",
-				ServiceException::class.java,
-			) {
-				session.stopService()
-			}
+			session.stopService()
 		} finally {
 			Client.setCloseAuthorizationUpdateEnabled(true)
 		}
