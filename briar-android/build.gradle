@@ -68,6 +68,10 @@ def telegramConnectorEnabled =
 def matrixConnectorEnabled =
 		(project.findProperty('harbor.matrixConnector.enabled') ?: 'false')
 				.toString().toBoolean()
+// Single source of truth for the pinned sdk-android version: shared between
+// the real dependency declaration below and the ABI-completeness check
+// (P364-001) so a version bump can't update one site but not the other.
+def matrixSdkVersion = '26.08.05'
 def configuredTelegramApiId =
 		telegramConfigValue(
 				['harbor.telegram.apiId'],
@@ -109,12 +113,17 @@ if (telegramConnectorEnabled) {
 def requiredMatrixSdkAbis = ['arm64-v8a', 'armeabi-v7a', 'x86', 'x86_64']
 if (matrixConnectorEnabled) {
 	project.afterEvaluate {
+		// detachedConfiguration also resolves sdk-android's transitive
+		// dependencies (e.g. net.java.dev.jna:jna, itself packaged as an
+		// .aar), so the expected sdk-android filename is matched exactly
+		// rather than any resolved file ending in ".aar".
+		def matrixSdkAarName = "sdk-android-${matrixSdkVersion}.aar"
 		def matrixSdkAar = configurations.detachedConfiguration(
-				dependencies.create('org.matrix.rustcomponents:sdk-android:26.08.05'))
-				.resolve().find { it.name.endsWith('.aar') }
+				dependencies.create("org.matrix.rustcomponents:sdk-android:${matrixSdkVersion}"))
+				.resolve().find { it.name == matrixSdkAarName }
 		if (matrixSdkAar == null) {
 			throw new GradleException(
-					'Matrix connector sdk-android AAR could not be resolved for ABI verification')
+					"Matrix connector could not resolve ${matrixSdkAarName} for ABI verification")
 		}
 		def presentMatrixSdkAbis = zipTree(matrixSdkAar)
 				.matching { include 'jni/*/libmatrix_sdk_ffi.so' }
@@ -282,7 +291,7 @@ dependencies {
 		// Pinned per the MX-003 compatibility spike: minSdk 21, arm64-v8a/
 		// armeabi-v7a/x86/x86_64 ABIs, Apache-2.0. Not resolved or bundled
 		// while the flag is off (default).
-		implementation 'org.matrix.rustcomponents:sdk-android:26.08.05'
+		implementation "org.matrix.rustcomponents:sdk-android:${matrixSdkVersion}"
 	}
 
 	// newer versions of the libraries below require compileSdk 34
