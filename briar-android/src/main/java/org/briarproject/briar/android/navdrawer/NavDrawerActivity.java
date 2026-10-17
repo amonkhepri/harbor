@@ -167,6 +167,12 @@ public class NavDrawerActivity extends BriarActivity implements
 		};
 		drawerLayout.addDrawerListener(drawerToggle);
 		navigation.setNavigationItemSelectedListener(this);
+		toolbar.setOnClickListener(v -> {
+			if (!drawerLayout.isDrawerOpen(START)) {
+				drawerLayout.openDrawer(START);
+			}
+		});
+		drawerToggle.syncState();
 
 		// Wait for the drawer to be laid out before trying to position the
 		// onboarding tap target
