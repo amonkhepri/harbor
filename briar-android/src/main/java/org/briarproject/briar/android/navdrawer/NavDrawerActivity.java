@@ -168,7 +168,8 @@ public class NavDrawerActivity extends BriarActivity implements
 		drawerLayout.addDrawerListener(drawerToggle);
 		navigation.setNavigationItemSelectedListener(this);
 		toolbar.setOnClickListener(v -> {
-			if (!drawerLayout.isDrawerOpen(START)) {
+			if (!drawerLayout.isDrawerOpen(START) &&
+					drawerLayout.getDrawerLockMode(START) != LOCK_MODE_LOCKED_CLOSED) {
 				drawerLayout.openDrawer(START);
 			}
 		});
@@ -292,6 +293,9 @@ public class NavDrawerActivity extends BriarActivity implements
 	@Override
 	public boolean onNavigationItemSelected(@NonNull MenuItem item) {
 		drawerLayout.closeDrawer(START);
+		if (drawerLayout.getDrawerLockMode(START) == LOCK_MODE_LOCKED_CLOSED) {
+			return false;
+		}
 		if (item.getItemId() == R.id.nav_btn_lock) {
 			lockManager.setLocked(true);
 			ActivityCompat.finishAfterTransition(this);
