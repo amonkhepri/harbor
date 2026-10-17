@@ -85,8 +85,8 @@ public class SetupActivity extends BaseActivity
 		i.setFlags(FLAG_ACTIVITY_NEW_TASK | FLAG_ACTIVITY_TASK_ON_HOME |
 				FLAG_ACTIVITY_CLEAR_TASK | FLAG_ACTIVITY_CLEAR_TOP);
 		startActivity(i);
-		supportFinishAfterTransition();
-		overridePendingTransition(R.anim.screen_new_in, R.anim.screen_old_out);
+		finish();
+		overridePendingTransition(R.anim.fade_in, R.anim.fade_out);
 	}
 
 	@Override
