@@ -223,6 +223,20 @@ public class NavDrawerActivity extends BriarActivity implements
 	}
 
 	@Override
+	protected boolean recreateOnSignIn() {
+		// ContactsViewModel#loadContacts() goes through DbViewModel's
+		// runOnDbThread(), which already waits for the database to open
+		// before querying it, and the list updates reactively afterwards via
+		// the event bus (ContactAddedEvent etc.). There is nothing here that
+		// a failed-before-signing-in load would leave stale, so skip the
+		// superclass's recreate(): it only costs a disruptive teardown and
+		// re-inflation of the toolbar/nav drawer right as the user reaches
+		// this screen for the first time, which can race an immediate tap on
+		// the toolbar.
+		return false;
+	}
+
+	@Override
 	protected void onNewIntent(Intent intent) {
 		super.onNewIntent(intent);
 
