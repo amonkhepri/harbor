@@ -95,7 +95,10 @@ class GenericConnectorInboxThreadItemTest {
 			assertEquals("Chat", view.findViewById<TextView>(R.id.connectorThreadTitle).text.toString())
 		}
 		holder.bind(loading.copy(title = "Custom Room")) { _, _ -> }
-		assertEquals("Custom Room", view.findViewById<TextView>(R.id.connectorThreadTitle).text.toString())
+		assertEquals(
+			"Custom Room",
+			view.findViewById<TextView>(R.id.connectorThreadTitle).text.toString(),
+		)
 
 		val outgoingPhoto = GenericConnectorInboxThreadItem(
 			ConnectorThread(
@@ -111,5 +114,35 @@ class GenericConnectorInboxThreadItemTest {
 
 		assertEquals(true, outgoingPhoto.isLastMessageOutgoing)
 		assertEquals(ConnectorMessageType.PHOTO, outgoingPhoto.previewType)
+	}
+
+	@Test
+	fun testUnreadCountCarriesThroughFromConnectorThread() {
+		val withCount = GenericConnectorInboxThreadItem(
+			ConnectorThread(
+				ConnectorSources.MATRIX,
+				"!room:matrix.example.org",
+				"room",
+				42,
+				"preview",
+				false,
+				ConnectorMessageType.TEXT,
+				unreadCount = 12,
+			),
+		)
+		assertEquals(12, withCount.unreadCount)
+
+		val withoutCount = GenericConnectorInboxThreadItem(
+			ConnectorThread(
+				ConnectorSources.MATRIX,
+				"!room:matrix.example.org",
+				"room",
+				42,
+				"preview",
+				false,
+				ConnectorMessageType.TEXT,
+			),
+		)
+		assertEquals(null, withoutCount.unreadCount)
 	}
 }

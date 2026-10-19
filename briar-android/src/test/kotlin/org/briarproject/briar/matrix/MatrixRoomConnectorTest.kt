@@ -55,6 +55,30 @@ class MatrixRoomConnectorTest {
 		assertEquals("", thread.latestMessageText)
 		assertFalse(thread.isLatestMessageOutgoing)
 		assertEquals(10, roomSnapshotClient.lastRequestedLimit)
+		assertNull(thread.unreadCount)
+	}
+
+	@Test
+	fun `getRecentThreads carries unread count from room snapshot`() {
+		val roomSnapshotClient = FakeRoomSnapshotClient(
+			listOf(
+				MatrixRoomSnapshot("!a:example.org", "Alpha", unreadCount = 5),
+				MatrixRoomSnapshot("!b:example.org", "Beta", unreadCount = 0),
+				MatrixRoomSnapshot("!c:example.org", "Gamma", unreadCount = null),
+			),
+		)
+		val connector = connector(
+			roomSnapshotClient = roomSnapshotClient,
+			messageSnapshotClient = FakeMessageSnapshotClient(emptyList()),
+			authSession = FakeMatrixAuthSession(MatrixAuthState.READY),
+		)
+
+		val threads = connector.getRecentThreads(10)
+
+		assertEquals(3, threads.size)
+		assertEquals(5, threads[0].unreadCount)
+		assertEquals(0, threads[1].unreadCount)
+		assertNull(threads[2].unreadCount)
 	}
 
 	@Test

@@ -83,6 +83,7 @@ class MatrixRoomConnector(
 				latestMessageText = latest?.bodyText ?: "",
 				isLatestMessageOutgoing = latest?.isOutgoing ?: false,
 				latestMessageType = latest?.type ?: ConnectorMessageType.TEXT,
+				unreadCount = snapshot.unreadCount,
 			)
 		}
 	}

@@ -13,6 +13,8 @@ import org.briarproject.briar.android.util.UiUtils.formatDate
 import org.briarproject.briar.api.connector.ConnectorSources
 import org.briarproject.briar.api.connector.ConnectorMessageType
 
+import java.util.Locale
+
 @UiThread
 class ConnectorInboxThreadViewHolder(view: View) : RecyclerView.ViewHolder(view) {
 	private val sourceIcon: ImageView = view.findViewById(R.id.connectorThreadIcon)
@@ -20,6 +22,7 @@ class ConnectorInboxThreadViewHolder(view: View) : RecyclerView.ViewHolder(view)
 	private val date: TextView = view.findViewById(R.id.connectorThreadDate)
 	private val badge: TextView = view.findViewById(R.id.connectorThreadBadge)
 	private val preview: TextView = view.findViewById(R.id.connectorThreadPreview)
+	internal val unreadBadge: TextView = view.findViewById(R.id.connectorThreadUnreadBadge)
 
 	fun bind(
 		item: ConnectorInboxThreadItem,
@@ -32,6 +35,20 @@ class ConnectorInboxThreadViewHolder(view: View) : RecyclerView.ViewHolder(view)
 		sourceIcon.contentDescription =
 			sourceContentDescription(sourceIcon.resources, item)
 		badge.text = sourceLabel(item)
+		val unreadCount = item.unreadCount
+		if (item.connectorSource.id == ConnectorSources.MATRIX_ID &&
+			unreadCount != null &&
+			unreadCount > 0
+		) {
+			unreadBadge.visibility = View.VISIBLE
+			unreadBadge.text = unreadText(unreadCount)
+			unreadBadge.contentDescription =
+				unreadContentDescription(unreadBadge.resources, unreadCount)
+		} else {
+			unreadBadge.visibility = View.GONE
+			unreadBadge.text = ""
+			unreadBadge.contentDescription = null
+		}
 		preview.text = when {
 			item.isPreviewLoading ->
 				preview.resources.getString(R.string.connector_thread_preview_loading)
@@ -143,5 +160,14 @@ class ConnectorInboxThreadViewHolder(view: View) : RecyclerView.ViewHolder(view)
 				text,
 			)
 		}
+
+		fun unreadText(count: Int): CharSequence = String.format(Locale.getDefault(), "%d", count)
+
+		fun unreadContentDescription(resources: Resources, count: Int): CharSequence =
+			resources.getQuantityString(
+				R.plurals.connector_thread_unread_messages,
+				count,
+				count,
+			)
 	}
 }

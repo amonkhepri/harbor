@@ -19,6 +19,7 @@ data class GenericConnectorInboxThreadItem(
 	override val isLastMessageOutgoing: Boolean,
 	override val isPreviewLoading: Boolean,
 	override val previewType: ConnectorMessageType,
+	override val unreadCount: Int? = null,
 ) : ConnectorInboxThreadItem {
 
 	constructor(thread: ConnectorThread) : this(
@@ -30,6 +31,7 @@ data class GenericConnectorInboxThreadItem(
 		thread.isLatestMessageOutgoing,
 		false,
 		thread.latestMessageType,
+		thread.unreadCount,
 	)
 }
 

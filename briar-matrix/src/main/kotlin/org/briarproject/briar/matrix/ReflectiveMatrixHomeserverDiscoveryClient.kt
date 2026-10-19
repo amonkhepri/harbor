@@ -584,7 +584,8 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			val id = roomClass.getMethod("id").invoke(room) as String
 			val displayName = (roomClass.getMethod("displayName").invoke(room) as? String)
 				?.takeIf { it.isNotEmpty() } ?: id
-			MatrixRoomSnapshot(id, displayName)
+			val unreadCount = readUnreadCount(room)
+			MatrixRoomSnapshot(id, displayName, unreadCount)
 		}
 	} catch (e: InvocationTargetException) {
 		null
@@ -592,6 +593,28 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		null
 	} catch (e: LinkageError) {
 		null
+	}
+
+	private fun readUnreadCount(room: Any): Int? {
+		var roomInfo: Any? = null
+		return try {
+			roomInfo = invokeCloseableValue(
+				target = room,
+				methodName = "roomInfo",
+				parameterTypes = emptyArray(),
+				arguments = emptyArray(),
+				abandon = ::destroyQuietly,
+			)
+			val method = roomInfo.javaClass.getMethod("getNumUnreadMessages-s-VKNKU")
+			val unread = method.invoke(roomInfo) as? Number
+			unread?.toLong()?.coerceIn(0L, Int.MAX_VALUE.toLong())?.toInt()
+		} catch (e: Exception) {
+			null
+		} catch (e: LinkageError) {
+			null
+		} finally {
+			destroyQuietly(roomInfo)
+		}
 	}
 
 	/**
@@ -1343,7 +1366,8 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		const val MENTIONS_CLASS_NAME = "org.matrix.rustcomponents.sdk.Mentions"
 		const val IMAGE_INFO_CLASS_NAME = "org.matrix.rustcomponents.sdk.ImageInfo"
 		const val THUMBNAIL_INFO_CLASS_NAME = "org.matrix.rustcomponents.sdk.ThumbnailInfo"
-		const val EVENT_OR_TRANSACTION_ID_CLASS_NAME = "org.matrix.rustcomponents.sdk.EventOrTransactionId"
+		const val EVENT_OR_TRANSACTION_ID_CLASS_NAME =
+			"org.matrix.rustcomponents.sdk.EventOrTransactionId"
 		const val EVENT_ID_CLASS_NAME = "org.matrix.rustcomponents.sdk.EventOrTransactionId\$EventId"
 		const val MEDIA_SOURCE_CLASS_NAME = "org.matrix.rustcomponents.sdk.MediaSource"
 		const val RECEIPT_TYPE_CLASS_NAME = "org.matrix.rustcomponents.sdk.ReceiptType"

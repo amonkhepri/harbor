@@ -44,18 +44,32 @@ enum class Membership { INVITED, JOINED, LEFT, KNOCKED, BANNED }
 
 enum class ReceiptType { READ, READ_PRIVATE, FULLY_READ }
 
+class RoomInfo(val numUnreadMessages: ULong = 0uL) {
+	fun destroy() {
+		FakeMatrixSdkState.roomInfoDestroyCount++
+	}
+}
+
 /** Mirrors the pinned AAR's real shape: synchronous `id()`/`displayName()`/`isSpace()`/`membership()`. */
 class Room(
 	private val roomId: String,
 	private val roomDisplayName: String?,
 	private val space: Boolean,
 	private val roomMembership: Membership,
+	private val unreadMessagesCount: ULong? = null,
 ) {
 	fun id(): String = roomId
 	fun displayName(): String? = roomDisplayName
 	fun isSpace(): Boolean = space
 	fun membership(): Membership = roomMembership
 	fun encryptionState(): EncryptionState = FakeMatrixSdkState.encryptionState
+
+	suspend fun roomInfo(): RoomInfo {
+		FakeMatrixSdkState.roomInfoCallCount++
+		FakeMatrixSdkState.roomInfoFailureToThrow?.let { throw it }
+		val count = unreadMessagesCount ?: throw ClientException.Generic("no roomInfo", "no roomInfo")
+		return RoomInfo(count)
+	}
 
 	suspend fun timeline(): Timeline {
 		FakeMatrixSdkState.timelineCallCount++
@@ -547,13 +561,15 @@ class Client internal constructor(
 		if (fake.malformedRoomId) {
 			MalformedRoom(fake.roomId, fake.displayName, fake.isSpace, fake.membership)
 		} else {
-			Room(fake.roomId, fake.displayName, fake.isSpace, fake.membership)
+			Room(fake.roomId, fake.displayName, fake.isSpace, fake.membership, fake.unreadMessagesCount)
 		}
 	} as List<Room>
 
 	fun getRoom(roomId: String): Room? = FakeMatrixSdkState.roomsToReturn
 		.firstOrNull { it.roomId == roomId }
-		?.let { fake -> Room(fake.roomId, fake.displayName, fake.isSpace, fake.membership) }
+		?.let { fake ->
+			Room(fake.roomId, fake.displayName, fake.isSpace, fake.membership, fake.unreadMessagesCount)
+		}
 
 	suspend fun login(
 		username: String,
@@ -711,6 +727,7 @@ data class FakeRoomSpec(
 	val isSpace: Boolean = false,
 	val membership: Membership = Membership.JOINED,
 	val malformedRoomId: Boolean = false,
+	val unreadMessagesCount: ULong? = null,
 )
 
 /** Test-only malformed runtime handle returned through `Client.rooms()`'s erased list type. */
@@ -823,9 +840,15 @@ object FakeMatrixSdkState {
 	var lastMarkAsReadRoomId: String? = null
 	var lastMarkAsReadReceiptType: ReceiptType? = null
 	var markAsReadFailureToThrow: ClientException? = null
+	var roomInfoCallCount = 0
+	var roomInfoDestroyCount = 0
+	var roomInfoFailureToThrow: Exception? = null
 
 	fun reset() {
 		awaitBuilds()
+		roomInfoCallCount = 0
+		roomInfoDestroyCount = 0
+		roomInfoFailureToThrow = null
 		onSessionConstruct = null
 		onSessionRead = null
 		onLogin = null
