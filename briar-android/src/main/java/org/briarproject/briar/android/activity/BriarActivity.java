@@ -83,7 +83,7 @@ public abstract class BriarActivity extends BaseActivity {
 		if (request == REQUEST_PASSWORD) {
 			// Recreate the activity so any DB tasks that failed before
 			// signing in can be retried
-			if (result == RESULT_OK && recreateOnSignIn()) {
+			if (result == RESULT_OK) {
 				if (LOG.isLoggable(INFO)) {
 					LOG.info("Recreating " + getClass().getSimpleName()
 							+ " after signing in");
@@ -99,20 +99,6 @@ public abstract class BriarActivity extends BaseActivity {
 			// If the result is OK, we don't need to do anything here
 			// and can resume normally.
 		}
-	}
-
-	/**
-	 * Whether this activity should tear down and rebuild its whole view
-	 * hierarchy via {@link #recreate()} after signing in (see
-	 * {@link #onActivityResult}). Subclasses whose initial content is loaded
-	 * through a DB-ready-aware path (e.g. {@code DbViewModel#runOnDbThread},
-	 * which already waits for the database rather than failing outright) can
-	 * override this to return false: for them the recreate buys nothing, and
-	 * it briefly tears down and re-inflates the whole screen (toolbar, nav
-	 * drawer, etc.) right as the user is first able to interact with it.
-	 */
-	protected boolean recreateOnSignIn() {
-		return true;
 	}
 
 	@Override
