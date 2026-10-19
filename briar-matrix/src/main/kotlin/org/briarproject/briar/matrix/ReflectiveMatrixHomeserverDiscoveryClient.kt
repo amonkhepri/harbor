@@ -1366,8 +1366,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		const val MENTIONS_CLASS_NAME = "org.matrix.rustcomponents.sdk.Mentions"
 		const val IMAGE_INFO_CLASS_NAME = "org.matrix.rustcomponents.sdk.ImageInfo"
 		const val THUMBNAIL_INFO_CLASS_NAME = "org.matrix.rustcomponents.sdk.ThumbnailInfo"
-		const val EVENT_OR_TRANSACTION_ID_CLASS_NAME =
-			"org.matrix.rustcomponents.sdk.EventOrTransactionId"
+		const val EVENT_OR_TRANSACTION_ID_CLASS_NAME = "org.matrix.rustcomponents.sdk.EventOrTransactionId"
 		const val EVENT_ID_CLASS_NAME = "org.matrix.rustcomponents.sdk.EventOrTransactionId\$EventId"
 		const val MEDIA_SOURCE_CLASS_NAME = "org.matrix.rustcomponents.sdk.MediaSource"
 		const val RECEIPT_TYPE_CLASS_NAME = "org.matrix.rustcomponents.sdk.ReceiptType"

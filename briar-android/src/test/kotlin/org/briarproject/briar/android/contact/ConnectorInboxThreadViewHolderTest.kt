@@ -30,7 +30,7 @@ class ConnectorInboxThreadViewHolderTest {
 
 		val invisibleTitles = listOf(
 			"​",
-			"",
+			"\uFEFF",
 			"‎‏",
 			"⁠",
 			"​﻿‎‏⁠",

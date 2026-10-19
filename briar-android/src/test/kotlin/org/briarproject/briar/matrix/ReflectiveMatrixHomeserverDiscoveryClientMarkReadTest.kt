@@ -60,6 +60,53 @@ class ReflectiveMatrixHomeserverDiscoveryClientMarkReadTest {
 		assertEquals(1, FakeMatrixSdkState.roomCloseCount)
 	}
 
+	@Test
+	fun `markRead success does not alter room unread count until next successful snapshot`() {
+		val client = loggedInClient()
+		FakeMatrixSdkState.roomsToReturn = listOf(
+			FakeRoomSpec("!room:example.org", unreadMessagesCount = 3uL),
+		)
+
+		val initial = client.getJoinedRooms(10).single()
+		assertEquals(3, initial.unreadCount)
+
+		val marked = client.markRead("!room:example.org")
+		assertTrue(marked)
+
+		val afterMark = client.getJoinedRooms(10).single()
+		assertEquals(3, afterMark.unreadCount)
+
+		FakeMatrixSdkState.roomsToReturn = listOf(
+			FakeRoomSpec("!room:example.org", unreadMessagesCount = 0uL),
+		)
+		val nextSnapshot = client.getJoinedRooms(10).single()
+		assertEquals(0, nextSnapshot.unreadCount)
+	}
+
+	@Test
+	fun `markRead failure does not alter room unread count until next successful snapshot`() {
+		val client = loggedInClient()
+		FakeMatrixSdkState.roomsToReturn = listOf(
+			FakeRoomSpec("!room:example.org", unreadMessagesCount = 3uL),
+		)
+		FakeMatrixSdkState.markAsReadFailureToThrow = ClientException.Generic("failed", "failed")
+
+		val initial = client.getJoinedRooms(10).single()
+		assertEquals(3, initial.unreadCount)
+
+		val marked = client.markRead("!room:example.org")
+		assertFalse(marked)
+
+		val afterFailedMark = client.getJoinedRooms(10).single()
+		assertEquals(3, afterFailedMark.unreadCount)
+
+		FakeMatrixSdkState.roomsToReturn = listOf(
+			FakeRoomSpec("!room:example.org", unreadMessagesCount = 1uL),
+		)
+		val nextSnapshot = client.getJoinedRooms(10).single()
+		assertEquals(1, nextSnapshot.unreadCount)
+	}
+
 	private fun loggedInClient(): ReflectiveMatrixHomeserverDiscoveryClient =
 		ReflectiveMatrixHomeserverDiscoveryClient().also { client ->
 			assertEquals(NONE, client.login("https://matrix.example.org", "alice", "swordfish"))

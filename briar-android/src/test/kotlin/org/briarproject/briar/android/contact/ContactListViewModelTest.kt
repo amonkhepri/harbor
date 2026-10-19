@@ -276,6 +276,43 @@ class ContactListViewModelTest {
 	}
 
 	@Test
+	fun testTransientFailurePreservesLoadedThreadsWithUnreadCount() {
+		val connector = mock(ReadOnlyConnector::class.java)
+		val thread = connectorThread(ConnectorSources.MATRIX, "!room:example").copy(unreadCount = 5)
+		`when`(connector.source).thenReturn(ConnectorSources.MATRIX)
+		`when`(connector.isEnabled()).thenReturn(true)
+		`when`(connector.isAuthorized()).thenReturn(true)
+		`when`(connector.getRecentThreads(20))
+			.thenReturn(listOf(thread))
+			.thenThrow(IllegalStateException())
+			.thenReturn(listOf(thread.copy(unreadCount = 0)))
+		val viewModel = createViewModel(connector)
+
+		viewModel.loadConnectorThreads()
+		val initialItems = getOrAwaitValue(viewModel.connectorThreadItems)
+		assertEquals(1, initialItems.size)
+		assertEquals(5, initialItems.single().unreadCount)
+
+		viewModel.loadConnectorThreads()
+		val preservedItems = getOrAwaitValue(viewModel.connectorThreadItems)
+		assertEquals(1, preservedItems.size)
+		assertEquals(5, preservedItems.single().unreadCount)
+		assertEquals(
+			LOAD_FAILED,
+			getOrAwaitValue(viewModel.connectorAvailabilityStates)[ConnectorSources.MATRIX],
+		)
+
+		viewModel.loadConnectorThreads()
+		val updatedItems = getOrAwaitValue(viewModel.connectorThreadItems)
+		assertEquals(1, updatedItems.size)
+		assertEquals(0, updatedItems.single().unreadCount)
+		assertEquals(
+			NONE,
+			getOrAwaitValue(viewModel.connectorAvailabilityStates)[ConnectorSources.MATRIX],
+		)
+	}
+
+	@Test
 	fun testDeauthorizationClearsLoadedTelegramThreads() {
 		val connector = mock(ReadOnlyConnector::class.java)
 		`when`(connector.source).thenReturn(ConnectorSources.TELEGRAM)

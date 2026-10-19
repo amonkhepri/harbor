@@ -8,12 +8,11 @@ import android.widget.TextView
 import androidx.annotation.DrawableRes
 import androidx.annotation.UiThread
 import androidx.recyclerview.widget.RecyclerView
+import java.util.Locale
 import org.briarproject.briar.R
 import org.briarproject.briar.android.util.UiUtils.formatDate
 import org.briarproject.briar.api.connector.ConnectorSources
 import org.briarproject.briar.api.connector.ConnectorMessageType
-
-import java.util.Locale
 
 @UiThread
 class ConnectorInboxThreadViewHolder(view: View) : RecyclerView.ViewHolder(view) {
