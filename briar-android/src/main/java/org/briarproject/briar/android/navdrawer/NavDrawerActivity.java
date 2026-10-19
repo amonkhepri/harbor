@@ -291,6 +291,14 @@ public class NavDrawerActivity extends BriarActivity implements
 	}
 
 	@Override
+	public boolean onOptionsItemSelected(MenuItem item) {
+		if (drawerToggle.onOptionsItemSelected(item)) {
+			return true;
+		}
+		return super.onOptionsItemSelected(item);
+	}
+
+	@Override
 	public boolean onNavigationItemSelected(@NonNull MenuItem item) {
 		drawerLayout.closeDrawer(START);
 		if (drawerLayout.getDrawerLockMode(START) == LOCK_MODE_LOCKED_CLOSED) {
