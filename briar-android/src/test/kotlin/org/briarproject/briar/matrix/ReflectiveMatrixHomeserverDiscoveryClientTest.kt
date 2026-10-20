@@ -412,6 +412,24 @@ class ReflectiveMatrixHomeserverDiscoveryClientTest {
 	}
 
 	@Test
+	fun `getJoinedRooms leaves unreadCount null when raw count has the sign bit set`() {
+		val client = newSessionClient()
+		client.login("https://matrix.example.org", "alice", "swordfish")
+		FakeMatrixSdkState.roomsToReturn = listOf(
+			FakeRoomSpec(
+				roomId = "!overflow:example.org",
+				displayName = "Overflow Room",
+				unreadMessagesCount = ULong.MAX_VALUE,
+			),
+		)
+
+		val result = client.getJoinedRooms(10)
+
+		assertEquals(1, result.size)
+		assertNull(result.single().unreadCount)
+	}
+
+	@Test
 	fun `restore does not delete session file on transient failure`() {
 		val storeConfiguration = fakeStoreConfiguration()
 		val client = newSessionClient()

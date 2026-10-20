@@ -607,7 +607,11 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			)
 			val method = roomInfo.javaClass.getMethod("getNumUnreadMessages-s-VKNKU")
 			val unread = method.invoke(roomInfo) as? Number
-			unread?.toLong()?.coerceIn(0L, Int.MAX_VALUE.toLong())?.toInt()
+			// getNumUnreadMessages-s-VKNKU returns an unsigned ULong whose underlying
+			// primitive is boxed as a signed Long by reflection: a raw value with the
+			// sign bit set is not a confirmed zero, so it must map to null, not be
+			// clamped into the valid range.
+			unread?.toLong()?.takeIf { it >= 0 }?.coerceAtMost(Int.MAX_VALUE.toLong())?.toInt()
 		} catch (e: Exception) {
 			null
 		} catch (e: LinkageError) {
