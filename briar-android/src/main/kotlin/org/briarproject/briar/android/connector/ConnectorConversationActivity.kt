@@ -870,7 +870,12 @@ class ConnectorConversationActivity : BriarActivity() {
 	}
 
 	internal fun onRetrySendClicked(item: ConnectorConversationMessageItem) {
-		if (item.type != ConnectorMessageType.TEXT) return
+		if (item.type != ConnectorMessageType.TEXT ||
+			!item.isOutgoing ||
+			item.localEchoStatus != ConnectorLocalEchoStatus.FAILED
+		) {
+			return
+		}
 		val echoId = item.stableId
 		if (inFlightRetryIds.contains(echoId)) return
 		val activeConnector = connector ?: return
@@ -892,7 +897,7 @@ class ConnectorConversationActivity : BriarActivity() {
 			runOnUiThread {
 				inFlightRetryIds.remove(echoId)
 				val dead = !retryOwner.owns(echoId, generation) || isFinishing || isDestroyed
-				if (dead || !activeConnector.isAuthorized()) {
+				if (dead) {
 					retryOwner.clear(echoId)
 					return@runOnUiThread
 				}

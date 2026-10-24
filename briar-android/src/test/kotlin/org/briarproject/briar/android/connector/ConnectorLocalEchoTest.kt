@@ -548,6 +548,15 @@ class ConnectorLocalEchoTest {
 		val loggedOutStatus = messageState(activity).messages.single().localEchoStatus
 		assertEquals(FAILED, loggedOutStatus)
 
+		// Mid-flight logout: background failure reverts to FAILED without getting stuck at PENDING
+		connector.authorized = true
+		activity.onRetrySendClicked(failedItem)
+		assertEquals(1, work.size)
+		assertEquals(PENDING, messageState(activity).messages.single().localEchoStatus)
+		connector.authorized = false
+		work.removeAt(0).run()
+		assertEquals(FAILED, messageState(activity).messages.single().localEchoStatus)
+
 		// In-flight retry cancelled when finishing/destroyed does not crash or update view
 		connector.authorized = true
 		connector.sendResult = true
@@ -592,5 +601,29 @@ class ConnectorLocalEchoTest {
 		val completed = messageState(activity).messages
 		assertEquals(SENT, completed[0].localEchoStatus)
 		assertEquals(SENT, completed[1].localEchoStatus)
+	}
+
+	@Test fun testRetrySendIgnoredForNonFailedOrNonTextMessages() {
+		val work = mutableListOf<Runnable>()
+		val connector = FakeTextConnector(sendResult = true)
+		val activity = buildActivityForTextSend(connector, work)
+		val sentItem = sendFailingText(activity, work, "sent")
+		assertEquals(SENT, sentItem.localEchoStatus)
+		work.clear()
+
+		// Ignored for SENT item
+		activity.onRetrySendClicked(sentItem)
+		assertTrue(work.isEmpty())
+		assertEquals(SENT, messageState(activity).messages.single().localEchoStatus)
+
+		// Ignored for incoming item
+		val incoming = sentItem.copy(isOutgoing = false, localEchoStatus = FAILED)
+		activity.onRetrySendClicked(incoming)
+		assertTrue(work.isEmpty())
+
+		// Ignored for non-text item
+		val media = sentItem.copy(type = ConnectorMessageType.PHOTO, localEchoStatus = FAILED)
+		activity.onRetrySendClicked(media)
+		assertTrue(work.isEmpty())
 	}
 }

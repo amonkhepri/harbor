@@ -95,6 +95,7 @@ internal class ConnectorConversationAdapter(
 			date.visibility = if (item.dateMillis > 0) View.VISIBLE else View.GONE
 			date.text = if (item.dateMillis > 0) formatDate(date.context, item.dateMillis) else ""
 			if (item.isOutgoing &&
+				item.type == ConnectorMessageType.TEXT &&
 				item.localEchoStatus == ConnectorLocalEchoStatus.FAILED &&
 				onRetrySendClicked != null
 			) {

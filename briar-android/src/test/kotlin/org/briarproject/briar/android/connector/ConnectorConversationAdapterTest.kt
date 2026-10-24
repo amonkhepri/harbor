@@ -203,6 +203,8 @@ class ConnectorConversationAdapterTest {
 			base.copy(isOutgoing = true),
 			base.copy(isOutgoing = true, localEchoStatus = PENDING),
 			base.copy(isOutgoing = true, localEchoStatus = SENT),
+			base.copy(isOutgoing = true, localEchoStatus = FAILED, type = ConnectorMessageType.PHOTO),
+			base.copy(isOutgoing = true, localEchoStatus = FAILED, type = ConnectorMessageType.FILE),
 		)
 		nonRetry.forEach {
 			holder.bind(it)
