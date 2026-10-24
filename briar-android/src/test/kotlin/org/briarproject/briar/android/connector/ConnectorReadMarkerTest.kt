@@ -294,5 +294,30 @@ class ConnectorReadMarkerTest {
 		load(activity)
 		work.removeAt(0).run()
 		assertEquals(2, connector.reads)
+		assertEquals(null, connector.getThreadTopic("room"))
+	}
+
+	@Test fun refreshRebindsTopicAndErrorsClearIt() {
+		var topic: String? = "First\nroom"
+		val connector = object : FakeConnector() {
+			override fun getThreadTopic(threadId: String) = topic
+		}
+		val activity = activity(connector)
+		val bar = requireNotNull(activity.supportActionBar)
+		for (next in listOf("First\nroom", "Second room", "", null)) {
+			topic = next
+			load(activity)
+			assertEquals(null, bar.subtitle)
+			work.removeAt(0).run()
+			assertEquals(ConnectorConversationActivity.topicSubtitle(next), bar.subtitle)
+		}
+		topic = "Restored"
+		load(activity)
+		work.removeAt(0).run()
+		assertEquals("Restored", bar.subtitle)
+		connector.result = ConnectorMessageReadResult.LoadFailed
+		load(activity)
+		work.removeAt(0).run()
+		assertEquals(null, bar.subtitle)
 	}
 }

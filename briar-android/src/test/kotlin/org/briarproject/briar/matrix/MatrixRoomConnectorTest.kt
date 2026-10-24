@@ -59,6 +59,33 @@ class MatrixRoomConnectorTest {
 	}
 
 	@Test
+	fun `topics follow selected room and disappear without authorization`() {
+		val auth = FakeMatrixAuthSession(MatrixAuthState.READY)
+		val rooms = listOf(
+			MatrixRoomSnapshot("!a", "Alpha", topic = "Purpose"),
+			MatrixRoomSnapshot("!b", "Beta", topic = ""),
+			MatrixRoomSnapshot("!c", "Gamma"),
+		)
+		val connector = connector(
+			roomSnapshotClient = FakeRoomSnapshotClient(rooms),
+			messageSnapshotClient = FakeMessageSnapshotClient(emptyList()),
+			authSession = auth,
+		)
+		for (room in rooms) {
+			assertEquals(room.topic, connector.getThreadTopic(room.roomId))
+			assertEquals(
+				room.topic,
+				connector.getRecentThreads(10).first {
+					it.threadId == room.roomId
+				}.topic,
+			)
+		}
+		assertNull(connector.getThreadTopic("!missing"))
+		auth.state = MatrixAuthState.CREDENTIAL_ENTRY
+		assertNull(connector.getThreadTopic("!a"))
+	}
+
+	@Test
 	fun `getRecentThreads carries unread count from room snapshot`() {
 		val roomSnapshotClient = FakeRoomSnapshotClient(
 			listOf(

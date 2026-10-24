@@ -57,9 +57,11 @@ class Room(
 	private val space: Boolean,
 	private val roomMembership: Membership,
 	private val unreadMessagesCount: ULong? = null,
+	private val roomTopic: String? = null,
 ) {
 	fun id(): String = roomId
 	fun displayName(): String? = roomDisplayName
+	fun topic(): String? = roomTopic
 	fun isSpace(): Boolean = space
 	fun membership(): Membership = roomMembership
 	fun encryptionState(): EncryptionState = FakeMatrixSdkState.encryptionState
@@ -565,7 +567,14 @@ class Client internal constructor(
 		if (fake.malformedRoomId) {
 			MalformedRoom(fake.roomId, fake.displayName, fake.isSpace, fake.membership)
 		} else {
-			Room(fake.roomId, fake.displayName, fake.isSpace, fake.membership, fake.unreadMessagesCount)
+			Room(
+				fake.roomId,
+				fake.displayName,
+				fake.isSpace,
+				fake.membership,
+				fake.unreadMessagesCount,
+				fake.topic,
+			)
 		}
 	} as List<Room>
 
@@ -732,6 +741,7 @@ data class FakeRoomSpec(
 	val membership: Membership = Membership.JOINED,
 	val malformedRoomId: Boolean = false,
 	val unreadMessagesCount: ULong? = null,
+	val topic: String? = null,
 )
 
 /** Test-only malformed runtime handle returned through `Client.rooms()`'s erased list type. */

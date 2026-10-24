@@ -365,6 +365,16 @@ class ReflectiveMatrixHomeserverDiscoveryClientTest {
 	}
 
 	@Test
+	fun `getJoinedRooms preserves present empty and absent topics`() {
+		val client = newSessionClient()
+		client.login("https://matrix.example.org", "alice", "swordfish")
+		for (topic in listOf("Room purpose", "", null)) {
+			FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec("!a:example.org", topic = topic))
+			assertEquals(topic, client.getJoinedRooms(10).single().topic)
+		}
+	}
+
+	@Test
 	fun `getJoinedRooms carries unread message count and disposes roomInfo`() {
 		val client = newSessionClient()
 		client.login("https://matrix.example.org", "alice", "swordfish")

@@ -62,6 +62,12 @@ class MatrixRoomConnector(
 
 	override fun isAuthorized(): Boolean = authSession.getSnapshot().authState == MatrixAuthState.READY
 
+	override fun getThreadTopic(threadId: String): String? = if (isAuthorized()) {
+		roomSnapshotClient.getJoinedRooms(Int.MAX_VALUE).firstOrNull { it.roomId == threadId }?.topic
+	} else {
+		null
+	}
+
 	override fun getRecentThreads(limit: Int): List<ConnectorThread> {
 		if (!isAuthorized()) return emptyList()
 
@@ -87,6 +93,7 @@ class MatrixRoomConnector(
 				latestMessageType = latest?.type ?: ConnectorMessageType.TEXT,
 				unreadCount = snapshot.unreadCount,
 				isMarkedUnread = snapshot.isMarkedUnread,
+				topic = snapshot.topic,
 			)
 		}
 	}

@@ -15,6 +15,7 @@ import android.widget.ImageButton
 import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
+import androidx.appcompat.app.ActionBar
 import androidx.lifecycle.ViewModelProvider
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.google.android.material.snackbar.Snackbar
@@ -165,6 +166,34 @@ class ConnectorConversationActivity : BriarActivity() {
 			imageSender: ConnectorImageSender?,
 		): Boolean = imageSender != null && connectorEnabled && authorized && hasValidThreadId(threadId)
 
+		internal fun bindTopic(actionBar: ActionBar?, topic: String?) {
+			actionBar?.subtitle = topicSubtitle(topic)
+		}
+
+		internal fun topicSubtitle(topic: String?): String? {
+			val text = StringBuilder()
+			var index = 0
+			while (topic != null && index < topic.length) {
+				val point = topic.codePointAt(index)
+				index += Character.charCount(point)
+				when {
+					Character.isWhitespace(point) || Character.isSpaceChar(point) -> {
+						if (text.isNotEmpty() && text.last() != ' ') text.append(' ')
+					}
+					Character.getType(point).toByte() !in
+						listOf(Character.CONTROL, Character.FORMAT, Character.SURROGATE) ->
+						text.appendCodePoint(point)
+				}
+			}
+			val normalized = text.toString().trim()
+			if (normalized.isEmpty()) return null
+			return if (normalized.codePointCount(0, normalized.length) > 120) {
+				normalized.substring(0, normalized.offsetByCodePoints(0, 119)).trimEnd() + "…"
+			} else {
+				normalized
+			}
+		}
+
 		internal fun titleText(title: String?, fallback: String): String {
 			if (title == null) return fallback
 			var index = 0
@@ -271,7 +300,7 @@ class ConnectorConversationActivity : BriarActivity() {
 		supportActionBar?.apply {
 			setDisplayHomeAsUpEnabled(true)
 			this.title = title
-			subtitle = sourceName
+			subtitle = null
 		}
 
 		list = findViewById(R.id.connectorConversationList)
@@ -437,6 +466,7 @@ class ConnectorConversationActivity : BriarActivity() {
 	}
 
 	private fun loadMessages(showLoading: Boolean = true, isInitialOpen: Boolean = false) {
+		bindTopic(supportActionBar, null)
 		automaticRefreshRunning = !showLoading
 		val loadGeneration = loadOwner.begin()
 		val activeConnector = connector
@@ -477,7 +507,12 @@ class ConnectorConversationActivity : BriarActivity() {
 						val state = ConnectorConversationMessageListState(
 							ConnectorConversationMessageItem.fromMessages(result.messages),
 						)
-						showMessages(loadGeneration, state, EMPTY)
+						val topic = try {
+							activeConnector.getThreadTopic(threadId)
+						} catch (e: RuntimeException) {
+							null
+						}
+						showMessages(loadGeneration, state, EMPTY, topic)
 						if (isInitialOpen || result.messages.isNotEmpty()) {
 							markThreadRead(loadGeneration)
 						}
@@ -570,9 +605,11 @@ class ConnectorConversationActivity : BriarActivity() {
 		loadGeneration: Long,
 		state: ConnectorConversationMessageListState,
 		availabilityState: ConnectorConversationAvailabilityState,
+		topic: String? = null,
 	) {
 		runOnUiThread {
 			if (!loadOwner.owns(loadGeneration)) return@runOnUiThread
+			bindTopic(supportActionBar, topic)
 			automaticRefreshRunning = false
 			val next = if (availabilityState == EMPTY) {
 				messageState.reconcile(state.messages).copy(isLoading = false)

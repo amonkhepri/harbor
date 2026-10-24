@@ -9,5 +9,8 @@ interface ReadOnlyConnector {
 
 	fun getRecentThreads(limit: Int): List<ConnectorThread>
 
+	/** Optional metadata lookup without loading other threads' timelines. */
+	fun getThreadTopic(threadId: String): String? = null
+
 	fun getRecentMessageReadResult(threadId: String, limit: Int): ConnectorMessageReadResult
 }

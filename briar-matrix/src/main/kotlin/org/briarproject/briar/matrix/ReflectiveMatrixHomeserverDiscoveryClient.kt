@@ -586,10 +586,18 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			val displayName = (roomClass.getMethod("displayName").invoke(room) as? String)
 				?.takeIf { it.isNotEmpty() } ?: id
 			val (unreadCount, markedUnread) = readUnreadState(room)
-			MatrixRoomSnapshot(id, displayName, unreadCount, markedUnread)
+			MatrixRoomSnapshot(id, displayName, unreadCount, markedUnread, readTopic(room))
 		}
 	} catch (e: InvocationTargetException) {
 		null
+	} catch (e: ReflectiveOperationException) {
+		null
+	} catch (e: LinkageError) {
+		null
+	}
+
+	private fun readTopic(room: Any): String? = try {
+		room.javaClass.getMethod("topic").invoke(room) as? String
 	} catch (e: ReflectiveOperationException) {
 		null
 	} catch (e: LinkageError) {

@@ -20,4 +20,5 @@ data class MatrixRoomSnapshot(
 	val displayName: String,
 	val unreadCount: Int? = null,
 	val isMarkedUnread: Boolean? = null,
+	val topic: String? = null,
 )
