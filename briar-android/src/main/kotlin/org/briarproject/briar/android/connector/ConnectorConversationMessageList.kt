@@ -74,6 +74,25 @@ internal data class ConnectorConversationMessageListState(
 		)
 	}
 
+	fun retrySend(id: String): ConnectorConversationMessageListState {
+		val echoes = localEchoes.map {
+			if (it.item.stableId != id) {
+				it
+			} else {
+				it.copy(
+					completed = false,
+					item = it.item.copy(localEchoStatus = ConnectorLocalEchoStatus.PENDING),
+				)
+			}
+		}
+		return copy(
+			localEchoes = echoes,
+			messages = messages.map { message ->
+				echoes.firstOrNull { it.item.stableId == message.stableId }?.item ?: message
+			},
+		)
+	}
+
 	fun reconcile(
 		serverMessages: List<ConnectorConversationMessageItem>,
 	): ConnectorConversationMessageListState {

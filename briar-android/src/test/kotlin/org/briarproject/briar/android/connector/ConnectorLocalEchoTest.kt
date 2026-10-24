@@ -22,6 +22,7 @@ import org.briarproject.briar.api.connector.ConnectorTextSender
 import org.briarproject.briar.api.connector.ConnectorThread
 import org.briarproject.briar.api.connector.ReadOnlyConnector
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -96,6 +97,46 @@ class ConnectorLocalEchoTest {
 		setField(activity, "threadId", "room")
 		activity.ioExecutor = Executor { work.add(it) }
 		return activity
+	}
+
+	private class FakeTextConnector(
+		var enabled: Boolean = true,
+		var authorized: Boolean = true,
+		var sendResult: Boolean = true,
+	) : ReadOnlyConnector, ConnectorTextSender {
+		override val source = ConnectorSources.MATRIX
+		override fun isEnabled() = enabled
+		override fun isAuthorized() = authorized
+		override fun getRecentThreads(limit: Int) = emptyList<ConnectorThread>()
+		override fun getRecentMessageReadResult(threadId: String, limit: Int) =
+			ConnectorMessageReadResult.Success(emptyList())
+
+		var sendCount = 0
+		override fun sendText(threadId: String, text: String): Boolean {
+			sendCount++
+			return sendResult
+		}
+	}
+
+	private fun buildActivityForTextSend(
+		connector: ReadOnlyConnector,
+		work: MutableList<Runnable>,
+	): ConnectorConversationActivity {
+		val activity = buildActivityForMediaSend(connector, work)
+		setField(activity, "textSender", connector as? ConnectorTextSender)
+		return activity
+	}
+
+	private fun sendFailingText(
+		activity: ConnectorConversationActivity,
+		work: MutableList<Runnable>,
+		text: String = "retry",
+	): ConnectorConversationMessageItem {
+		(getField(activity, "composeText") as EditText).setText(text)
+		ConnectorConversationActivity::class.java.getDeclaredMethod("onSendClicked")
+			.apply { isAccessible = true }.invoke(activity)
+		work.removeAt(0).run()
+		return messageState(activity).messages.single()
 	}
 
 	private fun setField(activity: ConnectorConversationActivity, name: String, value: Any?) {
@@ -397,5 +438,121 @@ class ConnectorLocalEchoTest {
 		invokeCompleteEcho(activity, "completeFileEcho", false)
 
 		assertTrue(messageState(activity).messages.isEmpty())
+	}
+
+	@Test fun testRetryStateTransitionFailedToPendingToSentOnSuccess() {
+		val work = mutableListOf<Runnable>()
+		val connector = FakeTextConnector(sendResult = false)
+		val activity = buildActivityForTextSend(connector, work)
+		val failedItem = sendFailingText(activity, work, "retry me")
+		assertEquals(ConnectorLocalEchoStatus.FAILED, failedItem.localEchoStatus)
+
+		connector.sendResult = true
+		activity.onRetrySendClicked(failedItem)
+
+		assertEquals(ConnectorLocalEchoStatus.PENDING, messageState(activity).messages.single().localEchoStatus)
+		assertEquals(1, work.size)
+
+		work.removeAt(0).run()
+		assertEquals(ConnectorLocalEchoStatus.SENT, messageState(activity).messages.single().localEchoStatus)
+	}
+
+	@Test fun testRetryStateTransitionFailedToPendingToFailedOnFailure() {
+		val work = mutableListOf<Runnable>()
+		val connector = FakeTextConnector(sendResult = false)
+		val activity = buildActivityForTextSend(connector, work)
+		val failedItem = sendFailingText(activity, work, "retry fail")
+		assertEquals(ConnectorLocalEchoStatus.FAILED, failedItem.localEchoStatus)
+
+		activity.onRetrySendClicked(failedItem)
+		assertEquals(ConnectorLocalEchoStatus.PENDING, messageState(activity).messages.single().localEchoStatus)
+		work.removeAt(0).run()
+		assertEquals(ConnectorLocalEchoStatus.FAILED, messageState(activity).messages.single().localEchoStatus)
+	}
+
+	@Test fun testAdapterClickFiresRetryOnlyForFailedEchoes() {
+		val work = mutableListOf<Runnable>()
+		val connector = FakeTextConnector(sendResult = true)
+		val activity = buildActivityForTextSend(connector, work)
+
+		val view = LayoutInflater.from(activity).inflate(R.layout.list_item_connector_message, null)
+		val holder = ConnectorConversationAdapter.MessageViewHolder(view, null, activity::onRetrySendClicked)
+
+		listOf(
+			server.copy(isOutgoing = false),
+			server.copy(localEchoStatus = ConnectorLocalEchoStatus.PENDING),
+			server.copy(localEchoStatus = ConnectorLocalEchoStatus.SENT),
+			server,
+		).forEach {
+			holder.bind(it)
+			assertFalse(view.performClick())
+		}
+		assertEquals(0, connector.sendCount)
+
+		val failed = server.copy(localEchoStatus = ConnectorLocalEchoStatus.FAILED)
+		setField(
+			activity,
+			"messageState",
+			ConnectorConversationMessageListState(
+				messages = listOf(failed),
+				localEchoes = listOf(ConnectorLocalEcho(failed, emptySet(), completed = true)),
+			),
+		)
+		holder.bind(failed)
+		assertTrue(view.performClick())
+		assertEquals(1, work.size)
+		assertEquals(ConnectorLocalEchoStatus.PENDING, messageState(activity).messages.single().localEchoStatus)
+	}
+
+	@Test fun testDuplicateClickSuppressedWhileRetryInFlight() {
+		val work = mutableListOf<Runnable>()
+		val connector = FakeTextConnector(sendResult = false)
+		val activity = buildActivityForTextSend(connector, work)
+		val failedItem = sendFailingText(activity, work, "dup click")
+		assertEquals(ConnectorLocalEchoStatus.FAILED, failedItem.localEchoStatus)
+
+		activity.onRetrySendClicked(failedItem)
+		assertEquals(1, work.size)
+		assertEquals(ConnectorLocalEchoStatus.PENDING, messageState(activity).messages.single().localEchoStatus)
+
+		activity.onRetrySendClicked(failedItem)
+		assertEquals(1, work.size)
+
+		connector.sendResult = true
+		work.removeAt(0).run()
+		assertEquals(ConnectorLocalEchoStatus.SENT, messageState(activity).messages.single().localEchoStatus)
+	}
+
+	@Test fun testRetryFencedAgainstLogoutAndLifecycleCancellation() {
+		val work = mutableListOf<Runnable>()
+		val connector = FakeTextConnector(sendResult = false)
+		val activity = buildActivityForTextSend(connector, work)
+		val failedItem = sendFailingText(activity, work, "fenced")
+		assertEquals(ConnectorLocalEchoStatus.FAILED, failedItem.localEchoStatus)
+
+		// Suppressed when logged out
+		connector.authorized = false
+		activity.onRetrySendClicked(failedItem)
+		assertTrue(work.isEmpty())
+		assertEquals(ConnectorLocalEchoStatus.FAILED, messageState(activity).messages.single().localEchoStatus)
+
+		// In-flight retry cancelled when finishing/destroyed does not crash or update view
+		connector.authorized = true
+		connector.sendResult = true
+		activity.onRetrySendClicked(failedItem)
+		assertEquals(1, work.size)
+		assertEquals(ConnectorLocalEchoStatus.PENDING, messageState(activity).messages.single().localEchoStatus)
+
+		activity.finish()
+		assertTrue(activity.isFinishing)
+		(getField(activity, "retryOwner") as ConnectorConversationLoadOwner).invalidate()
+
+		// New retry ignored when finishing
+		activity.onRetrySendClicked(failedItem)
+		assertEquals(1, work.size)
+
+		// Queued background result does not mutate state after destruction
+		work.removeAt(0).run()
+		assertEquals(ConnectorLocalEchoStatus.PENDING, messageState(activity).messages.single().localEchoStatus)
 	}
 }

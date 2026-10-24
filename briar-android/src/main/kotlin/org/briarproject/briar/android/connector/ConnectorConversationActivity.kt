@@ -163,7 +163,8 @@ class ConnectorConversationActivity : BriarActivity() {
 		}
 	}
 
-	private val adapter = ConnectorConversationAdapter(::onDeleteMessageClicked)
+	private val adapter =
+		ConnectorConversationAdapter(::onDeleteMessageClicked, ::onRetrySendClicked)
 
 	@Inject
 	lateinit var connectorRegistry: ConnectorRegistry
@@ -206,6 +207,8 @@ class ConnectorConversationActivity : BriarActivity() {
 	// Not restored across recreation: matches MX-015's local-only echo scope boundary.
 	private var pendingImageEchoId: String? = null
 	private var pendingFileEchoId: String? = null
+	private val inFlightRetryIds = mutableSetOf<String>()
+	private val retryOwner = ConnectorConversationLoadOwner()
 
 	private val imageContentLauncher = registerForActivityResult(GetImageAdvanced(), ::onImageChosen)
 	private val imageDocumentLauncher =
@@ -405,6 +408,8 @@ class ConnectorConversationActivity : BriarActivity() {
 	override fun onDestroy() {
 		unreadOwner.invalidate()
 		loadOwner.invalidate()
+		retryOwner.invalidate()
+		inFlightRetryIds.clear()
 		super.onDestroy()
 	}
 
@@ -837,6 +842,50 @@ class ConnectorConversationActivity : BriarActivity() {
 				val outcome = resolveDeleteOutcome(messageState, item, success)
 				outcome.feedbackStringRes?.let { Snackbar.make(list, it, Snackbar.LENGTH_LONG).show() }
 					?: submitMessageState(outcome.nextState)
+			}
+		}
+	}
+
+	internal fun onRetrySendClicked(item: ConnectorConversationMessageItem) {
+		if (item.type != ConnectorMessageType.TEXT) return
+		val echoId = item.stableId
+		if (inFlightRetryIds.contains(echoId)) return
+		val activeConnector = connector ?: return
+		val sender = textSender ?: return
+		if (!activeConnector.isEnabled() || !activeConnector.isAuthorized() || isFinishing || isDestroyed) {
+			return
+		}
+		val activeThreadId = threadId
+		if (activeThreadId.isEmpty()) return
+
+		inFlightRetryIds.add(echoId)
+		val generation = retryOwner.begin()
+		submitMessageState(messageState.retrySend(echoId))
+		ioExecutor.execute {
+			val sent = try {
+				if (!activeConnector.isAuthorized()) {
+					false
+				} else {
+					sender.sendText(activeThreadId, item.text)
+				}
+			} catch (e: RuntimeException) {
+				false
+			}
+			runOnUiThread {
+				inFlightRetryIds.remove(echoId)
+				if (!retryOwner.owns(generation) || isFinishing || isDestroyed || !activeConnector.isAuthorized()) {
+					return@runOnUiThread
+				}
+				submitMessageState(messageState.completeSend(echoId, sent))
+				if (sent) {
+					loadMessages(showLoading = false)
+				} else {
+					BriarSnackbarBuilder().make(
+						list,
+						R.string.connector_conversation_send_failed,
+						Snackbar.LENGTH_LONG,
+					).show()
+				}
 			}
 		}
 	}

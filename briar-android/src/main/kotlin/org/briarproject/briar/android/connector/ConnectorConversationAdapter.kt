@@ -13,6 +13,7 @@ import org.briarproject.briar.api.connector.ConnectorMessageType
 
 internal class ConnectorConversationAdapter(
 	private val onDeleteClicked: ((ConnectorConversationMessageItem) -> Unit)? = null,
+	private val onRetrySendClicked: ((ConnectorConversationMessageItem) -> Unit)? = null,
 ) : ListAdapter<
 	ConnectorConversationMessageItem,
 	ConnectorConversationAdapter.MessageViewHolder,
@@ -24,7 +25,7 @@ internal class ConnectorConversationAdapter(
 			parent,
 			false,
 		)
-		return MessageViewHolder(view, onDeleteClicked)
+		return MessageViewHolder(view, onDeleteClicked, onRetrySendClicked)
 	}
 
 	override fun onBindViewHolder(holder: MessageViewHolder, position: Int) {
@@ -34,7 +35,10 @@ internal class ConnectorConversationAdapter(
 	class MessageViewHolder(
 		itemView: View,
 		private val onDeleteClicked: ((ConnectorConversationMessageItem) -> Unit)? = null,
+		private val onRetrySendClicked: ((ConnectorConversationMessageItem) -> Unit)? = null,
 	) : RecyclerView.ViewHolder(itemView) {
+		constructor(itemView: View, onDeleteClicked: ((ConnectorConversationMessageItem) -> Unit)?) :
+			this(itemView, onDeleteClicked, null)
 		private val text: TextView =
 			itemView.findViewById(R.id.connectorMessageText)
 		private val direction: TextView =
@@ -90,6 +94,15 @@ internal class ConnectorConversationAdapter(
 			)
 			date.visibility = if (item.dateMillis > 0) View.VISIBLE else View.GONE
 			date.text = if (item.dateMillis > 0) formatDate(date.context, item.dateMillis) else ""
+			if (item.isOutgoing &&
+				item.localEchoStatus == ConnectorLocalEchoStatus.FAILED &&
+				onRetrySendClicked != null
+			) {
+				itemView.setOnClickListener { onRetrySendClicked.invoke(item) }
+			} else {
+				itemView.setOnClickListener(null)
+				itemView.isClickable = false
+			}
 			itemView.setOnLongClickListener {
 				// Delete affordance is connector-neutral: own sent messages without pending
 				// local echo and not already deleted trigger the callback when delete is supported.
