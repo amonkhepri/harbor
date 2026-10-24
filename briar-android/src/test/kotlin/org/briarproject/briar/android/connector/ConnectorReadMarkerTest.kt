@@ -14,6 +14,7 @@ import org.briarproject.briar.api.connector.ConnectorMessage
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult
 import org.briarproject.briar.api.connector.ConnectorMessageType
 import org.briarproject.briar.api.connector.ConnectorReadMarker
+import org.briarproject.briar.api.connector.ConnectorUnreadMarker
 import org.briarproject.briar.api.connector.ConnectorSources
 import org.briarproject.briar.api.connector.ConnectorThread
 import org.briarproject.briar.api.connector.ReadOnlyConnector
@@ -32,6 +33,7 @@ class ConnectorReadMarkerTest {
 	private open class FakeConnector : ReadOnlyConnector {
 		override val source get() = ConnectorSources.TELEGRAM
 		var authorized = true
+		var enabled = true
 		var reads = 0
 		var result: ConnectorMessageReadResult = ConnectorMessageReadResult.Success(
 			listOf(
@@ -47,7 +49,7 @@ class ConnectorReadMarkerTest {
 				),
 			),
 		)
-		override fun isEnabled() = true
+		override fun isEnabled() = enabled
 		override fun isAuthorized() = authorized
 		override fun getRecentThreads(limit: Int) = emptyList<ConnectorThread>()
 		override fun getRecentMessageReadResult(
@@ -61,10 +63,25 @@ class ConnectorReadMarkerTest {
 
 	private class MarkingConnector :
 		FakeConnector(),
-		ConnectorReadMarker {
+		ConnectorReadMarker,
+		ConnectorUnreadMarker {
 		override val source get() = ConnectorSources.MATRIX
 		var marks = 0
+		var unreadMarks = 0
+		var unreadResult = true
+		var beforeRead: () -> Unit = {}
+		var beforeUnread: () -> Unit = {}
+		override fun prepareMarkUnread(threadId: String) =
+			object : ConnectorUnreadMarker.PreparedMarkUnread {
+				override fun isCurrent() = authorized
+				override fun markUnread(): Boolean {
+					beforeUnread()
+					unreadMarks++
+					return unreadResult
+				}
+			}
 		override fun markThreadRead(threadId: String): Boolean {
+			beforeRead()
 			assertEquals("room", threadId)
 			marks++
 			return true
@@ -114,6 +131,117 @@ class ConnectorReadMarkerTest {
 			Boolean::class.javaPrimitiveType,
 			Boolean::class.javaPrimitiveType,
 		).apply { isAccessible = true }.invoke(activity, false, initial)
+	}
+
+	private fun markUnread(activity: ConnectorConversationActivity) {
+		ConnectorConversationActivity::class.java.getDeclaredMethod("markUnreadAndClose")
+			.apply { isAccessible = true }.invoke(activity)
+	}
+
+	@Test fun unreadSuccessClosesAndSuppressesDuplicateAndQueuedReads() {
+		val connector = MarkingConnector()
+		val activity = activity(connector)
+		load(activity, initial = true)
+		markUnread(activity)
+		markUnread(activity)
+		assertEquals(2, work.size)
+		work.removeAt(0).run()
+		assertEquals(0, connector.marks)
+		work.removeAt(0).run()
+		assertEquals(1, connector.unreadMarks)
+		assertEquals(true, activity.isFinishing)
+	}
+
+	@Test fun unreadFailureStaysOpenAndRestoresReadsAndRetry() {
+		val connector = MarkingConnector().apply { unreadResult = false }
+		val activity = activity(connector)
+		markUnread(activity)
+		work.removeAt(0).run()
+		assertEquals(false, activity.isFinishing)
+		load(activity, initial = true)
+		work.removeAt(0).run()
+		assertEquals(1, connector.marks)
+		connector.unreadResult = true
+		markUnread(activity)
+		work.removeAt(0).run()
+		assertEquals(true, activity.isFinishing)
+	}
+
+	@Test fun logoutDuringUnreadFencesNavigation() {
+		val connector = MarkingConnector()
+		val activity = activity(connector)
+		connector.beforeUnread = { connector.authorized = false }
+		markUnread(activity)
+		work.removeAt(0).run()
+		assertEquals(false, activity.isFinishing)
+	}
+
+	@Test fun menuIsCapabilityGatedAndDisabledWhilePending() {
+		val connector = MarkingConnector()
+		val activity = activity(connector)
+		val menu = android.widget.PopupMenu(activity, FrameLayout(activity)).menu
+		activity.menuInflater.inflate(R.menu.connector_conversation_actions, menu)
+		val action = menu.findItem(R.id.action_mark_unread_connector_conversation)
+		activity.onPrepareOptionsMenu(menu)
+		assertEquals(true, action.isVisible)
+		assertEquals(activity.getString(R.string.connector_mark_unread), action.title)
+		activity.onOptionsItemSelected(action)
+		activity.onPrepareOptionsMenu(menu)
+		assertEquals(false, action.isEnabled)
+		connector.authorized = false
+		activity.onPrepareOptionsMenu(menu)
+		assertEquals(false, action.isVisible)
+		connector.authorized = true
+		connector.enabled = false
+		activity.onPrepareOptionsMenu(menu)
+		assertEquals(false, action.isVisible)
+		activity(FakeConnector()).onPrepareOptionsMenu(menu)
+		assertEquals(false, action.isVisible)
+	}
+
+	@Test fun destroyedScreenOrChangedRoomCannotRunQueuedUnread() {
+		for (changeRoom in listOf(false, true)) {
+			val connector = MarkingConnector()
+			val activity = activity(connector)
+			markUnread(activity)
+			if (changeRoom) {
+				ConnectorConversationActivity::class.java.getDeclaredField("threadId")
+					.apply { isAccessible = true }.set(activity, "other")
+			} else {
+				val owner = ConnectorConversationActivity::class.java.getDeclaredField("unreadOwner")
+					.apply { isAccessible = true }.get(activity) as ConnectorConversationLoadOwner
+				owner.invalidate()
+			}
+			work.removeAt(0).run()
+			assertEquals(0, connector.unreadMarks)
+			assertEquals(false, activity.isFinishing)
+		}
+	}
+
+	@Test fun delayedReadCompletesBeforeUnread() {
+		val connector = MarkingConnector()
+		val activity = activity(connector)
+		val entered = java.util.concurrent.CountDownLatch(1)
+		val release = java.util.concurrent.CountDownLatch(1)
+		connector.beforeRead = {
+			entered.countDown()
+			check(release.await(5, java.util.concurrent.TimeUnit.SECONDS))
+		}
+		connector.beforeUnread = { assertEquals(1, connector.marks) }
+		load(activity, initial = true)
+		val read = Thread(work.removeAt(0)).apply { start() }
+		check(entered.await(5, java.util.concurrent.TimeUnit.SECONDS))
+		markUnread(activity)
+		val unread = Thread(work.removeAt(0)).apply { start() }
+		release.countDown()
+		read.join(5000)
+		unread.join(5000)
+		assertEquals(false, read.isAlive)
+		assertEquals(false, unread.isAlive)
+		assertEquals(1, connector.unreadMarks)
+		load(activity)
+		work.removeAt(0).run()
+		assertEquals(1, connector.marks)
 	}
 
 	@Test fun openingAndNonemptyRefreshEachMarkOnceOnExecutor() {

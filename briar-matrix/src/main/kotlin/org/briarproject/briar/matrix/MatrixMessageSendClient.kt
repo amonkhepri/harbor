@@ -1,6 +1,7 @@
 package org.briarproject.briar.matrix
 
 import org.briarproject.briar.api.connector.ConnectorFileSender.PreparedFileSend
+import org.briarproject.briar.api.connector.ConnectorUnreadMarker.PreparedMarkUnread
 
 /**
  * Narrow, fakeable boundary over sending one plain-text message or one image attachment into an
@@ -22,6 +23,8 @@ import org.briarproject.briar.api.connector.ConnectorFileSender.PreparedFileSend
  * against the 26.08.05 AAR for MX-019).
  */
 interface MatrixMessageSendClient {
+	fun prepareMarkUnread(roomId: String): PreparedMarkUnread? = null
+
 	/** Captures the retained SDK session before provider IO; unsupported clients fail closed. */
 	fun prepareFileMessage(roomId: String): PreparedFileSend? = null
 

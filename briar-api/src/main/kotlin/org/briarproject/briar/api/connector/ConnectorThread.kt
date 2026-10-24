@@ -9,4 +9,5 @@ data class ConnectorThread(
 	val isLatestMessageOutgoing: Boolean,
 	val latestMessageType: ConnectorMessageType,
 	val unreadCount: Int? = null,
+	val isMarkedUnread: Boolean? = null,
 )

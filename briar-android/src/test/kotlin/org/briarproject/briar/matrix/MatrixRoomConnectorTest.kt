@@ -63,7 +63,7 @@ class MatrixRoomConnectorTest {
 		val roomSnapshotClient = FakeRoomSnapshotClient(
 			listOf(
 				MatrixRoomSnapshot("!a:example.org", "Alpha", unreadCount = 5),
-				MatrixRoomSnapshot("!b:example.org", "Beta", unreadCount = 0),
+				MatrixRoomSnapshot("!b:example.org", "Beta", unreadCount = 0, isMarkedUnread = true),
 				MatrixRoomSnapshot("!c:example.org", "Gamma", unreadCount = null),
 			),
 		)
@@ -78,6 +78,8 @@ class MatrixRoomConnectorTest {
 		assertEquals(3, threads.size)
 		assertEquals(5, threads[0].unreadCount)
 		assertEquals(0, threads[1].unreadCount)
+		assertEquals(true, threads[1].isMarkedUnread)
+		assertNull(threads[2].isMarkedUnread)
 		assertNull(threads[2].unreadCount)
 	}
 

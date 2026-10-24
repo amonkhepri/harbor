@@ -38,6 +38,7 @@ import org.briarproject.briar.api.connector.ConnectorMessageDeleter
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult
 import org.briarproject.briar.api.connector.ConnectorMessageType
 import org.briarproject.briar.api.connector.ConnectorReadMarker
+import org.briarproject.briar.api.connector.ConnectorUnreadMarker
 import org.briarproject.briar.api.connector.ConnectorRegistry
 import org.briarproject.briar.api.connector.ConnectorSources
 import org.briarproject.briar.api.connector.ConnectorTextSender
@@ -179,6 +180,10 @@ class ConnectorConversationActivity : BriarActivity() {
 	private var imageSender: ConnectorImageSender? = null
 	private var fileSender: ConnectorFileSender? = null
 	private var readMarker: ConnectorReadMarker? = null
+	private val readStateLock = Any()
+	private val unreadOwner = ConnectorConversationLoadOwner()
+
+	@Volatile private var unreadPending = false
 	private lateinit var fileButton: ImageButton
 	private lateinit var fileUpload: ConnectorFileUploadState
 	private val fileLauncher =
@@ -363,6 +368,10 @@ class ConnectorConversationActivity : BriarActivity() {
 	}
 
 	override fun onPrepareOptionsMenu(menu: Menu): Boolean {
+		menu.findItem(R.id.action_mark_unread_connector_conversation)?.apply {
+			isVisible = canMarkUnread()
+			isEnabled = !unreadPending
+		}
 		menu.findItem(R.id.action_refresh_connector_conversation)?.isVisible =
 			shouldShowManualRefreshAction(
 				connector?.isEnabled() == true,
@@ -376,6 +385,10 @@ class ConnectorConversationActivity : BriarActivity() {
 
 	override fun onOptionsItemSelected(item: MenuItem): Boolean {
 		val itemId = item.itemId
+		if (itemId == R.id.action_mark_unread_connector_conversation) {
+			markUnreadAndClose()
+			return true
+		}
 		if (itemId == android.R.id.home) {
 			onBackPressed()
 			return true
@@ -390,6 +403,7 @@ class ConnectorConversationActivity : BriarActivity() {
 	}
 
 	override fun onDestroy() {
+		unreadOwner.invalidate()
 		loadOwner.invalidate()
 		super.onDestroy()
 	}
@@ -463,10 +477,64 @@ class ConnectorConversationActivity : BriarActivity() {
 	// room read after this screen no longer owns it.
 	private fun markThreadRead(loadGeneration: Long) {
 		val marker = readMarker ?: return
-		if (!loadOwner.owns(loadGeneration)) return
-		try {
-			marker.markThreadRead(threadId)
-		} catch (e: RuntimeException) {
+		synchronized(readStateLock) {
+			if (unreadPending || !loadOwner.owns(loadGeneration)) return
+			try {
+				marker.markThreadRead(threadId)
+			} catch (e: RuntimeException) {
+			}
+		}
+	}
+
+	private fun canMarkUnread(): Boolean = connector is ConnectorUnreadMarker &&
+		connector?.isEnabled() == true &&
+		connector?.isAuthorized() == true &&
+		hasValidThreadId(threadId)
+
+	private fun markUnreadAndClose() {
+		if (unreadPending || !canMarkUnread()) return
+		val activeConnector = connector ?: return
+		val room = threadId
+		val prepared = (activeConnector as ConnectorUnreadMarker).prepareMarkUnread(room)
+		val generation = unreadOwner.begin()
+		unreadPending = true
+		invalidateOptionsMenu()
+		ioExecutor.execute {
+			// Only background work takes this lock: finish an active read before setting unread.
+			val success = synchronized(readStateLock) {
+				if (!unreadOwner.owns(generation) ||
+					threadId != room ||
+					!activeConnector.isAuthorized()
+				) {
+					return@execute
+				}
+				try {
+					prepared?.markUnread() == true
+				} catch (e: RuntimeException) {
+					false
+				}
+			}
+			runOnUiThread {
+				if (!unreadOwner.owns(generation) ||
+					threadId != room ||
+					isFinishing ||
+					!activeConnector.isAuthorized() ||
+					prepared?.isCurrent() == false
+				) {
+					return@runOnUiThread
+				}
+				if (success) {
+					finish()
+				} else {
+					unreadPending = false
+					invalidateOptionsMenu()
+					BriarSnackbarBuilder().make(
+						list,
+						R.string.connector_mark_unread_failed,
+						Snackbar.LENGTH_LONG,
+					).show()
+				}
+			}
 		}
 	}
 

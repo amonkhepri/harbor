@@ -12,4 +12,9 @@
 		android:title="@string/connector_conversation_find"
 		app:showAsAction="never" />
 
+	<item
+		android:id="@+id/action_mark_unread_connector_conversation"
+		android:title="@string/connector_mark_unread"
+		app:showAsAction="never" />
+
 </menu>

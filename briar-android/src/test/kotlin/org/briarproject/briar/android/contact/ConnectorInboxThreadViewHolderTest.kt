@@ -91,6 +91,21 @@ class ConnectorInboxThreadViewHolderTest {
 	}
 
 	@Test
+	fun manualUnreadUsesDotUnlessCountPositiveAndRecyclingClearsIt() {
+		val holder = createHolder()
+		for (count in listOf(0, null)) {
+			holder.bind(matrixItem(count).copy(isMarkedUnread = true)) { _, _ -> }
+			assertBadgeVisible(holder, "•", "Marked unread")
+		}
+		holder.bind(matrixItem(3).copy(isMarkedUnread = true)) { _, _ -> }
+		assertBadgeVisible(holder, "3", "3 unread messages")
+		holder.bind(telegramItem(0).copy(isMarkedUnread = true)) { _, _ -> }
+		assertBadgeHidden(holder)
+		holder.bind(matrixItem(null)) { _, _ -> }
+		assertBadgeHidden(holder)
+	}
+
+	@Test
 	fun testMatrixZeroAndUnavailableUnreadHidesBadgeAndResetsAccessibility() {
 		val holder = createHolder()
 

@@ -128,9 +128,11 @@ class GenericConnectorInboxThreadItemTest {
 				false,
 				ConnectorMessageType.TEXT,
 				unreadCount = 12,
+				isMarkedUnread = true,
 			),
 		)
 		assertEquals(12, withCount.unreadCount)
+		assertEquals(true, withCount.isMarkedUnread)
 
 		val withoutCount = GenericConnectorInboxThreadItem(
 			ConnectorThread(
@@ -144,5 +146,6 @@ class GenericConnectorInboxThreadItemTest {
 			),
 		)
 		assertEquals(null, withoutCount.unreadCount)
+		assertEquals(null, withoutCount.isMarkedUnread)
 	}
 }

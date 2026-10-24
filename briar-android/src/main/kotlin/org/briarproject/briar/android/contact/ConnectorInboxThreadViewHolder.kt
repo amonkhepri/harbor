@@ -43,6 +43,13 @@ class ConnectorInboxThreadViewHolder(view: View) : RecyclerView.ViewHolder(view)
 			unreadBadge.text = unreadText(unreadCount)
 			unreadBadge.contentDescription =
 				unreadContentDescription(unreadBadge.resources, unreadCount)
+		} else if (item.connectorSource.id == ConnectorSources.MATRIX_ID &&
+			item.isMarkedUnread == true
+		) {
+			unreadBadge.visibility = View.VISIBLE
+			unreadBadge.text = "•"
+			unreadBadge.contentDescription =
+				unreadBadge.resources.getString(R.string.connector_thread_marked_unread)
 		} else {
 			unreadBadge.visibility = View.GONE
 			unreadBadge.text = ""

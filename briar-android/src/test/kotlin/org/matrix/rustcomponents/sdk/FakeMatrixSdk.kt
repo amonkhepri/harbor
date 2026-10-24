@@ -44,7 +44,7 @@ enum class Membership { INVITED, JOINED, LEFT, KNOCKED, BANNED }
 
 enum class ReceiptType { READ, READ_PRIVATE, FULLY_READ }
 
-class RoomInfo(val numUnreadMessages: ULong = 0uL) {
+class RoomInfo(val numUnreadMessages: ULong = 0uL, val isMarkedUnread: Boolean = false) {
 	fun destroy() {
 		FakeMatrixSdkState.roomInfoDestroyCount++
 	}
@@ -68,7 +68,7 @@ class Room(
 		FakeMatrixSdkState.roomInfoCallCount++
 		FakeMatrixSdkState.roomInfoFailureToThrow?.let { throw it }
 		val count = unreadMessagesCount ?: throw ClientException.Generic("no roomInfo", "no roomInfo")
-		return RoomInfo(count)
+		return RoomInfo(count, FakeMatrixSdkState.markedUnreadRooms[roomId] == true)
 	}
 
 	suspend fun timeline(): Timeline {
@@ -95,6 +95,10 @@ class Room(
 		FakeMatrixSdkState.lastMarkAsReadRoomId = roomId
 		FakeMatrixSdkState.lastMarkAsReadReceiptType = receiptType
 		FakeMatrixSdkState.markAsReadFailureToThrow?.let { throw it }
+	}
+
+	suspend fun setUnreadFlag(newValue: Boolean) {
+		FakeMatrixSdkState.markedUnreadRooms[roomId] = newValue
 	}
 }
 
@@ -837,6 +841,7 @@ object FakeMatrixSdkState {
 	var joinDelayMs = 0L
 	var sendAttachmentJoinHandleCloseCount = 0
 	var markAsReadCallCount = 0
+	val markedUnreadRooms = mutableMapOf<String, Boolean>()
 	var lastMarkAsReadRoomId: String? = null
 	var lastMarkAsReadReceiptType: ReceiptType? = null
 	var markAsReadFailureToThrow: ClientException? = null
@@ -930,6 +935,7 @@ object FakeMatrixSdkState {
 		joinDelayMs = 0L
 		sendAttachmentJoinHandleCloseCount = 0
 		markAsReadCallCount = 0
+		markedUnreadRooms.clear()
 		lastMarkAsReadRoomId = null
 		lastMarkAsReadReceiptType = null
 		markAsReadFailureToThrow = null

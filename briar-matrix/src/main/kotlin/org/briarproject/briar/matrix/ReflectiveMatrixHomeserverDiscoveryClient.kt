@@ -11,6 +11,7 @@ import org.briarproject.briar.api.connector.ConnectorFileSender
 import org.briarproject.briar.api.connector.ConnectorImageSender
 import org.briarproject.briar.api.connector.ConnectorMessageType
 import org.briarproject.briar.api.connector.ConnectorReactionSummary
+import org.briarproject.briar.api.connector.ConnectorUnreadMarker.PreparedMarkUnread
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.DataInputStream
@@ -584,8 +585,8 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			val id = roomClass.getMethod("id").invoke(room) as String
 			val displayName = (roomClass.getMethod("displayName").invoke(room) as? String)
 				?.takeIf { it.isNotEmpty() } ?: id
-			val unreadCount = readUnreadCount(room)
-			MatrixRoomSnapshot(id, displayName, unreadCount)
+			val (unreadCount, markedUnread) = readUnreadState(room)
+			MatrixRoomSnapshot(id, displayName, unreadCount, markedUnread)
 		}
 	} catch (e: InvocationTargetException) {
 		null
@@ -595,7 +596,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		null
 	}
 
-	private fun readUnreadCount(room: Any): Int? {
+	private fun readUnreadState(room: Any): Pair<Int?, Boolean?> {
 		var roomInfo: Any? = null
 		return try {
 			roomInfo = invokeCloseableValue(
@@ -611,11 +612,13 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			// primitive is boxed as a signed Long by reflection: a raw value with the
 			// sign bit set is not a confirmed zero, so it must map to null, not be
 			// clamped into the valid range.
-			unread?.toLong()?.takeIf { it >= 0 }?.coerceAtMost(Int.MAX_VALUE.toLong())?.toInt()
+			val count = unread?.toLong()?.takeIf { it >= 0 }
+				?.coerceAtMost(Int.MAX_VALUE.toLong())?.toInt()
+			count to (roomInfo.javaClass.getMethod("isMarkedUnread").invoke(roomInfo) as? Boolean)
 		} catch (e: Exception) {
-			null
+			null to null
 		} catch (e: LinkageError) {
-			null
+			null to null
 		} finally {
 			destroyQuietly(roomInfo)
 		}
@@ -739,15 +742,34 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 	 * no session is retained, [roomId] cannot be found, or the SDK call fails.
 	 */
 	@Synchronized
-	override fun markRead(roomId: String): Boolean {
+	override fun markRead(roomId: String): Boolean = updateReadState(roomId, false)
+
+	override fun prepareMarkUnread(roomId: String): PreparedMarkUnread? {
+		val generation = synchronized(lifecycleLock) { activeGeneration } ?: return null
+		return object : PreparedMarkUnread {
+			override fun isCurrent(): Boolean = synchronized(lifecycleLock) {
+				activeGeneration === generation
+			}
+			override fun markUnread(): Boolean =
+				synchronized(this@ReflectiveMatrixHomeserverDiscoveryClient) {
+					isCurrent() && updateReadState(roomId, true) && isCurrent()
+				}
+		}
+	}
+
+	private fun updateReadState(roomId: String, unread: Boolean): Boolean {
 		val client = loginClient ?: return false
 		var room: Any? = null
 		return try {
 			room = client.javaClass.getMethod("getRoom", String::class.java).invoke(client, roomId)
 				?: throw SnapshotAdapterFailure()
-			val receiptTypeClass = Class.forName(RECEIPT_TYPE_CLASS_NAME)
-			val readReceiptType = receiptTypeClass.getField("READ_PRIVATE").get(null)
-			invokeUnit(room, "markAsRead", arrayOf(receiptTypeClass), arrayOf(readReceiptType))
+			if (!unread) {
+				val receiptTypeClass = Class.forName(RECEIPT_TYPE_CLASS_NAME)
+				val readReceiptType = receiptTypeClass.getField("READ_PRIVATE").get(null)
+				invokeUnit(room, "markAsRead", arrayOf(receiptTypeClass), arrayOf(readReceiptType))
+			}
+			// SDK 26.08.05 explicitly leaves the flag unchanged in markAsRead.
+			invokeUnit(room, "setUnreadFlag", arrayOf(Boolean::class.javaPrimitiveType!!), arrayOf(unread))
 			true
 		} catch (e: InterruptedException) {
 			Thread.currentThread().interrupt()
@@ -1370,7 +1392,8 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		const val MENTIONS_CLASS_NAME = "org.matrix.rustcomponents.sdk.Mentions"
 		const val IMAGE_INFO_CLASS_NAME = "org.matrix.rustcomponents.sdk.ImageInfo"
 		const val THUMBNAIL_INFO_CLASS_NAME = "org.matrix.rustcomponents.sdk.ThumbnailInfo"
-		const val EVENT_OR_TRANSACTION_ID_CLASS_NAME = "org.matrix.rustcomponents.sdk.EventOrTransactionId"
+		const val EVENT_OR_TRANSACTION_ID_CLASS_NAME =
+			"org.matrix.rustcomponents.sdk.EventOrTransactionId"
 		const val EVENT_ID_CLASS_NAME = "org.matrix.rustcomponents.sdk.EventOrTransactionId\$EventId"
 		const val MEDIA_SOURCE_CLASS_NAME = "org.matrix.rustcomponents.sdk.MediaSource"
 		const val RECEIPT_TYPE_CLASS_NAME = "org.matrix.rustcomponents.sdk.ReceiptType"

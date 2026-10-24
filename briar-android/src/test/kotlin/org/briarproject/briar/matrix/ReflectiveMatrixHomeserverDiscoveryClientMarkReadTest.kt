@@ -111,4 +111,23 @@ class ReflectiveMatrixHomeserverDiscoveryClientMarkReadTest {
 		ReflectiveMatrixHomeserverDiscoveryClient().also { client ->
 			assertEquals(NONE, client.login("https://matrix.example.org", "alice", "swordfish"))
 		}
+
+	@Test
+	fun manualFlagSurvivesFailedReadAndClearsOnlyAfterSuccessfulRead() {
+		val client = loggedInClient()
+		val room = "!room:example.org"
+		FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec(room, unreadMessagesCount = 0uL))
+		val prepared = client.prepareMarkUnread(room)!!
+		assertTrue(prepared.markUnread())
+		assertEquals(true, client.getJoinedRooms(1).single().isMarkedUnread)
+		FakeMatrixSdkState.markAsReadFailureToThrow = ClientException.Generic("failed", "failed")
+		assertFalse(client.markRead(room))
+		assertEquals(true, client.getJoinedRooms(1).single().isMarkedUnread)
+		FakeMatrixSdkState.markAsReadFailureToThrow = null
+		assertTrue(client.markRead(room))
+		assertEquals(false, client.getJoinedRooms(1).single().isMarkedUnread)
+		client.logout()
+		assertFalse(prepared.isCurrent())
+		assertFalse(prepared.markUnread())
+	}
 }
