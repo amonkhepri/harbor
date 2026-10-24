@@ -46,7 +46,9 @@ import org.briarproject.briar.api.connector.ReadOnlyConnector
 import org.briarproject.nullsafety.MethodsNotNullByDefault
 import org.briarproject.nullsafety.ParametersNotNullByDefault
 import java.io.IOException
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executor
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
 
@@ -69,6 +71,27 @@ internal class ConnectorConversationLoadOwner {
 
 	fun invalidate() {
 		generation.incrementAndGet()
+	}
+}
+
+internal class ConnectorConversationRetryOwner {
+	private val generations = ConcurrentHashMap<String, Long>()
+	private val invalidated = AtomicBoolean(false)
+
+	fun begin(echoId: String): Long {
+		if (invalidated.get()) return -1L
+		return generations.compute(echoId) { _, cur -> (cur ?: 0L) + 1L } ?: -1L
+	}
+
+	fun owns(echoId: String, gen: Long): Boolean =
+		!invalidated.get() && gen != -1L && generations[echoId] == gen
+
+	fun clear(echoId: String) {
+		generations.remove(echoId)
+	}
+	fun invalidate() {
+		invalidated.set(true)
+		generations.clear()
 	}
 }
 
@@ -208,7 +231,7 @@ class ConnectorConversationActivity : BriarActivity() {
 	private var pendingImageEchoId: String? = null
 	private var pendingFileEchoId: String? = null
 	private val inFlightRetryIds = mutableSetOf<String>()
-	private val retryOwner = ConnectorConversationLoadOwner()
+	private val retryOwner = ConnectorConversationRetryOwner()
 
 	private val imageContentLauncher = registerForActivityResult(GetImageAdvanced(), ::onImageChosen)
 	private val imageDocumentLauncher =
@@ -852,39 +875,34 @@ class ConnectorConversationActivity : BriarActivity() {
 		if (inFlightRetryIds.contains(echoId)) return
 		val activeConnector = connector ?: return
 		val sender = textSender ?: return
-		if (!activeConnector.isEnabled() || !activeConnector.isAuthorized() || isFinishing || isDestroyed) {
-			return
-		}
+		val unavailable = !activeConnector.isEnabled() || !activeConnector.isAuthorized()
+		if (unavailable || isFinishing || isDestroyed) return
 		val activeThreadId = threadId
 		if (activeThreadId.isEmpty()) return
 
 		inFlightRetryIds.add(echoId)
-		val generation = retryOwner.begin()
+		val generation = retryOwner.begin(echoId)
 		submitMessageState(messageState.retrySend(echoId))
 		ioExecutor.execute {
 			val sent = try {
-				if (!activeConnector.isAuthorized()) {
-					false
-				} else {
-					sender.sendText(activeThreadId, item.text)
-				}
+				if (!activeConnector.isAuthorized()) false else sender.sendText(activeThreadId, item.text)
 			} catch (e: RuntimeException) {
 				false
 			}
 			runOnUiThread {
 				inFlightRetryIds.remove(echoId)
-				if (!retryOwner.owns(generation) || isFinishing || isDestroyed || !activeConnector.isAuthorized()) {
+				val dead = !retryOwner.owns(echoId, generation) || isFinishing || isDestroyed
+				if (dead || !activeConnector.isAuthorized()) {
+					retryOwner.clear(echoId)
 					return@runOnUiThread
 				}
+				retryOwner.clear(echoId)
 				submitMessageState(messageState.completeSend(echoId, sent))
 				if (sent) {
 					loadMessages(showLoading = false)
 				} else {
-					BriarSnackbarBuilder().make(
-						list,
-						R.string.connector_conversation_send_failed,
-						Snackbar.LENGTH_LONG,
-					).show()
+					val res = R.string.connector_conversation_send_failed
+					BriarSnackbarBuilder().make(list, res, Snackbar.LENGTH_LONG).show()
 				}
 			}
 		}

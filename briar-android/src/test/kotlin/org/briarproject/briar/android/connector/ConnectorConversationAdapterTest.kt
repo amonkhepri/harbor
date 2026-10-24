@@ -4,6 +4,9 @@ import android.app.Application
 import android.view.LayoutInflater
 import android.widget.TextView
 import org.briarproject.briar.R
+import org.briarproject.briar.android.connector.ConnectorLocalEchoStatus.FAILED
+import org.briarproject.briar.android.connector.ConnectorLocalEchoStatus.PENDING
+import org.briarproject.briar.android.connector.ConnectorLocalEchoStatus.SENT
 import org.briarproject.briar.api.connector.ConnectorMessageType
 import org.briarproject.briar.api.connector.ConnectorReactionSummary
 import org.briarproject.briar.api.connector.ConnectorSources
@@ -177,51 +180,43 @@ class ConnectorConversationAdapterTest {
 
 	@Test
 	fun testRetrySendAffordanceOnlyOnFailedOutgoingEchoes() {
-		val context = RuntimeEnvironment.getApplication()
-		val parent = android.widget.FrameLayout(context)
-		val view = LayoutInflater.from(context)
-			.inflate(R.layout.list_item_connector_message, parent, false)
-		parent.addView(view)
-
+		val view = LayoutInflater.from(RuntimeEnvironment.getApplication())
+			.inflate(R.layout.list_item_connector_message, null)
 		var retryItem: ConnectorConversationMessageItem? = null
 		val holder = ConnectorConversationAdapter.MessageViewHolder(
 			view,
 			onDeleteClicked = null,
 			onRetrySendClicked = { retryItem = it },
 		)
-
 		val base = ConnectorConversationMessageItem(
-			connectorSource = ConnectorSources.MATRIX,
-			connectorThreadId = "!room:example.org",
-			connectorMessageId = "\$1",
-			dateMillis = 1000L,
-			isOutgoing = false,
-			text = "hello",
-			type = ConnectorMessageType.TEXT,
+			ConnectorSources.MATRIX,
+			"!room",
+			"$1",
+			1000L,
+			false,
+			"hello",
+			ConnectorMessageType.TEXT,
 		)
-
-		// Incoming, non-echo, pending, and sent messages must not trigger retry
-		listOf(
+		val nonRetry = listOf(
 			base,
-			base.copy(localEchoStatus = ConnectorLocalEchoStatus.FAILED),
+			base.copy(localEchoStatus = FAILED),
 			base.copy(isOutgoing = true),
-			base.copy(isOutgoing = true, localEchoStatus = ConnectorLocalEchoStatus.PENDING),
-			base.copy(isOutgoing = true, localEchoStatus = ConnectorLocalEchoStatus.SENT),
-		).forEach {
+			base.copy(isOutgoing = true, localEchoStatus = PENDING),
+			base.copy(isOutgoing = true, localEchoStatus = SENT),
+		)
+		nonRetry.forEach {
 			holder.bind(it)
 			assertFalse(view.performClick())
 			assertNull(retryItem)
 		}
 
-		// Outgoing failed echo triggers retry callback
-		val failed = base.copy(isOutgoing = true, localEchoStatus = ConnectorLocalEchoStatus.FAILED)
+		val failed = base.copy(isOutgoing = true, localEchoStatus = FAILED)
 		holder.bind(failed)
 		assertTrue(view.performClick())
 		assertEquals(failed, retryItem)
 
-		// With null onRetrySendClicked, click is disabled
 		retryItem = null
-		ConnectorConversationAdapter.MessageViewHolder(view, null, null).bind(failed)
+		ConnectorConversationAdapter.MessageViewHolder(view).bind(failed)
 		assertFalse(view.performClick())
 		assertNull(retryItem)
 	}
