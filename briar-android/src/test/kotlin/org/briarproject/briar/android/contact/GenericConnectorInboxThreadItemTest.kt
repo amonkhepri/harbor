@@ -95,7 +95,10 @@ class GenericConnectorInboxThreadItemTest {
 			assertEquals("Chat", view.findViewById<TextView>(R.id.connectorThreadTitle).text.toString())
 		}
 		holder.bind(loading.copy(title = "Custom Room")) { _, _ -> }
-		assertEquals("Custom Room", view.findViewById<TextView>(R.id.connectorThreadTitle).text.toString())
+		assertEquals(
+			"Custom Room",
+			view.findViewById<TextView>(R.id.connectorThreadTitle).text.toString(),
+		)
 
 		val outgoingPhoto = GenericConnectorInboxThreadItem(
 			ConnectorThread(
