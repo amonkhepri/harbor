@@ -584,7 +584,8 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			val id = roomClass.getMethod("id").invoke(room) as String
 			val displayName = (roomClass.getMethod("displayName").invoke(room) as? String)
 				?.takeIf { it.isNotEmpty() } ?: id
-			MatrixRoomSnapshot(id, displayName)
+			val unreadCount = readUnreadCount(room)
+			MatrixRoomSnapshot(id, displayName, unreadCount)
 		}
 	} catch (e: InvocationTargetException) {
 		null
@@ -592,6 +593,32 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		null
 	} catch (e: LinkageError) {
 		null
+	}
+
+	private fun readUnreadCount(room: Any): Int? {
+		var roomInfo: Any? = null
+		return try {
+			roomInfo = invokeCloseableValue(
+				target = room,
+				methodName = "roomInfo",
+				parameterTypes = emptyArray(),
+				arguments = emptyArray(),
+				abandon = ::destroyQuietly,
+			)
+			val method = roomInfo.javaClass.getMethod("getNumUnreadMessages-s-VKNKU")
+			val unread = method.invoke(roomInfo) as? Number
+			// getNumUnreadMessages-s-VKNKU returns an unsigned ULong whose underlying
+			// primitive is boxed as a signed Long by reflection: a raw value with the
+			// sign bit set is not a confirmed zero, so it must map to null, not be
+			// clamped into the valid range.
+			unread?.toLong()?.takeIf { it >= 0 }?.coerceAtMost(Int.MAX_VALUE.toLong())?.toInt()
+		} catch (e: Exception) {
+			null
+		} catch (e: LinkageError) {
+			null
+		} finally {
+			destroyQuietly(roomInfo)
+		}
 	}
 
 	/**

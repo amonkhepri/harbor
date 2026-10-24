@@ -115,4 +115,34 @@ class GenericConnectorInboxThreadItemTest {
 		assertEquals(true, outgoingPhoto.isLastMessageOutgoing)
 		assertEquals(ConnectorMessageType.PHOTO, outgoingPhoto.previewType)
 	}
+
+	@Test
+	fun testUnreadCountCarriesThroughFromConnectorThread() {
+		val withCount = GenericConnectorInboxThreadItem(
+			ConnectorThread(
+				ConnectorSources.MATRIX,
+				"!room:matrix.example.org",
+				"room",
+				42,
+				"preview",
+				false,
+				ConnectorMessageType.TEXT,
+				unreadCount = 12,
+			),
+		)
+		assertEquals(12, withCount.unreadCount)
+
+		val withoutCount = GenericConnectorInboxThreadItem(
+			ConnectorThread(
+				ConnectorSources.MATRIX,
+				"!room:matrix.example.org",
+				"room",
+				42,
+				"preview",
+				false,
+				ConnectorMessageType.TEXT,
+			),
+		)
+		assertEquals(null, withoutCount.unreadCount)
+	}
 }

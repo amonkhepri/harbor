@@ -17,6 +17,9 @@ interface ConnectorInboxThreadItem : InboxThreadItem {
 
 	val isPreviewLoading: Boolean
 
+	val unreadCount: Int?
+		get() = null
+
 	override val stableId: String
 		get() = "${connectorSource.id}:$connectorThreadId"
 

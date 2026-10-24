@@ -36,6 +36,25 @@ class InboxThreadAdapterTest {
 		assertContentsChanged(item.copy(isLastMessageOutgoing = true))
 		assertContentsChanged(item.copy(isPreviewLoading = true))
 		assertContentsChanged(item.copy(latestActivityMillis = 2L))
+		assertContentsChanged(item.copy(unreadCount = 2))
+	}
+
+	@Test
+	fun testConnectorContentsDetectUnreadCountChange() {
+		val item = connectorItem().copy(unreadCount = 3)
+
+		assertEquals(
+			true,
+			callback.areContentsTheSame(item, item.copy(unreadCount = 3)),
+		)
+		assertEquals(
+			false,
+			callback.areContentsTheSame(item, item.copy(unreadCount = 0)),
+		)
+		assertEquals(
+			false,
+			callback.areContentsTheSame(item, item.copy(unreadCount = null)),
+		)
 	}
 
 	@Test

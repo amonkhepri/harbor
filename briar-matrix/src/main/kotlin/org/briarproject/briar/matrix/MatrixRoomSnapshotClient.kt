@@ -15,4 +15,8 @@ interface MatrixRoomSnapshotClient {
 	fun getJoinedRooms(limit: Int): List<MatrixRoomSnapshot>
 }
 
-data class MatrixRoomSnapshot(val roomId: String, val displayName: String)
+data class MatrixRoomSnapshot(
+	val roomId: String,
+	val displayName: String,
+	val unreadCount: Int? = null,
+)
