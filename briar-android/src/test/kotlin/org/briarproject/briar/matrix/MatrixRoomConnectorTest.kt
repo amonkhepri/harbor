@@ -20,6 +20,25 @@ import java.util.concurrent.atomic.AtomicLong
 
 class MatrixRoomConnectorTest {
 
+	@Test fun leavePreparationRequiresAuthorizationAndUsesSelectedRoom() {
+		val auth = FakeMatrixAuthSession(MatrixAuthState.CREDENTIAL_ENTRY)
+		var preparedRoom: String? = null
+		val sender = object : MatrixMessageSendClient by FakeMessageSendClient(true) {
+			override fun prepareLeave(
+				roomId: String,
+			): org.briarproject.briar.api.connector.ConnectorRoomLeaver.PreparedLeave? {
+				preparedRoom = roomId
+				return null
+			}
+		}
+		val connector = connector(authSession = auth, messageSendClient = sender)
+		assertNull(connector.prepareLeave("room"))
+		assertNull(preparedRoom)
+		auth.state = MatrixAuthState.READY
+		connector.prepareLeave("room")
+		assertEquals("room", preparedRoom)
+	}
+
 	@Test
 	fun `enabled and reports authorized only when the auth session is ready`() {
 		val authSession = FakeMatrixAuthSession(MatrixAuthState.CREDENTIAL_ENTRY)

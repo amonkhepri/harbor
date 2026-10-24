@@ -17,4 +17,8 @@
 		android:title="@string/connector_mark_unread"
 		app:showAsAction="never" />
 
+	<item
+		android:id="@+id/action_leave_connector_room"
+		android:title="@string/connector_leave_room"
+		app:showAsAction="never" />
 </menu>

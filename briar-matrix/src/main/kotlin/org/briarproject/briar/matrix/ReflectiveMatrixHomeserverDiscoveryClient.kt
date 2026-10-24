@@ -12,6 +12,7 @@ import org.briarproject.briar.api.connector.ConnectorImageSender
 import org.briarproject.briar.api.connector.ConnectorMessageType
 import org.briarproject.briar.api.connector.ConnectorReactionSummary
 import org.briarproject.briar.api.connector.ConnectorUnreadMarker.PreparedMarkUnread
+import org.briarproject.briar.api.connector.ConnectorRoomLeaver.PreparedLeave
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.DataInputStream
@@ -762,6 +763,33 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 				synchronized(this@ReflectiveMatrixHomeserverDiscoveryClient) {
 					isCurrent() && updateReadState(roomId, true) && isCurrent()
 				}
+		}
+	}
+
+	override fun prepareLeave(roomId: String): PreparedLeave? {
+		val generation = synchronized(lifecycleLock) { activeGeneration } ?: return null
+		return object : PreparedLeave {
+			override fun isCurrent() = synchronized(lifecycleLock) { activeGeneration === generation }
+			override fun leave(): Boolean = synchronized(this@ReflectiveMatrixHomeserverDiscoveryClient) {
+				if (!isCurrent()) return@synchronized false
+				var room: Any? = null
+				try {
+					val client = loginClient ?: return@synchronized false
+					room = client.javaClass.getMethod("getRoom", String::class.java).invoke(client, roomId)
+						?: return@synchronized false
+					invokeUnit(room, "leave", emptyArray(), emptyArray())
+					isCurrent()
+				} catch (e: InterruptedException) {
+					Thread.currentThread().interrupt()
+					false
+				} catch (e: Exception) {
+					false
+				} catch (e: LinkageError) {
+					false
+				} finally {
+					closeQuietly(room)
+				}
+			}
 		}
 	}
 

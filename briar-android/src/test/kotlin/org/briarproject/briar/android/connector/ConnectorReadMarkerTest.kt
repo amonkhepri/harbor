@@ -1,6 +1,7 @@
 package org.briarproject.briar.android.connector
 
 import android.app.Application
+import androidx.appcompat.app.AlertDialog
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.ImageButton
@@ -14,6 +15,7 @@ import org.briarproject.briar.api.connector.ConnectorMessage
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult
 import org.briarproject.briar.api.connector.ConnectorMessageType
 import org.briarproject.briar.api.connector.ConnectorReadMarker
+import org.briarproject.briar.api.connector.ConnectorRoomLeaver
 import org.briarproject.briar.api.connector.ConnectorUnreadMarker
 import org.briarproject.briar.api.connector.ConnectorSources
 import org.briarproject.briar.api.connector.ConnectorThread
@@ -64,7 +66,19 @@ class ConnectorReadMarkerTest {
 	private class MarkingConnector :
 		FakeConnector(),
 		ConnectorReadMarker,
+		ConnectorRoomLeaver,
 		ConnectorUnreadMarker {
+		var leaves = 0
+		var leaveResult = true
+		var beforeLeave: () -> Unit = {}
+		override fun prepareLeave(threadId: String) = object : ConnectorRoomLeaver.PreparedLeave {
+			override fun isCurrent() = authorized
+			override fun leave(): Boolean {
+				leaves++
+				beforeLeave()
+				return leaveResult
+			}
+		}
 		override val source get() = ConnectorSources.MATRIX
 		var marks = 0
 		var unreadMarks = 0
@@ -136,6 +150,106 @@ class ConnectorReadMarkerTest {
 	private fun markUnread(activity: ConnectorConversationActivity) {
 		ConnectorConversationActivity::class.java.getDeclaredMethod("markUnreadAndClose")
 			.apply { isAccessible = true }.invoke(activity)
+	}
+
+	private fun leaveDialog(activity: ConnectorConversationActivity): AlertDialog {
+		ConnectorConversationActivity::class.java.getDeclaredMethod("confirmLeaveRoom")
+			.apply { isAccessible = true }.invoke(activity)
+		return field(activity, "leaveDialog") as AlertDialog
+	}
+
+	private fun field(activity: ConnectorConversationActivity, name: String): Any? =
+		ConnectorConversationActivity::class.java.getDeclaredField(name)
+			.apply { isAccessible = true }.get(activity)
+
+	@Test fun leaveRequiresConfirmationAndSuppressesDuplicates() {
+		val connector = MarkingConnector()
+		val activity = activity(connector)
+		leaveDialog(activity).getButton(AlertDialog.BUTTON_NEGATIVE).performClick()
+		org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+		assertEquals(0, work.size)
+		assertEquals(0, connector.leaves)
+		val dialog = leaveDialog(activity)
+		dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+		dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+		org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+		assertEquals(1, work.size)
+		assertEquals(0, connector.leaves)
+		work.removeAt(0).run()
+		assertEquals(1, connector.leaves)
+		assertEquals(true, activity.isFinishing)
+	}
+
+	@Test fun failedLeaveShowsRetryAndKeepsConversationOpen() {
+		val connector = MarkingConnector().apply { leaveResult = false }
+		val activity = activity(connector)
+		leaveDialog(activity).getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+		org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+		work.removeAt(0).run()
+		assertEquals(false, activity.isFinishing)
+		assertEquals(null, field(activity, "leaveDialog"))
+		org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+		val root = (field(activity, "list") as BriarRecyclerView).parent as FrameLayout
+		assertEquals(
+			activity.getString(R.string.connector_leave_room_failed),
+			root.findViewById<TextView>(com.google.android.material.R.id.snackbar_text).text,
+		)
+		connector.leaveResult = true
+		root.findViewById<TextView>(com.google.android.material.R.id.snackbar_action).performClick()
+		(field(activity, "leaveDialog") as AlertDialog)
+			.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+		org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+		work.removeAt(0).run()
+		assertEquals(true, activity.isFinishing)
+	}
+
+	@Test fun leaveFencesQueuedWorkAndCallbacks() {
+		for (duringCall in listOf(false, true)) {
+			for (change in listOf("room", "destroy", "logout")) {
+				val connector = MarkingConnector()
+				val activity = activity(connector)
+				val invalidate = {
+					when (change) {
+						"room" -> ConnectorConversationActivity::class.java.getDeclaredField("threadId")
+							.apply { isAccessible = true }.set(activity, "other")
+						"destroy" -> (field(activity, "leaveOwner") as ConnectorConversationLoadOwner).invalidate()
+						else -> connector.authorized = false
+					}
+				}
+				leaveDialog(activity).getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+				org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+				if (duringCall) connector.beforeLeave = invalidate else invalidate()
+				work.removeAt(0).run()
+				assertEquals(if (duringCall) 1 else 0, connector.leaves)
+				assertEquals(false, activity.isFinishing)
+			}
+		}
+	}
+
+	@Test fun leaveMenuRequiresMatrixCapabilityAndAuthorization() {
+		val connector = MarkingConnector()
+		val activity = activity(connector)
+		val menu = android.widget.PopupMenu(activity, FrameLayout(activity)).menu
+		activity.menuInflater.inflate(R.menu.connector_conversation_actions, menu)
+		val action = menu.findItem(R.id.action_leave_connector_room)
+		activity.onPrepareOptionsMenu(menu)
+		assertEquals(true, action.isVisible)
+		leaveDialog(activity).getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+		org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+		activity.onPrepareOptionsMenu(menu)
+		assertEquals(false, action.isEnabled)
+		connector.authorized = false
+		activity.onPrepareOptionsMenu(menu)
+		assertEquals(false, action.isVisible)
+		activity(FakeConnector()).onPrepareOptionsMenu(menu)
+		assertEquals(false, action.isVisible)
+		activity(object : FakeConnector() {
+			override val source get() = org.briarproject.briar.api.connector.ConnectorSource(
+				"briar",
+				"Briar",
+			)
+		}).onPrepareOptionsMenu(menu)
+		assertEquals(false, action.isVisible)
 	}
 
 	@Test fun unreadSuccessClosesAndSuppressesDuplicateAndQueuedReads() {

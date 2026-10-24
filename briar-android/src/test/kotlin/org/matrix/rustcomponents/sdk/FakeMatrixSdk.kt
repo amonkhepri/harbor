@@ -102,6 +102,12 @@ class Room(
 	suspend fun setUnreadFlag(newValue: Boolean) {
 		FakeMatrixSdkState.markedUnreadRooms[roomId] = newValue
 	}
+
+	suspend fun leave() {
+		FakeMatrixSdkState.leaveCalls++
+		if (FakeMatrixSdkState.leaveFails) throw ClientException.Generic("failed", "failed")
+		FakeMatrixSdkState.roomsToReturn = FakeMatrixSdkState.roomsToReturn.filter { it.roomId != roomId }
+	}
 }
 
 interface TimelineListener {
@@ -799,6 +805,8 @@ object FakeMatrixSdkState {
 	var lastBuiltClient: Client? = null
 	var roomsToReturn: List<FakeRoomSpec> = emptyList()
 	var roomCloseCount = 0
+	var leaveCalls = 0
+	var leaveFails = false
 	val closedRoomHandles = mutableListOf<String>()
 	var timelineCallCount = 0
 	var timelineSuspendAsynchronously = false
@@ -893,6 +901,8 @@ object FakeMatrixSdkState {
 		lastBuiltClient = null
 		roomsToReturn = emptyList()
 		roomCloseCount = 0
+		leaveCalls = 0
+		leaveFails = false
 		closedRoomHandles.clear()
 		timelineCallCount = 0
 		timelineSuspendAsynchronously = false

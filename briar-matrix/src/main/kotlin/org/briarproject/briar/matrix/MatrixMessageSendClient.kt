@@ -1,6 +1,7 @@
 package org.briarproject.briar.matrix
 
 import org.briarproject.briar.api.connector.ConnectorFileSender.PreparedFileSend
+import org.briarproject.briar.api.connector.ConnectorRoomLeaver.PreparedLeave
 import org.briarproject.briar.api.connector.ConnectorUnreadMarker.PreparedMarkUnread
 
 /**
@@ -23,6 +24,8 @@ import org.briarproject.briar.api.connector.ConnectorUnreadMarker.PreparedMarkUn
  * against the 26.08.05 AAR for MX-019).
  */
 interface MatrixMessageSendClient {
+	fun prepareLeave(roomId: String): PreparedLeave? = null
+
 	fun prepareMarkUnread(roomId: String): PreparedMarkUnread? = null
 
 	/** Captures the retained SDK session before provider IO; unsupported clients fail closed. */

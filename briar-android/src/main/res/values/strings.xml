@@ -1018,5 +1018,10 @@
     <string name="connector_file_failed">Could not send file. Choose a non-empty file up to 10 MiB and try again.</string>
 	<string name="connector_mark_unread">Mark unread and return to inbox</string>
 	<string name="connector_mark_unread_failed">Could not mark unread. Please try again.</string>
+	<string name="connector_leave_room">Leave room</string>
+	<string name="connector_leave_room_confirm">Leave room? You will need an invitation to rejoin private rooms.</string>
+	<string name="connector_leave_room_failed">Could not leave room.</string>
+	<string name="connector_leave_room_retry">Retry</string>
+	<string name="connector_leave_room_action">Leave</string>
 	<string name="connector_thread_marked_unread">Marked unread</string>
 </resources>

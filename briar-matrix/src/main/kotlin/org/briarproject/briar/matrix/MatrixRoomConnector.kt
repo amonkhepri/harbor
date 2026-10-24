@@ -10,6 +10,7 @@ import org.briarproject.briar.api.connector.ConnectorMessageReadResult.LoadFaile
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult.Success
 import org.briarproject.briar.api.connector.ConnectorMessageType
 import org.briarproject.briar.api.connector.ConnectorReadMarker
+import org.briarproject.briar.api.connector.ConnectorRoomLeaver
 import org.briarproject.briar.api.connector.ConnectorSource
 import org.briarproject.briar.api.connector.ConnectorSources
 import org.briarproject.briar.api.connector.ConnectorTextSender
@@ -55,6 +56,7 @@ class MatrixRoomConnector(
 	ConnectorFileSender,
 	ConnectorReadMarker,
 	ConnectorUnreadMarker,
+	ConnectorRoomLeaver,
 	ConnectorMessageDeleter {
 	override val source: ConnectorSource = ConnectorSources.MATRIX
 
@@ -152,6 +154,9 @@ class MatrixRoomConnector(
 
 	override fun prepareMarkUnread(threadId: String): ConnectorUnreadMarker.PreparedMarkUnread? =
 		if (isAuthorized()) messageSendClient.prepareMarkUnread(threadId) else null
+
+	override fun prepareLeave(threadId: String): ConnectorRoomLeaver.PreparedLeave? =
+		if (isAuthorized()) messageSendClient.prepareLeave(threadId) else null
 
 	override fun deleteMessage(threadId: String, messageId: String): Boolean {
 		if (!isAuthorized()) return false

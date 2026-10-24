@@ -18,6 +18,30 @@ class ReflectiveMatrixHomeserverDiscoveryClientMarkReadTest {
 		FakeMatrixSdkState.reset()
 	}
 
+	@Test fun leaveClosesHandleRefreshesRoomsAndFencesOldSession() {
+		val client = loggedInClient()
+		val room = "!room:example.org"
+		FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec(room))
+		val prepared = client.prepareLeave(room)!!
+		FakeMatrixSdkState.leaveFails = true
+		assertFalse(prepared.leave())
+		assertEquals(1, FakeMatrixSdkState.roomCloseCount)
+		assertEquals(1, client.getJoinedRooms(10).size)
+		FakeMatrixSdkState.leaveFails = false
+		assertTrue(prepared.leave())
+		assertTrue(client.getJoinedRooms(10).isEmpty())
+		client.logout()
+		assertFalse(prepared.isCurrent())
+		assertFalse(prepared.leave())
+		assertEquals(2, FakeMatrixSdkState.leaveCalls)
+		assertEquals(null, client.prepareLeave(room))
+		assertEquals(NONE, client.login("https://matrix.example.org", "alice", "swordfish"))
+		assertFalse(prepared.isCurrent())
+		assertFalse(prepared.leave())
+		assertFalse(client.prepareLeave("!missing:example.org")!!.leave())
+		assertEquals(2, FakeMatrixSdkState.leaveCalls)
+	}
+
 	@Test
 	fun `markRead returns false when no session is retained`() {
 		val client = ReflectiveMatrixHomeserverDiscoveryClient()

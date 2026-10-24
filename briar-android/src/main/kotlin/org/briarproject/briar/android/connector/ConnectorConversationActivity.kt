@@ -39,6 +39,7 @@ import org.briarproject.briar.api.connector.ConnectorMessageDeleter
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult
 import org.briarproject.briar.api.connector.ConnectorMessageType
 import org.briarproject.briar.api.connector.ConnectorReadMarker
+import org.briarproject.briar.api.connector.ConnectorRoomLeaver
 import org.briarproject.briar.api.connector.ConnectorUnreadMarker
 import org.briarproject.briar.api.connector.ConnectorRegistry
 import org.briarproject.briar.api.connector.ConnectorSources
@@ -235,6 +236,9 @@ class ConnectorConversationActivity : BriarActivity() {
 	private var readMarker: ConnectorReadMarker? = null
 	private val readStateLock = Any()
 	private val unreadOwner = ConnectorConversationLoadOwner()
+	private val leaveOwner = ConnectorConversationLoadOwner()
+	private var leavePending = false
+	private var leaveDialog: AlertDialog? = null
 
 	@Volatile private var unreadPending = false
 	private lateinit var fileButton: ImageButton
@@ -423,6 +427,10 @@ class ConnectorConversationActivity : BriarActivity() {
 	}
 
 	override fun onPrepareOptionsMenu(menu: Menu): Boolean {
+		menu.findItem(R.id.action_leave_connector_room)?.apply {
+			isVisible = canLeaveRoom()
+			isEnabled = !leavePending
+		}
 		menu.findItem(R.id.action_mark_unread_connector_conversation)?.apply {
 			isVisible = canMarkUnread()
 			isEnabled = !unreadPending
@@ -440,6 +448,10 @@ class ConnectorConversationActivity : BriarActivity() {
 
 	override fun onOptionsItemSelected(item: MenuItem): Boolean {
 		val itemId = item.itemId
+		if (itemId == R.id.action_leave_connector_room) {
+			confirmLeaveRoom()
+			return true
+		}
 		if (itemId == R.id.action_mark_unread_connector_conversation) {
 			markUnreadAndClose()
 			return true
@@ -458,6 +470,8 @@ class ConnectorConversationActivity : BriarActivity() {
 	}
 
 	override fun onDestroy() {
+		leaveOwner.invalidate()
+		leaveDialog?.dismiss()
 		unreadOwner.invalidate()
 		loadOwner.invalidate()
 		retryOwner.invalidate()
@@ -547,6 +561,60 @@ class ConnectorConversationActivity : BriarActivity() {
 			} catch (e: RuntimeException) {
 			}
 		}
+	}
+
+	private fun canLeaveRoom(): Boolean = connector is ConnectorRoomLeaver &&
+		connector?.source?.id == ConnectorSources.MATRIX_ID &&
+		connector?.isEnabled() == true &&
+		connector?.isAuthorized() == true &&
+		hasValidThreadId(threadId)
+
+	private fun confirmLeaveRoom() {
+		if (leavePending || leaveDialog != null || !canLeaveRoom() || isFinishing || isDestroyed) return
+		val active = connector ?: return
+		val room = threadId
+		val prepared = (active as ConnectorRoomLeaver).prepareLeave(room)
+		val generation = leaveOwner.begin()
+		fun current() = leaveOwner.owns(generation) &&
+			connector === active &&
+			threadId == room &&
+			!isFinishing &&
+			!isDestroyed &&
+			active.isAuthorized() &&
+			prepared?.isCurrent() != false
+		leaveDialog = AlertDialog.Builder(this)
+			.setMessage(R.string.connector_leave_room_confirm)
+			.setNegativeButton(R.string.cancel, null)
+			.setPositiveButton(R.string.connector_leave_room_action) { _, _ ->
+				if (!leavePending && current()) {
+					leavePending = true
+					invalidateOptionsMenu()
+					ioExecutor.execute {
+						if (!current()) return@execute
+						val success = try {
+							prepared?.leave() == true
+						} catch (e: RuntimeException) {
+							false
+						}
+						runOnUiThread {
+							if (!current()) return@runOnUiThread
+							leavePending = false
+							invalidateOptionsMenu()
+							if (success) {
+								// ContactListFragment.onStart reloads the unified inbox on return.
+								finish()
+							} else {
+								BriarSnackbarBuilder()
+									.setAction(R.string.connector_leave_room_retry) { confirmLeaveRoom() }
+									.make(list, R.string.connector_leave_room_failed, Snackbar.LENGTH_LONG)
+									.show()
+							}
+						}
+					}
+				}
+			}
+			.setOnDismissListener { leaveDialog = null }
+			.show()
 	}
 
 	private fun canMarkUnread(): Boolean = connector is ConnectorUnreadMarker &&
