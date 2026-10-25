@@ -208,6 +208,18 @@ class ReflectiveMatrixHomeserverDiscoveryClientTest {
 	}
 
 	@Test
+	fun `synchronous url discovery uses homeserverUrl directly and resolves`() {
+		val result = ReflectiveMatrixHomeserverDiscoveryClient().discover("http://127.0.0.1:8008")
+
+		assertEquals(DiscoveryResult.Resolved("http://127.0.0.1:8008"), result)
+		assertEquals("http://127.0.0.1:8008", FakeMatrixSdkState.lastHomeserverUrl)
+		assertNull(FakeMatrixSdkState.lastServerName)
+		assertEquals(true, FakeMatrixSdkState.inMemoryStoreCalled)
+		assertEquals(1, FakeMatrixSdkState.clientCloseCount)
+		assertEquals(3, FakeMatrixSdkState.builderCloseCount)
+	}
+
+	@Test
 	fun `asynchronous success on another thread resolves the url and closes builders`() {
 		FakeMatrixSdkState.homeserverUrlToReturn = "https://matrix.example.org"
 		FakeMatrixSdkState.suspendAsynchronously = true

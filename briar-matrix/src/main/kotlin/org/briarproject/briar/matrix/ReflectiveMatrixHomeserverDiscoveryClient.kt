@@ -177,10 +177,19 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		return try {
 			val builderClass = Class.forName(CLIENT_BUILDER_CLASS_NAME)
 			var builder = track(builders, builderClass.getConstructor().newInstance())
-			builder = track(
-				builders,
-				builderClass.getMethod("serverName", String::class.java).invoke(builder, serverName),
-			)
+			builder = if (serverName.startsWith("http://", ignoreCase = true) ||
+				serverName.startsWith("https://", ignoreCase = true)
+			) {
+				track(
+					builders,
+					builderClass.getMethod("homeserverUrl", String::class.java).invoke(builder, serverName),
+				)
+			} else {
+				track(
+					builders,
+					builderClass.getMethod("serverName", String::class.java).invoke(builder, serverName),
+				)
+			}
 			builder = track(builders, builderClass.getMethod("inMemoryStore").invoke(builder))
 			client = buildClient(builder, builderClass)
 			DiscoveryResult.Resolved(readHomeserverUrl(client))

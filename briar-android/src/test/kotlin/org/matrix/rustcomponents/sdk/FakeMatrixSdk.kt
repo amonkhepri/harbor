@@ -718,10 +718,12 @@ class ClientBuilder : AutoCloseable {
 		}
 	}
 
-	private fun newClient(): Client =
-		Client(FakeMatrixSdkState.homeserverUrlToReturn, FakeMatrixSdkState.lastSessionDelegate).also {
-			FakeMatrixSdkState.lastBuiltClient = it
-		}
+	private fun newClient(): Client = Client(
+		FakeMatrixSdkState.lastHomeserverUrl ?: FakeMatrixSdkState.homeserverUrlToReturn,
+		FakeMatrixSdkState.lastSessionDelegate,
+	).also {
+		FakeMatrixSdkState.lastBuiltClient = it
+	}
 }
 
 /** Mirrors the pinned SDK's `SqliteStoreBuilder`: also `AutoCloseable`, also wrapper-per-call. */
