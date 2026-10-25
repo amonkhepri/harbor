@@ -53,23 +53,27 @@ Per the task contract:
 
 ## 4. Focused Unit & Regression Verification
 
-1. **Matrix & Connector Test Suite**:
+1. **Matrix & Connector Test Suite (Default-Off Configuration)**:
    - Executed:
      ```bash
-     ./gradlew :briar-android:testOfficialDebugUnitTest \
+     TARGET_REPO=/Users/amunratis/AndroidStudioProjects/Harbor-worktrees/t_9ef1e36a \
+       agent-tools/test.sh \
        --tests "org.briarproject.briar.matrix.*" \
        --tests "org.briarproject.briar.android.matrix.*" \
        --tests "org.briarproject.briar.android.connector.*"
      ```
-   - Result: `BUILD SUCCESSFUL in 53s` (73 actionable tasks: 21 executed, 6 from cache, 46 up-to-date, 0 failures).
-   - All Matrix authentication session state transitions, homeserver discovery, message send/receive abstractions, typing notices, and connector conversation adapters pass 100% of unit tests.
+   - Configuration Distinction: The unit test command omits `-Pharbor.matrixConnector.enabled=true`. In `briar-android/build.gradle:75-77`, `harbor.matrixConnector.enabled` defaults to `false`. Under lines 252–256, this default-off configuration places `src/matrix/kotlin` into `sourceSets.test.java.srcDirs` where it compiles and executes against the simulated test SDK fake rather than the real Matrix Rust SDK dependency.
+   - Result: `BUILD SUCCESSFUL in 32s` (73 actionable tasks: 12 executed, 61 up-to-date, 0 failures).
+   - Verifies connector conversation adapters, typing notices, session lifecycle transitions, retry logic, and simulated message plumbing against test fakes.
 
 2. **Proof Distinction**:
-   - **Simulated Proof**: PASS (Matrix unit tests with mock/fake SDK clients verify session lifecycle, retry logic, error handling, and message snapshot plumbing).
+   - **Simulated Proof**: PASS (Matrix unit tests with mock/fake SDK clients verify session lifecycle, retry logic, error handling, and message snapshot plumbing under the default-off configuration).
    - **Real Network Proof**: BLOCKED on prerequisite (Dan disposable account provisioning).
 
 ---
 
 ## 5. Summary & Prerequisite Handoff
 
-The Harbor product codebase builds and passes all Matrix connector unit tests with the Matrix connector enabled. Real two-account network verification is unblocked on the product side and pending only the external prerequisite of Dan-provisioned disposable homeserver credentials.
+The recorded checks verify Matrix-enabled APK packaging (`-Pharbor.matrixConnector.enabled=true`) alongside API shape alignment against the pinned Matrix Rust SDK binary, and confirm that simulated regression coverage passes under the default-off unit test configuration.
+
+However, these checks do not establish real network delivery or live force-stop session restoration. Product readiness for real Matrix two-account messaging remains unverified pending live execution, which is blocked on the prerequisite of Dan-provisioned disposable homeserver credentials.
