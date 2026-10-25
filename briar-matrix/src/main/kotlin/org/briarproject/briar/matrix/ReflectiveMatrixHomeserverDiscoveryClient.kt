@@ -151,9 +151,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 									}
 								}
 							}
-						} catch (e: Exception) {
-							complete()
-						} catch (e: LinkageError) {
+						} catch (e: Throwable) {
 							complete()
 						}
 					}

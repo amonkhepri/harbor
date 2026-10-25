@@ -9,8 +9,11 @@ import android.view.inputmethod.InputConnectionWrapper
 import androidx.appcompat.widget.AppCompatEditText
 
 /** Advertise edits only inside input dispatch, never setText or saved-state restoration. */
-class ConnectorComposeText(context: Context, attrs: AttributeSet?) :
-	AppCompatEditText(context, attrs) {
+class ConnectorComposeText @JvmOverloads constructor(
+	context: Context,
+	attrs: AttributeSet? = null,
+	defStyleAttr: Int = androidx.appcompat.R.attr.editTextStyle,
+) : AppCompatEditText(context, attrs, defStyleAttr) {
 	var onUserEdit: ((Boolean) -> Unit)? = null
 	private var inputDepth = 0
 

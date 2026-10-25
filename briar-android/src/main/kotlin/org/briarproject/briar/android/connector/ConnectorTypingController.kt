@@ -44,7 +44,7 @@ internal class ConnectorTypingController(
 			val active = lease
 			session?.send(true) { active.get() && now() - lastEdit < IDLE_MS }
 		}
-		schedule(tick, minOf(lastStart + RENEW_MS, lastEdit + IDLE_MS) - now())
+		schedule(tick, maxOf(0L, minOf(lastStart + RENEW_MS, lastEdit + IDLE_MS) - now()))
 	}
 
 	fun stop() {

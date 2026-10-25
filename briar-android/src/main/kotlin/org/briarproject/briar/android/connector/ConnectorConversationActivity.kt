@@ -354,7 +354,7 @@ class ConnectorConversationActivity : BriarActivity() {
 				{ task, delay -> handler.postDelayed(task, delay) },
 				{ handler.removeCallbacks(it) },
 			)
-			(composeText as ConnectorComposeText).onUserEdit = { typing?.edited(it) }
+			(composeText as? ConnectorComposeText)?.onUserEdit = { typing?.edited(it) }
 			composeText.setOnFocusChangeListener { _, focused -> if (!focused) typing?.stop() }
 		}
 		sendButton = findViewById(R.id.connectorConversationSendButton)

@@ -103,4 +103,14 @@ class ConnectorTypingTest {
 			),
 		)
 	}
+
+	@Test fun composeTextConstructorsWorkAcrossAllArities() {
+		val context = RuntimeEnvironment.getApplication()
+		val v1 = ConnectorComposeText(context)
+		val v2 = ConnectorComposeText(context, null)
+		val v3 = ConnectorComposeText(context, null, androidx.appcompat.R.attr.editTextStyle)
+		assertEquals("", v1.text.toString())
+		assertEquals("", v2.text.toString())
+		assertEquals("", v3.text.toString())
+	}
 }
