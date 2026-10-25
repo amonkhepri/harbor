@@ -13,6 +13,9 @@ import org.briarproject.briar.api.connector.ConnectorMessageType
 import org.briarproject.briar.api.connector.ConnectorReactionSummary
 import org.briarproject.briar.api.connector.ConnectorUnreadMarker.PreparedMarkUnread
 import org.briarproject.briar.api.connector.ConnectorRoomLeaver.PreparedLeave
+import org.briarproject.briar.api.connector.ConnectorTypingSender.PreparedTyping
+import java.util.concurrent.Executor
+import java.util.concurrent.Executors
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.DataInputStream
@@ -69,6 +72,9 @@ import kotlin.coroutines.intrinsics.COROUTINE_SUSPENDED
 class ReflectiveMatrixHomeserverDiscoveryClient(
 	private val discoveryTimeoutMs: Long = 30_000L,
 	private val sessionDelegateFactory: MatrixClientSessionDelegateFactory? = null,
+	private val typingExecutor: Executor = Executors.newSingleThreadExecutor { task ->
+		Thread(task, "matrix-typing").apply { isDaemon = true }
+	},
 ) : MatrixHomeserverDiscoveryClient,
 	MatrixLoginClient,
 	MatrixRoomSnapshotClient,
@@ -79,6 +85,89 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 	private val lifecycleLock = Any()
 	private var activeGeneration: Any? = null
 	private var activeStore: MatrixStoreConfiguration? = null
+	private class TypingLane {
+		val queue = java.util.ArrayDeque<() -> Unit>()
+		var busy = false
+	}
+	private val typingLanes = mutableMapOf<String, TypingLane>()
+
+	// Unlike invokeUnit, this lane waits for real native completion, not a timeout. A hung
+	// operation cannot release a later stop/start out of order or block message sending.
+	override fun prepareTyping(roomId: String): PreparedTyping? {
+		val (generation, lane) = synchronized(lifecycleLock) {
+			val generation = activeGeneration ?: return null
+			generation to typingLanes.getOrPut(roomId) { TypingLane() }
+		}
+		return object : PreparedTyping {
+			private val pendingStart = AtomicBoolean()
+			override fun isCurrent() = synchronized(lifecycleLock) { activeGeneration === generation }
+			override fun send(typing: Boolean, wanted: () -> Boolean) {
+				if (typing && !pendingStart.compareAndSet(false, true)) return
+				typingExecutor.execute {
+					lane.queue.add operation@{
+						if (typing) pendingStart.set(false)
+						var room: Any? = null
+						val completed = AtomicBoolean()
+						fun complete() {
+							if (!completed.compareAndSet(false, true)) return
+							closeQuietly(room)
+							typingExecutor.execute {
+								lane.busy = false
+								drainTyping(lane)
+							}
+						}
+						try {
+							// Authorization takes its own lock; never call it under SDK locks.
+							if (typing && !wanted()) return@operation complete()
+							synchronized(this@ReflectiveMatrixHomeserverDiscoveryClient) {
+								synchronized(lifecycleLock) {
+									if (isCurrent()) {
+										val client = loginClient
+										room = client?.javaClass?.getMethod("getRoom", String::class.java)
+											?.invoke(client, roomId)
+									}
+								}
+							}
+							val target = room
+							if (target == null || (typing && !wanted())) {
+								complete()
+							} else {
+								synchronized(lifecycleLock) {
+									if (!isCurrent()) {
+										complete()
+									} else {
+										val continuation = object : Continuation<Unit> {
+											override val context = EmptyCoroutineContext
+											override fun resumeWith(result: Result<Unit>) = complete()
+										}
+										// SDK 26.08.05: fixed 4s expiry, 3s resend suppression.
+										val result = target.javaClass.getMethod(
+											"typingNotice",
+											Boolean::class.javaPrimitiveType,
+											Continuation::class.java,
+										)
+											.invoke(target, typing, continuation)
+										if (result !== COROUTINE_SUSPENDED) complete()
+									}
+								}
+							}
+						} catch (e: Exception) {
+							complete()
+						} catch (e: LinkageError) {
+							complete()
+						}
+					}
+					drainTyping(lane)
+				}
+			}
+		}
+	}
+
+	private fun drainTyping(lane: TypingLane) {
+		if (lane.busy || lane.queue.isEmpty()) return
+		lane.busy = true
+		lane.queue.removeFirst().invoke()
+	}
 
 	override fun discover(serverName: String): DiscoveryResult {
 		// `serverName(...)` and `inMemoryStore()` each return their own
@@ -345,7 +434,10 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 	}
 
 	private fun beginGeneration(generation: Any) {
-		synchronized(lifecycleLock) { activeGeneration = generation }
+		synchronized(lifecycleLock) {
+			activeGeneration = generation
+			typingLanes.clear()
+		}
 		val previous = loginClient
 		loginClient = null
 		activeStore = null
@@ -1193,6 +1285,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 	override fun logout() {
 		synchronized(lifecycleLock) {
 			activeGeneration = null
+			typingLanes.clear()
 			activeStore?.let { sessionFile(it).delete() }
 		}
 		activeStore = null
@@ -1211,7 +1304,10 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 
 	@Synchronized
 	override fun close() {
-		synchronized(lifecycleLock) { activeGeneration = null }
+		synchronized(lifecycleLock) {
+			activeGeneration = null
+			typingLanes.clear()
+		}
 		val client = loginClient
 		loginClient = null
 		activeStore = null

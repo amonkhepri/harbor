@@ -19,6 +19,34 @@ import org.junit.Test
 import java.util.concurrent.atomic.AtomicLong
 
 class MatrixRoomConnectorTest {
+	@Test fun typingRequiresAuthorizationAndFencesQueuedStarts() {
+		val auth = FakeMatrixAuthSession(MatrixAuthState.CREDENTIAL_ENTRY)
+		var preparations = 0
+		var queued: (() -> Boolean)? = null
+		val sender = object : MatrixMessageSendClient by FakeMessageSendClient(true) {
+			override fun prepareTyping(
+				roomId: String,
+			): org.briarproject.briar.api.connector.ConnectorTypingSender.PreparedTyping {
+				preparations++
+				return object : org.briarproject.briar.api.connector.ConnectorTypingSender.PreparedTyping {
+					override fun isCurrent() = true
+					override fun send(typing: Boolean, wanted: () -> Boolean) {
+						queued = wanted
+					}
+				}
+			}
+		}
+		val connector = connector(authSession = auth, messageSendClient = sender)
+		assertNull(connector.prepareTyping("room"))
+		assertEquals(0, preparations)
+		auth.state = MatrixAuthState.READY
+		val prepared = connector.prepareTyping("room")!!
+		prepared.send(true) { true }
+		assertTrue(queued!!.invoke())
+		auth.state = MatrixAuthState.CREDENTIAL_ENTRY
+		assertFalse(prepared.isCurrent())
+		assertFalse(queued!!.invoke())
+	}
 
 	@Test fun leavePreparationRequiresAuthorizationAndUsesSelectedRoom() {
 		val auth = FakeMatrixAuthSession(MatrixAuthState.CREDENTIAL_ENTRY)

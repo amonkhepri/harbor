@@ -99,6 +99,11 @@ class Room(
 		FakeMatrixSdkState.markAsReadFailureToThrow?.let { throw it }
 	}
 
+	suspend fun typingNotice(typing: Boolean) {
+		FakeMatrixSdkState.typingCalls.add(typing)
+		FakeMatrixSdkState.typingOperation(typing)
+	}
+
 	suspend fun setUnreadFlag(newValue: Boolean) {
 		FakeMatrixSdkState.markedUnreadRooms[roomId] = newValue
 	}
@@ -859,6 +864,8 @@ object FakeMatrixSdkState {
 	var joinDelayMs = 0L
 	var sendAttachmentJoinHandleCloseCount = 0
 	var markAsReadCallCount = 0
+	val typingCalls = mutableListOf<Boolean>()
+	var typingOperation: suspend (Boolean) -> Unit = {}
 	val markedUnreadRooms = mutableMapOf<String, Boolean>()
 	var lastMarkAsReadRoomId: String? = null
 	var lastMarkAsReadReceiptType: ReceiptType? = null
@@ -955,6 +962,8 @@ object FakeMatrixSdkState {
 		joinDelayMs = 0L
 		sendAttachmentJoinHandleCloseCount = 0
 		markAsReadCallCount = 0
+		typingCalls.clear()
+		typingOperation = {}
 		markedUnreadRooms.clear()
 		lastMarkAsReadRoomId = null
 		lastMarkAsReadReceiptType = null

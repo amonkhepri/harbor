@@ -249,6 +249,8 @@ class ConnectorConversationActivity : BriarActivity() {
 	private var threadId = ""
 	private lateinit var composeBar: View
 	private lateinit var composeText: EditText
+	private var typing: ConnectorTypingController? = null
+	private var composerResumed = false
 	private lateinit var sendButton: Button
 	private lateinit var attachButton: ImageButton
 	private var sendInFlight = false
@@ -332,6 +334,29 @@ class ConnectorConversationActivity : BriarActivity() {
 		composeBar = findViewById(R.id.connectorConversationComposeBar)
 		composeText = findViewById(R.id.connectorConversationComposeText)
 		composeText.hint = getString(R.string.connector_conversation_compose_hint, sourceName)
+		val typingSender = connector as? org.briarproject.briar.api.connector.ConnectorTypingSender
+		if (typingSender != null) {
+			val handler = android.os.Handler(android.os.Looper.getMainLooper())
+			typing = ConnectorTypingController(
+				{ typingSender.prepareTyping(threadId) },
+				{
+					composerResumed &&
+						composeText.hasFocus() &&
+						composeText.hasWindowFocus() &&
+						composeText.isEnabled &&
+						!sendInFlight &&
+						textSender != null &&
+						connector?.isEnabled() == true &&
+						connector?.isAuthorized() == true &&
+						hasValidThreadId(threadId)
+				},
+				android.os.SystemClock::elapsedRealtime,
+				{ task, delay -> handler.postDelayed(task, delay) },
+				{ handler.removeCallbacks(it) },
+			)
+			(composeText as ConnectorComposeText).onUserEdit = { typing?.edited(it) }
+			composeText.setOnFocusChangeListener { _, focused -> if (!focused) typing?.stop() }
+		}
 		sendButton = findViewById(R.id.connectorConversationSendButton)
 		sendButton.setOnClickListener { onSendClicked() }
 		attachButton = findViewById(R.id.connectorConversationAttachButton)
@@ -426,6 +451,22 @@ class ConnectorConversationActivity : BriarActivity() {
 		super.onStop()
 	}
 
+	override fun onResume() {
+		super.onResume()
+		composerResumed = true
+	}
+
+	override fun onPause() {
+		composerResumed = false
+		typing?.stop()
+		super.onPause()
+	}
+
+	override fun onWindowFocusChanged(hasFocus: Boolean) {
+		super.onWindowFocusChanged(hasFocus)
+		if (!hasFocus) typing?.stop()
+	}
+
 	override fun onPrepareOptionsMenu(menu: Menu): Boolean {
 		menu.findItem(R.id.action_leave_connector_room)?.apply {
 			isVisible = canLeaveRoom()
@@ -470,6 +511,7 @@ class ConnectorConversationActivity : BriarActivity() {
 	}
 
 	override fun onDestroy() {
+		typing?.stop()
 		leaveOwner.invalidate()
 		leaveDialog?.dismiss()
 		unreadOwner.invalidate()
@@ -904,6 +946,7 @@ class ConnectorConversationActivity : BriarActivity() {
 		sendInFlight = false
 		setComposeEnabled(true)
 		if (sent) {
+			typing?.stop()
 			if (clearComposeText) composeText.setText("")
 			if (!clearComposeText) {
 				BriarSnackbarBuilder().make(
@@ -933,6 +976,7 @@ class ConnectorConversationActivity : BriarActivity() {
 	}
 
 	private fun setComposeEnabled(enabled: Boolean) {
+		if (!enabled) typing?.stop()
 		composeText.isEnabled = enabled
 		sendButton.isEnabled = enabled
 		attachButton.isEnabled = enabled

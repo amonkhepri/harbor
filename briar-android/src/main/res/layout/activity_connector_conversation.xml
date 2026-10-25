@@ -84,7 +84,7 @@
 			android:src="@drawable/ic_file"
 			android:visibility="gone" />
 
-		<EditText
+		<org.briarproject.briar.android.connector.ConnectorComposeText
 			android:id="@+id/connectorConversationComposeText"
 			android:layout_width="0dp"
 			android:layout_height="wrap_content"

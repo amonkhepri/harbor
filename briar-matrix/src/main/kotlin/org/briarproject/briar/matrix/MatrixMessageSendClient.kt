@@ -24,6 +24,10 @@ import org.briarproject.briar.api.connector.ConnectorUnreadMarker.PreparedMarkUn
  * against the 26.08.05 AAR for MX-019).
  */
 interface MatrixMessageSendClient {
+	fun prepareTyping(
+		roomId: String,
+	): org.briarproject.briar.api.connector.ConnectorTypingSender.PreparedTyping? = null
+
 	fun prepareLeave(roomId: String): PreparedLeave? = null
 
 	fun prepareMarkUnread(roomId: String): PreparedMarkUnread? = null

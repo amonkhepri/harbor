@@ -16,6 +16,7 @@ import org.briarproject.briar.api.connector.ConnectorSources
 import org.briarproject.briar.api.connector.ConnectorTextSender
 import org.briarproject.briar.api.connector.ConnectorThread
 import org.briarproject.briar.api.connector.ConnectorUnreadMarker
+import org.briarproject.briar.api.connector.ConnectorTypingSender
 import org.briarproject.briar.api.matrix.MatrixAuthSession
 import org.briarproject.briar.api.matrix.MatrixAuthState
 import org.briarproject.briar.api.matrix.MatrixConnector
@@ -57,6 +58,7 @@ class MatrixRoomConnector(
 	ConnectorReadMarker,
 	ConnectorUnreadMarker,
 	ConnectorRoomLeaver,
+	ConnectorTypingSender,
 	ConnectorMessageDeleter {
 	override val source: ConnectorSource = ConnectorSources.MATRIX
 
@@ -127,6 +129,16 @@ class MatrixRoomConnector(
 	override fun sendText(threadId: String, text: String): Boolean {
 		if (!isAuthorized()) return false
 		return messageSendClient.sendTextMessage(threadId, text)
+	}
+
+	override fun prepareTyping(threadId: String): ConnectorTypingSender.PreparedTyping? {
+		if (!isAuthorized()) return null
+		val prepared = messageSendClient.prepareTyping(threadId) ?: return null
+		return object : ConnectorTypingSender.PreparedTyping {
+			override fun isCurrent() = isAuthorized() && prepared.isCurrent()
+			override fun send(typing: Boolean, wanted: () -> Boolean) =
+				prepared.send(typing) { wanted() && isCurrent() }
+		}
 	}
 
 	override fun prepareFileSend(threadId: String): ConnectorFileSender.PreparedFileSend? {
