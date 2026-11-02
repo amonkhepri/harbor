@@ -3,6 +3,8 @@ package org.briarproject.briar.android.matrix
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
+import org.briarproject.briar.android.connector.ConnectorDraftStore
+import org.briarproject.briar.api.connector.ConnectorSources
 import org.briarproject.briar.api.matrix.MatrixAuthSession
 import org.briarproject.briar.api.matrix.MatrixAuthSession.RecoverableErrorDetail
 import org.briarproject.briar.api.matrix.MatrixAuthState
@@ -58,7 +60,10 @@ internal class MatrixSetupViewModel(
 
 	fun logout(confirmed: Boolean) {
 		if (!confirmed || currentStep() != MatrixSetupStep.READY) return
-		runAction(reconcileLogoutFailure = true) { session.logout() }
+		runAction(reconcileLogoutFailure = true) {
+			session.logout()
+			ConnectorDraftStore.clearSource(ConnectorSources.MATRIX_ID)
+		}
 	}
 
 	private fun currentStep(): MatrixSetupStep? = state.value?.snapshot?.let(::setupStep)

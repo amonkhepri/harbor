@@ -334,6 +334,16 @@ class ConnectorConversationActivity : BriarActivity() {
 		composeBar = findViewById(R.id.connectorConversationComposeBar)
 		composeText = findViewById(R.id.connectorConversationComposeText)
 		composeText.hint = getString(R.string.connector_conversation_compose_hint, sourceName)
+		restoreDraft(state)
+		composeText.addTextChangedListener(object : TextWatcher {
+			override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+			override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
+			override fun afterTextChanged(s: Editable?) {
+				if (!sendInFlight) {
+					saveDraft()
+				}
+			}
+		})
 		val typingSender = connector as? org.briarproject.briar.api.connector.ConnectorTypingSender
 		if (typingSender != null) {
 			val handler = android.os.Handler(android.os.Looper.getMainLooper())
@@ -459,7 +469,26 @@ class ConnectorConversationActivity : BriarActivity() {
 	override fun onPause() {
 		composerResumed = false
 		typing?.stop()
+		saveDraft()
 		super.onPause()
+	}
+
+	internal fun restoreDraft(state: Bundle?) {
+		if (state == null && ::composeText.isInitialized) {
+			val sourceId = intent?.getStringExtra(SOURCE_ID) ?: connector?.source?.id
+			val draft = ConnectorDraftStore.getDraft(sourceId, threadId)
+			if (!draft.isNullOrEmpty()) {
+				composeText.setText(draft)
+				composeText.setSelection(composeText.length())
+			}
+		}
+	}
+
+	internal fun saveDraft() {
+		if (::composeText.isInitialized && !sendInFlight) {
+			val sourceId = intent?.getStringExtra(SOURCE_ID) ?: connector?.source?.id
+			ConnectorDraftStore.setDraft(sourceId, threadId, composeText.text?.toString())
+		}
 	}
 
 	override fun onWindowFocusChanged(hasFocus: Boolean) {
@@ -643,6 +672,10 @@ class ConnectorConversationActivity : BriarActivity() {
 							leavePending = false
 							invalidateOptionsMenu()
 							if (success) {
+								ConnectorDraftStore.clearDraft(
+									intent?.getStringExtra(SOURCE_ID) ?: connector?.source?.id,
+									room,
+								)
 								// ContactListFragment.onStart reloads the unified inbox on return.
 								finish()
 							} else {
@@ -834,6 +867,8 @@ class ConnectorConversationActivity : BriarActivity() {
 		if (text.isEmpty()) return
 		sendInFlight = true
 		setComposeEnabled(false)
+		val sourceId = intent?.getStringExtra(SOURCE_ID) ?: connector?.source?.id
+		ConnectorDraftStore.clearDraft(sourceId, threadId)
 		submitMessageState(messageState.beginTextSend(connector!!.source, threadId, text))
 		val echoId = messageState.localEchoes.last().item.stableId
 		val activeThreadId = threadId
