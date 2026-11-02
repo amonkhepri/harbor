@@ -174,7 +174,6 @@ public class ContactListFragment extends BaseFragment
 	@Override
 	public void onCreateOptionsMenu(Menu menu, MenuInflater inflater) {
 		inflater.inflate(R.menu.telegram_inbox_actions, menu);
-		inflater.inflate(R.menu.contact_list_actions, menu);
 		super.onCreateOptionsMenu(menu, inflater);
 	}
 
@@ -210,15 +209,6 @@ public class ContactListFragment extends BaseFragment
 		if (selectedFilter != null) {
 			item.setChecked(true);
 			viewModel.setSourceFilter(selectedFilter);
-			return true;
-		}
-		if (item.getItemId() == R.id.action_add_contact_nearby) {
-			Intent intent =
-					new Intent(getContext(), AddNearbyContactActivity.class);
-			startActivity(intent);
-			return true;
-		} else if (item.getItemId() == R.id.action_add_contact_remotely) {
-			startActivity(new Intent(getContext(), AddContactActivity.class));
 			return true;
 		}
 		return super.onOptionsItemSelected(item);

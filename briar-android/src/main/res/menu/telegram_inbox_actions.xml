@@ -4,7 +4,32 @@
 	xmlns:tools="http://schemas.android.com/tools">
 
 	<item
+		android:id="@+id/action_filter_inbox"
+		android:orderInCategory="1"
+		android:title="@string/inbox_filter_title"
+		android:visible="false"
+		app:showAsAction="never">
+		<menu>
+			<group
+				android:id="@+id/group_filter_source"
+				android:checkableBehavior="single">
+				<item
+					android:id="@+id/action_filter_all"
+					android:checked="true"
+					android:title="@string/inbox_filter_all" />
+				<item
+					android:id="@+id/action_filter_matrix"
+					android:title="@string/inbox_filter_matrix" />
+				<item
+					android:id="@+id/action_filter_briar"
+					android:title="@string/inbox_filter_briar" />
+			</group>
+		</menu>
+	</item>
+
+	<item
 		android:id="@+id/action_refresh_connector_threads"
+		android:orderInCategory="2"
 		android:title="@string/connector_inbox_refresh"
 		android:visible="false"
 		app:showAsAction="never"
