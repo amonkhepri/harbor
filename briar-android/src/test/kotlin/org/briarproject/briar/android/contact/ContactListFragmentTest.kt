@@ -241,4 +241,24 @@ class ContactListFragmentTest {
 		assertNull(menu.findItem(R.id.action_add_contact_nearby))
 		assertNull(menu.findItem(R.id.action_add_contact_remotely))
 	}
+
+	@Test
+	fun testCheckedIdForFilter() {
+		assertEquals(
+			R.id.action_filter_all,
+			ContactListFragment.checkedIdForFilter(InboxSourceFilter.All),
+		)
+		assertEquals(
+			R.id.action_filter_matrix,
+			ContactListFragment.checkedIdForFilter(InboxSourceFilter.Matrix),
+		)
+		assertEquals(
+			R.id.action_filter_briar,
+			ContactListFragment.checkedIdForFilter(InboxSourceFilter.Briar),
+		)
+		assertEquals(
+			R.id.action_filter_all,
+			ContactListFragment.checkedIdForFilter(InboxSourceFilter.Telegram),
+		)
+	}
 }

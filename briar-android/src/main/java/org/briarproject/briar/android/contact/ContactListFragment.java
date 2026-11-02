@@ -190,11 +190,7 @@ public class ContactListFragment extends BaseFragment
 		if (filterItem != null) {
 			filterItem.setVisible(shouldShowFilterAction(
 					viewModel.isAnyConnectorEnabled()));
-			int checkedId = currentFilter == InboxSourceFilter.Matrix.INSTANCE ?
-					R.id.action_filter_matrix :
-					(currentFilter == InboxSourceFilter.Briar.INSTANCE ?
-							R.id.action_filter_briar : R.id.action_filter_all);
-			MenuItem checkedItem = menu.findItem(checkedId);
+			MenuItem checkedItem = menu.findItem(checkedIdForFilter(currentFilter));
 			if (checkedItem != null) checkedItem.setChecked(true);
 		}
 	}
@@ -297,6 +293,15 @@ public class ContactListFragment extends BaseFragment
 			return InboxSourceFilter.Briar.INSTANCE;
 		}
 		return null;
+	}
+
+	static int checkedIdForFilter(InboxSourceFilter filter) {
+		if (filter == InboxSourceFilter.Matrix.INSTANCE) {
+			return R.id.action_filter_matrix;
+		} else if (filter == InboxSourceFilter.Briar.INSTANCE) {
+			return R.id.action_filter_briar;
+		}
+		return R.id.action_filter_all;
 	}
 
 	static boolean isManualRefreshAction(int itemId) {

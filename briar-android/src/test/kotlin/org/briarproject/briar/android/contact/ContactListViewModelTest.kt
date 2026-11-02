@@ -379,6 +379,9 @@ class ContactListViewModelTest {
 		viewModel.setSourceFilter(InboxSourceFilter.Matrix)
 		assertEquals(InboxSourceFilter.Matrix, getOrAwaitValue(viewModel.sourceFilter))
 
+		viewModel.setSourceFilter(InboxSourceFilter.Briar)
+		assertEquals(InboxSourceFilter.Briar, getOrAwaitValue(viewModel.sourceFilter))
+
 		viewModel.setSourceFilter(InboxSourceFilter.All)
 		assertEquals(InboxSourceFilter.All, getOrAwaitValue(viewModel.sourceFilter))
 	}
