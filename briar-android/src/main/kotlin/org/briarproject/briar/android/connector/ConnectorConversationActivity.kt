@@ -676,6 +676,9 @@ class ConnectorConversationActivity : BriarActivity() {
 									intent?.getStringExtra(SOURCE_ID) ?: connector?.source?.id,
 									room,
 								)
+								// finish() triggers onPause(), whose saveDraft() would otherwise
+								// resurrect the just-cleared draft from the still-populated field.
+								if (::composeText.isInitialized) composeText.setText("")
 								// ContactListFragment.onStart reloads the unified inbox on return.
 								finish()
 							} else {

@@ -6,6 +6,7 @@ import android.os.Bundle
 import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.ImageButton
+import androidx.appcompat.app.AlertDialog
 import androidx.arch.core.executor.testing.InstantTaskExecutorRule
 import androidx.recyclerview.widget.LinearLayoutManager
 import org.briarproject.briar.android.Localizer
@@ -300,6 +301,43 @@ class ConnectorConversationDraftTest {
 			"Draft before rotation",
 			ConnectorDraftStore.getDraft(ConnectorSources.MATRIX_ID, "!room1:matrix.org"),
 		)
+	}
+
+	@Test
+	fun leavingRoomDiscardsDraftDespitePauseOnFinish() {
+		val activity = createActivity(threadId = "!room1:matrix.org")
+		val composeText = getComposeText(activity)
+		composeText.setText("Draft before leaving")
+		pause(activity)
+
+		assertEquals(
+			"Draft before leaving",
+			ConnectorDraftStore.getDraft(ConnectorSources.MATRIX_ID, "!room1:matrix.org"),
+		)
+
+		val confirmLeaveRoom =
+			ConnectorConversationActivity::class.java.getDeclaredMethod("confirmLeaveRoom")
+		confirmLeaveRoom.isAccessible = true
+		confirmLeaveRoom.invoke(activity)
+		val leaveDialogField =
+			ConnectorConversationActivity::class.java.getDeclaredField("leaveDialog")
+		leaveDialogField.isAccessible = true
+		(leaveDialogField.get(activity) as AlertDialog)
+			.getButton(AlertDialog.BUTTON_POSITIVE)
+			.performClick()
+		org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+
+		assertEquals(1, work.size)
+		work.removeAt(0).run()
+
+		assertEquals(1, fakeConnector.leaveCount)
+		assertNull(ConnectorDraftStore.getDraft(ConnectorSources.MATRIX_ID, "!room1:matrix.org"))
+
+		// finish() schedules onPause(), whose saveDraft() must not resurrect the draft that
+		// leaving the room just cleared.
+		pause(activity)
+
+		assertNull(ConnectorDraftStore.getDraft(ConnectorSources.MATRIX_ID, "!room1:matrix.org"))
 	}
 
 	@Test
