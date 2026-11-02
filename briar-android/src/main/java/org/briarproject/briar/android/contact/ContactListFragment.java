@@ -66,6 +66,7 @@ public class ContactListFragment extends BaseFragment
 	private List<ConnectorInboxThreadItem> connectorItems = emptyList();
 	private ConnectorInboxAvailabilityState connectorAvailabilityState =
 			ConnectorInboxAvailabilityState.NONE;
+	private InboxSourceFilter currentFilter = InboxSourceFilter.All.INSTANCE;
 
 	/**
 	 * The Snackbar is non-null when shown and null otherwise.
@@ -131,6 +132,12 @@ public class ContactListFragment extends BaseFragment
 					updateEmptyState();
 					requireActivity().invalidateOptionsMenu();
 				});
+		viewModel.getSourceFilter()
+				.observe(getViewLifecycleOwner(), filter -> {
+					currentFilter = filter;
+					submitInboxItems();
+					requireActivity().invalidateOptionsMenu();
+				});
 		viewModel.getHasPendingContacts()
 				.observe(getViewLifecycleOwner(), hasPending -> {
 					if (hasPending) showSnackBar();
@@ -167,6 +174,7 @@ public class ContactListFragment extends BaseFragment
 	@Override
 	public void onCreateOptionsMenu(Menu menu, MenuInflater inflater) {
 		inflater.inflate(R.menu.telegram_inbox_actions, menu);
+		inflater.inflate(R.menu.contact_list_actions, menu);
 		super.onCreateOptionsMenu(menu, inflater);
 	}
 
@@ -179,12 +187,38 @@ public class ContactListFragment extends BaseFragment
 					viewModel.isAnyConnectorEnabled(),
 					connectorAvailabilityState));
 		}
+		MenuItem filterItem = menu.findItem(R.id.action_filter_inbox);
+		if (filterItem != null) {
+			filterItem.setVisible(shouldShowFilterAction(
+					viewModel.isAnyConnectorEnabled()));
+			int checkedId = currentFilter == InboxSourceFilter.Matrix.INSTANCE ?
+					R.id.action_filter_matrix :
+					(currentFilter == InboxSourceFilter.Briar.INSTANCE ?
+							R.id.action_filter_briar : R.id.action_filter_all);
+			MenuItem checkedItem = menu.findItem(checkedId);
+			if (checkedItem != null) checkedItem.setChecked(true);
+		}
 	}
 
 	@Override
 	public boolean onOptionsItemSelected(MenuItem item) {
 		if (isManualRefreshAction(item.getItemId())) {
 			viewModel.loadConnectorThreads();
+			return true;
+		}
+		InboxSourceFilter selectedFilter = filterForAction(item.getItemId());
+		if (selectedFilter != null) {
+			item.setChecked(true);
+			viewModel.setSourceFilter(selectedFilter);
+			return true;
+		}
+		if (item.getItemId() == R.id.action_add_contact_nearby) {
+			Intent intent =
+					new Intent(getContext(), AddNearbyContactActivity.class);
+			startActivity(intent);
+			return true;
+		} else if (item.getItemId() == R.id.action_add_contact_remotely) {
+			startActivity(new Intent(getContext(), AddContactActivity.class));
 			return true;
 		}
 		return super.onOptionsItemSelected(item);
@@ -248,14 +282,31 @@ public class ContactListFragment extends BaseFragment
 
 	private void submitInboxItems() {
 		updateEmptyState();
-		adapter.submitList(InboxThreadMerger.merge(briarItems, connectorItems), list::showData);
+		adapter.submitList(InboxThreadMerger.merge(briarItems, connectorItems,
+				currentFilter), list::showData);
 	}
 
 	private void updateEmptyState() {
-		list.setEmptyText(emptyTextForState(connectorAvailabilityState));
-		int actionRes = emptyActionTextForState(connectorAvailabilityState);
+		list.setEmptyText(currentFilter.emptyText(connectorAvailabilityState));
+		int actionRes = currentFilter.emptyAction(connectorAvailabilityState);
 		if (actionRes == 0) list.setEmptyAction("");
 		else list.setEmptyAction(actionRes);
+	}
+
+	static boolean shouldShowFilterAction(boolean connectorEnabled) {
+		return connectorEnabled;
+	}
+
+	@Nullable
+	static InboxSourceFilter filterForAction(int actionId) {
+		if (actionId == R.id.action_filter_all) {
+			return InboxSourceFilter.All.INSTANCE;
+		} else if (actionId == R.id.action_filter_matrix) {
+			return InboxSourceFilter.Matrix.INSTANCE;
+		} else if (actionId == R.id.action_filter_briar) {
+			return InboxSourceFilter.Briar.INSTANCE;
+		}
+		return null;
 	}
 
 	static boolean isManualRefreshAction(int itemId) {

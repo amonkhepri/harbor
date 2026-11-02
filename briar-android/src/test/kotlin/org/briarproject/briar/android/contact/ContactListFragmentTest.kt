@@ -170,4 +170,25 @@ class ContactListFragmentTest {
 		assertEquals("555", intent.getStringExtra(ConnectorConversationActivity.THREAD_ID))
 		assertEquals("Chat title", intent.getStringExtra(ConnectorConversationActivity.THREAD_TITLE))
 	}
+
+	@Test
+	fun testFilterActionRecognizedAndMapped() {
+		assertEquals(InboxSourceFilter.All, ContactListFragment.filterForAction(R.id.action_filter_all))
+		assertEquals(
+			InboxSourceFilter.Matrix,
+			ContactListFragment.filterForAction(R.id.action_filter_matrix),
+		)
+		assertEquals(
+			InboxSourceFilter.Briar,
+			ContactListFragment.filterForAction(R.id.action_filter_briar),
+		)
+		assertEquals(null, ContactListFragment.filterForAction(android.R.id.home))
+		assertEquals(null, ContactListFragment.filterForAction(R.id.action_refresh_connector_threads))
+	}
+
+	@Test
+	fun testFilterVisibilityRequiresEnabledConnector() {
+		assertEquals(false, ContactListFragment.shouldShowFilterAction(false))
+		assertEquals(true, ContactListFragment.shouldShowFilterAction(true))
+	}
 }

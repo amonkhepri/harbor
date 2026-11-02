@@ -114,6 +114,75 @@ class InboxThreadMergerTest {
 		assertEquals(listOf("m:newer", "m:middle", "m:older"), items.map { it.stableId })
 	}
 
+	@Test
+	fun testSwitchingFromMatrixToAllRestoresRowsAndPreservesOrdering() {
+		val contact = getContact()
+		val briar = ContactListItem(
+			contact,
+			AuthorInfo(AuthorInfo.Status.VERIFIED),
+			true,
+			GroupCount(1, 0, 5000L),
+		)
+		val telegram = GenericConnectorInboxThreadItem(
+			ConnectorThread(
+				ConnectorSources.TELEGRAM,
+				"7",
+				"chat",
+				42,
+				"",
+				false,
+				ConnectorMessageType.TEXT,
+			),
+		)
+		val matrix = FakeConnectorInboxThreadItem(
+			connectorSource = ConnectorSources.MATRIX,
+			connectorThreadId = "!room:example.org",
+			latestActivityMillis = 10000L,
+		)
+
+		val matrixOnly = InboxThreadMerger.merge(
+			listOf(briar),
+			listOf(telegram, matrix),
+			filter = InboxSourceFilter.Matrix,
+		)
+		assertEquals(listOf("matrix:!room:example.org"), matrixOnly.map { it.stableId })
+
+		// Switching to All restores all rows and preserves newest-first ordering:
+		// telegram: 42000ms, matrix: 10000ms, briar: 5000ms
+		val all = InboxThreadMerger.merge(
+			listOf(briar),
+			listOf(telegram, matrix),
+			filter = InboxSourceFilter.All,
+		)
+		assertEquals(
+			listOf("telegram:7", "matrix:!room:example.org", "briar:${contact.id.int}"),
+			all.map { it.stableId },
+		)
+	}
+
+	@Test
+	fun testBriarFilterExcludesConnectorRows() {
+		val contact = getContact()
+		val briar = ContactListItem(
+			contact,
+			AuthorInfo(AuthorInfo.Status.VERIFIED),
+			true,
+			GroupCount(1, 0, 5000L),
+		)
+		val matrix = FakeConnectorInboxThreadItem(
+			connectorSource = ConnectorSources.MATRIX,
+			connectorThreadId = "!room:example.org",
+			latestActivityMillis = 10000L,
+		)
+
+		val items = InboxThreadMerger.merge(
+			listOf(briar),
+			listOf(matrix),
+			filter = InboxSourceFilter.Briar,
+		)
+		assertEquals(listOf("briar:${contact.id.int}"), items.map { it.stableId })
+	}
+
 	private fun connectorItem(
 		id: String,
 		latestActivityMillis: Long,

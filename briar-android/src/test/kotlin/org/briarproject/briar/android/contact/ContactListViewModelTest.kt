@@ -371,6 +371,18 @@ class ContactListViewModelTest {
 		}
 	}
 
+	@Test
+	fun testSourceFilterDefaultsToAllAndUpdatesOnSet() {
+		val viewModel = createViewModel()
+		assertEquals(InboxSourceFilter.All, getOrAwaitValue(viewModel.sourceFilter))
+
+		viewModel.setSourceFilter(InboxSourceFilter.Matrix)
+		assertEquals(InboxSourceFilter.Matrix, getOrAwaitValue(viewModel.sourceFilter))
+
+		viewModel.setSourceFilter(InboxSourceFilter.All)
+		assertEquals(InboxSourceFilter.All, getOrAwaitValue(viewModel.sourceFilter))
+	}
+
 	private fun connector(source: ConnectorSource, thread: ConnectorThread) =
 		mock(ReadOnlyConnector::class.java).also { connector ->
 			`when`(connector.source).thenReturn(source)
