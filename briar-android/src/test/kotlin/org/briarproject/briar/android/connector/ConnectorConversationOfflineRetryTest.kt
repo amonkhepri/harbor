@@ -5,6 +5,7 @@ import android.content.Intent
 import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.ImageButton
+import android.widget.TextView
 import androidx.arch.core.executor.testing.InstantTaskExecutorRule
 import androidx.recyclerview.widget.LinearLayoutManager
 import org.briarproject.briar.R
@@ -20,6 +21,8 @@ import org.briarproject.briar.api.connector.ConnectorTextSender
 import org.briarproject.briar.api.connector.ConnectorThread
 import org.briarproject.briar.api.connector.ReadOnlyConnector
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -106,6 +109,7 @@ class ConnectorConversationOfflineRetryTest {
 		val root = FrameLayout(activity).apply { id = android.R.id.content }
 		val list = BriarRecyclerView(activity)
 		root.addView(list)
+		activity.setContentView(root)
 		val manager = LinearLayoutManager(activity)
 		list.setLayoutManager(manager)
 
@@ -113,6 +117,9 @@ class ConnectorConversationOfflineRetryTest {
 			isAccessible = true
 		}.get(activity) as ConnectorConversationAdapter
 		list.setAdapter(adapter)
+		list.findViewById<android.view.View>(R.id.emptyAction)?.setOnClickListener {
+			activity.retryRefresh()
+		}
 
 		val composeText = ConnectorComposeText(activity)
 		setField(activity, "list", list)
@@ -191,6 +198,7 @@ class ConnectorConversationOfflineRetryTest {
 		// Initial load successful
 		val stateBefore = messageState(activity)
 		assertEquals(2, stateBefore.messages.size)
+		assertNull(activity.getLoadFailedSnackbar())
 
 		// Disconnect / network loss occurs
 		fakeConnector.failLoads = true
@@ -204,6 +212,7 @@ class ConnectorConversationOfflineRetryTest {
 		assertEquals(2, stateAfter.messages.size)
 		assertEquals("Message 1", stateAfter.messages[0].text)
 		assertEquals("Message 2", stateAfter.messages[1].text)
+		assertNotNull(activity.getLoadFailedSnackbar())
 	}
 
 	@Test
@@ -215,20 +224,22 @@ class ConnectorConversationOfflineRetryTest {
 		drainWork()
 
 		assertEquals(1, messageState(activity).messages.size)
+		assertNull(activity.getLoadFailedSnackbar())
 
 		// Disconnect
 		fakeConnector.failLoads = true
 		activity.retryRefresh()
 		drainWork()
 
-		// History is preserved
+		// History is preserved and load failure feedback is visible
 		assertEquals(1, messageState(activity).messages.size)
+		assertNotNull(activity.getLoadFailedSnackbar())
 
 		// Reconnect with new remote message
 		fakeConnector.failLoads = false
 		fakeConnector.messages.add(createMessage("\$event2", "Message 2", 1001L))
 
-		// Explicit retry recovers fresh history
+		// Explicit retry recovers fresh history and clears failure feedback
 		activity.retryRefresh()
 		drainWork()
 
@@ -236,6 +247,7 @@ class ConnectorConversationOfflineRetryTest {
 		assertEquals(2, recoveredState.messages.size)
 		assertEquals("Message 1", recoveredState.messages[0].text)
 		assertEquals("Message 2", recoveredState.messages[1].text)
+		assertNull(activity.getLoadFailedSnackbar())
 	}
 
 	@Test
@@ -271,16 +283,47 @@ class ConnectorConversationOfflineRetryTest {
 
 		// Initial load failed on empty room
 		assertEquals(0, messageState(activity).messages.size)
+		val emptyAction = activity.findViewById<TextView>(R.id.emptyAction)
+		assertEquals("Retry", emptyAction.text.toString())
 
 		// Reconnect and add message
 		fakeConnector.failLoads = false
 		fakeConnector.messages.add(createMessage("\$event1", "First message", 1000L))
 
-		// Retry recovers
-		activity.retryRefresh()
+		// Click retry on the empty view
+		emptyAction.performClick()
 		drainWork()
 
 		assertEquals(1, messageState(activity).messages.size)
 		assertEquals("First message", messageState(activity).messages.single().text)
+		assertEquals("", emptyAction.text.toString())
+	}
+
+	@Test
+	fun backgroundObserverRefreshFailureShowsLoadFailedFeedback() {
+		fakeConnector.messages.add(createMessage("\$event1", "Message 1", 1000L))
+		val activity = createActivity()
+		activity.startRoomObserver()
+		drainWork()
+		loadInitial(activity)
+		drainWork()
+
+		assertEquals(1, messageState(activity).messages.size)
+		assertNull(activity.getLoadFailedSnackbar())
+
+		// Network is lost, remote room observer emits an event
+		fakeConnector.failLoads = true
+		fakeConnector.activeSubscription?.onUpdate?.invoke()
+		drainWork()
+
+		// History stays visible and offline feedback is shown with retry
+		assertEquals(1, messageState(activity).messages.size)
+		val snackbar = activity.getLoadFailedSnackbar()
+		assertNotNull(snackbar)
+
+		// A second background update while already offline does not recreate snackbar
+		fakeConnector.activeSubscription?.onUpdate?.invoke()
+		drainWork()
+		assertEquals(snackbar, activity.getLoadFailedSnackbar())
 	}
 }
