@@ -326,4 +326,43 @@ class ConnectorConversationOfflineRetryTest {
 		drainWork()
 		assertEquals(snackbar, activity.getLoadFailedSnackbar())
 	}
+
+	@Test
+	fun repeatedFailedRefreshesOfEmptyRoomShowsSnackbarOnce() {
+		fakeConnector.failLoads = true
+		val activity = createActivity()
+		activity.startRoomObserver()
+		drainWork()
+		loadInitial(activity)
+		drainWork()
+
+		assertEquals(0, messageState(activity).messages.size)
+		val initialSnackbar = activity.getLoadFailedSnackbar()
+		assertNotNull(initialSnackbar)
+
+		// Repeated background update while already offline does not recreate snackbar
+		fakeConnector.activeSubscription?.onUpdate?.invoke()
+		drainWork()
+		assertEquals(initialSnackbar, activity.getLoadFailedSnackbar())
+
+		// Repeated automatic periodic refresh while still offline does not recreate snackbar
+		val automaticRefresh = ConnectorConversationActivity::class.java.getDeclaredField("automaticRefresh").apply {
+			isAccessible = true
+		}.get(activity) as Runnable
+		automaticRefresh.run()
+		drainWork()
+		assertEquals(initialSnackbar, activity.getLoadFailedSnackbar())
+
+		// Explicit retry when still offline recreates snackbar
+		activity.retryRefresh()
+		drainWork()
+		val retriedSnackbar = activity.getLoadFailedSnackbar()
+		assertNotNull(retriedSnackbar)
+
+		// Successful recovery dismisses and clears snackbar
+		fakeConnector.failLoads = false
+		activity.retryRefresh()
+		drainWork()
+		assertNull(activity.getLoadFailedSnackbar())
+	}
 }

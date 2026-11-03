@@ -282,6 +282,7 @@ class ConnectorConversationActivity : BriarActivity() {
 		}
 	}
 	private var loadFailedSnackbar: Snackbar? = null
+	private var lastLoadFailed = false
 	private var roomObserverSubscription: ConnectorRoomObserver.RoomSubscription? = null
 	private var roomUpdateCoalescer: ConnectorRoomUpdateCoalescer? = null
 	private var automaticRefreshRunning = false
@@ -564,6 +565,7 @@ class ConnectorConversationActivity : BriarActivity() {
 		retryCoalescer.cancel()
 		loadFailedSnackbar?.dismiss()
 		loadFailedSnackbar = null
+		lastLoadFailed = false
 		typing?.stop()
 		leaveOwner.invalidate()
 		leaveDialog?.dismiss()
@@ -795,7 +797,6 @@ class ConnectorConversationActivity : BriarActivity() {
 				} else {
 					state
 				}
-				val priorStatusText = messageState.visibleStatusText
 				val nextState = next.withAvailabilityState(
 					availabilityState,
 					if (availabilityState == EMPTY) next else messageState,
@@ -803,8 +804,9 @@ class ConnectorConversationActivity : BriarActivity() {
 				)
 				submitMessageState(nextState)
 				if (availabilityState == LOAD_FAILED) {
-					showLoadFailedFeedback(nextState.messages.isEmpty(), priorStatusText)
+					showLoadFailedFeedback(nextState.messages.isEmpty())
 				} else {
+					lastLoadFailed = false
 					retryRequested = false
 					loadFailedSnackbar?.dismiss()
 					loadFailedSnackbar = null
@@ -817,12 +819,13 @@ class ConnectorConversationActivity : BriarActivity() {
 		}
 	}
 
-	private fun showLoadFailedFeedback(isEmpty: Boolean, priorStatusText: String?) {
+	private fun showLoadFailedFeedback(isEmpty: Boolean) {
 		if (isEmpty) {
 			list.setEmptyAction(R.string.connector_conversation_retry_refresh)
 		}
 		val text = getString(R.string.connector_conversation_load_failed, sourceName)
-		val shouldShowSnackbar = retryRequested || priorStatusText != text
+		val shouldShowSnackbar = retryRequested || !lastLoadFailed
+		lastLoadFailed = true
 		retryRequested = false
 		if (shouldShowSnackbar) {
 			loadFailedSnackbar?.dismiss()
