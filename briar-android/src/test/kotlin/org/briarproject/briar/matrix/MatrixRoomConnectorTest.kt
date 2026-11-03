@@ -106,6 +106,28 @@ class MatrixRoomConnectorTest {
 	}
 
 	@Test
+	fun `topic lookup never enumerates rooms and fails closed without authorization`() {
+		val auth = FakeMatrixAuthSession(MatrixAuthState.READY)
+		val requestedRooms = mutableListOf<String>()
+		val connector = connector(
+			roomSnapshotClient = object : MatrixRoomSnapshotClient {
+				override fun getJoinedRooms(limit: Int): List<MatrixRoomSnapshot> =
+					error("Topic reads must not enumerate rooms or unread state")
+
+				override fun getRoomTopic(roomId: String): String? {
+					requestedRooms.add(roomId)
+					return "Purpose"
+				}
+			},
+			authSession = auth,
+		)
+		assertEquals("Purpose", connector.getThreadTopic("!a"))
+		auth.state = MatrixAuthState.CREDENTIAL_ENTRY
+		assertNull(connector.getThreadTopic("!a"))
+		assertEquals(listOf("!a"), requestedRooms)
+	}
+
+	@Test
 	fun `topics follow selected room and disappear without authorization`() {
 		val auth = FakeMatrixAuthSession(MatrixAuthState.READY)
 		val rooms = listOf(
@@ -594,6 +616,9 @@ class MatrixRoomConnectorTest {
 
 	private class FakeRoomSnapshotClient(private val snapshots: List<MatrixRoomSnapshot>) :
 		MatrixRoomSnapshotClient {
+		override fun getRoomTopic(roomId: String): String? =
+			snapshots.firstOrNull { it.roomId == roomId }?.topic
+
 		var lastRequestedLimit: Int? = null
 			private set
 

@@ -682,6 +682,22 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		}
 	}
 
+	@Synchronized
+	override fun getRoomTopic(roomId: String): String? {
+		val client = loginClient ?: return null
+		var room: Any? = null
+		return try {
+			room = client.javaClass.getMethod("getRoom", String::class.java).invoke(client, roomId)
+			room?.let(::readTopic)
+		} catch (e: ReflectiveOperationException) {
+			null
+		} catch (e: LinkageError) {
+			null
+		} finally {
+			closeQuietly(room)
+		}
+	}
+
 	private fun toJoinedRoomSnapshot(room: Any): MatrixRoomSnapshot? = try {
 		val roomClass = room.javaClass
 		val isSpace = roomClass.getMethod("isSpace").invoke(room) as Boolean

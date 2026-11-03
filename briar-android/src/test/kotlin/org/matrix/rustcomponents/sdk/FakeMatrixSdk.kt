@@ -643,7 +643,14 @@ class Client internal constructor(
 	fun getRoom(roomId: String): Room? = FakeMatrixSdkState.roomsToReturn
 		.firstOrNull { it.roomId == roomId }
 		?.let { fake ->
-			Room(fake.roomId, fake.displayName, fake.isSpace, fake.membership, fake.unreadMessagesCount)
+			Room(
+				fake.roomId,
+				fake.displayName,
+				fake.isSpace,
+				fake.membership,
+				fake.unreadMessagesCount,
+				fake.topic,
+			)
 		}
 
 	suspend fun login(

@@ -387,6 +387,24 @@ class ReflectiveMatrixHomeserverDiscoveryClientTest {
 	}
 
 	@Test
+	fun `getRoomTopic reads only the selected room and releases its handle`() {
+		val client = newSessionClient()
+		assertNull(client.getRoomTopic("!a:example.org"))
+		client.login("https://matrix.example.org", "alice", "swordfish")
+		for (topic in listOf("Room purpose", "", null)) {
+			FakeMatrixSdkState.roomsToReturn = listOf(
+				FakeRoomSpec("!a:example.org", topic = topic),
+				FakeRoomSpec("!b:example.org", topic = "Other room"),
+			)
+			val closedBefore = FakeMatrixSdkState.roomCloseCount
+			assertEquals(topic, client.getRoomTopic("!a:example.org"))
+			assertEquals(closedBefore + 1, FakeMatrixSdkState.roomCloseCount)
+		}
+		assertNull(client.getRoomTopic("!missing:example.org"))
+		assertEquals(0, FakeMatrixSdkState.roomInfoCallCount)
+	}
+
+	@Test
 	fun `getJoinedRooms carries unread message count and disposes roomInfo`() {
 		val client = newSessionClient()
 		client.login("https://matrix.example.org", "alice", "swordfish")
