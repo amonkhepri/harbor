@@ -471,6 +471,11 @@ class ConnectorConversationAdapterTest {
 			attachment = null,
 		)
 
+		val fileItemWithReactions = fileItem.copy(
+			connectorMessageId = "\$file3",
+			reactions = listOf(ConnectorReactionSummary("🔥", 5)),
+		)
+
 		val fileLayout = view.findViewById<View>(R.id.connectorFileLayout)
 		val fileName = view.findViewById<TextView>(R.id.connectorFileName)
 		val fileDetails = view.findViewById<TextView>(R.id.connectorFileDetails)
@@ -508,5 +513,107 @@ class ConnectorConversationAdapterTest {
 		assertNull(fileLayout.contentDescription)
 		assertEquals(View.VISIBLE, text.visibility)
 		assertEquals(context.getString(R.string.connector_message_deleted), text.text.toString())
+
+		// 5. Rebind to file item with reactions
+		holder.bind(fileItemWithReactions)
+		assertEquals(View.VISIBLE, fileLayout.visibility)
+		assertEquals("data.csv", fileName.text.toString())
+		assertEquals(View.VISIBLE, text.visibility)
+		assertEquals("🔥 5", text.text.toString())
+		assertTrue(fileLayout.contentDescription.toString().contains("🔥 5"))
+
+		// 6. Rebind back to file item without reactions: ensures reactions view resets to GONE and empty
+		holder.bind(fileItem)
+		assertEquals(View.VISIBLE, fileLayout.visibility)
+		assertEquals("data.csv", fileName.text.toString())
+		assertEquals(View.GONE, text.visibility)
+		assertEquals("", text.text.toString())
+		assertFalse(fileLayout.contentDescription.toString().contains("🔥 5"))
+	}
+
+	@Test
+	fun testFileMessageWithReactionsRendersReactionsAndAccessibility() {
+		val context = RuntimeEnvironment.getApplication()
+		val view = LayoutInflater.from(context)
+			.inflate(R.layout.list_item_connector_message, null)
+		val holder = ConnectorConversationAdapter.MessageViewHolder(view)
+
+		val item = ConnectorConversationMessageItem(
+			connectorSource = ConnectorSources.MATRIX,
+			connectorThreadId = "!room:example.org",
+			connectorMessageId = "\$file:example.org",
+			dateMillis = 1_000L,
+			isOutgoing = false,
+			text = "",
+			type = ConnectorMessageType.FILE,
+			attachment = ConnectorAttachmentMetadata(
+				fileName = "report.pdf",
+				mimeType = "application/pdf",
+				size = 1024L * 1024L,
+			),
+			reactions = listOf(
+				ConnectorReactionSummary("👍", 2),
+				ConnectorReactionSummary("🎉", 1),
+			),
+		)
+		holder.bind(item)
+
+		val fileLayout = view.findViewById<View>(R.id.connectorFileLayout)
+		val fileName = view.findViewById<TextView>(R.id.connectorFileName)
+		val fileDetails = view.findViewById<TextView>(R.id.connectorFileDetails)
+		val text = view.findViewById<TextView>(R.id.connectorMessageText)
+
+		assertEquals(View.VISIBLE, fileLayout.visibility)
+		assertEquals("report.pdf", fileName.text.toString())
+		assertEquals(View.VISIBLE, fileDetails.visibility)
+		assertEquals(View.VISIBLE, text.visibility)
+		assertEquals("👍 2  🎉 1", text.text.toString())
+		val desc = fileLayout.contentDescription.toString()
+		assertTrue(desc.contains("report.pdf"))
+		assertTrue(desc.contains("application/pdf"))
+		assertTrue(desc.contains("👍 2  🎉 1"))
+	}
+
+	@Test
+	fun testFileMessageWithReplyAndEditedStateRendersInFileNameAndAccessibility() {
+		val context = RuntimeEnvironment.getApplication()
+		val view = LayoutInflater.from(context)
+			.inflate(R.layout.list_item_connector_message, null)
+		val holder = ConnectorConversationAdapter.MessageViewHolder(view)
+
+		val item = ConnectorConversationMessageItem(
+			connectorSource = ConnectorSources.MATRIX,
+			connectorThreadId = "!room:example.org",
+			connectorMessageId = "\$file:example.org",
+			dateMillis = 1_000L,
+			isOutgoing = false,
+			isReply = true,
+			isEdited = true,
+			text = "",
+			type = ConnectorMessageType.FILE,
+			attachment = ConnectorAttachmentMetadata(
+				fileName = "notes.txt",
+				mimeType = "text/plain",
+				size = 512L,
+			),
+			reactions = listOf(ConnectorReactionSummary("❤️", 1)),
+		)
+		holder.bind(item)
+
+		val fileLayout = view.findViewById<View>(R.id.connectorFileLayout)
+		val fileName = view.findViewById<TextView>(R.id.connectorFileName)
+		val text = view.findViewById<TextView>(R.id.connectorMessageText)
+
+		assertEquals(View.VISIBLE, fileLayout.visibility)
+		val expectedReply = context.getString(R.string.connector_message_reply, "notes.txt")
+		val expectedEdited = context.getString(R.string.connector_message_edited, expectedReply)
+		assertEquals(expectedEdited, fileName.text.toString())
+		assertEquals(View.VISIBLE, text.visibility)
+		assertEquals("❤️ 1", text.text.toString())
+
+		val desc = fileLayout.contentDescription.toString()
+		assertTrue(desc.contains(expectedEdited))
+		assertTrue(desc.contains("text/plain"))
+		assertTrue(desc.contains("❤️ 1"))
 	}
 }

@@ -80,39 +80,25 @@ internal class ConnectorConversationAdapter(
 			} else {
 				replyText
 			}
-			text.text = if (item.reactions.isEmpty()) {
-				decoratedText
+			val reactionSummary = if (item.reactions.isEmpty()) {
+				null
 			} else {
-				val reactionText = item.reactions.joinToString("  ") { reaction ->
+				item.reactions.joinToString("  ") { reaction ->
 					text.resources.getString(
 						R.string.connector_message_reaction_summary,
 						reaction.key,
 						reaction.count,
 					)
 				}
-				text.resources.getString(
-					R.string.connector_message_with_reactions,
-					decoratedText,
-					reactionText,
-				)
 			}
 			if (isFile) {
-				val mimeType = ConnectorFileMetadataFormatter.sanitizeMimeType(item.attachment?.mimeType)
+				val mimeType =
+					ConnectorFileMetadataFormatter.sanitizeMimeType(item.attachment?.mimeType)
 				val formattedSize = ConnectorFileMetadataFormatter.formatFileSize(
 					itemView.context,
 					item.attachment?.size,
 				)
-				val decoratedFileName = if (item.isReply) {
-					text.resources.getString(R.string.connector_message_reply, safeFileName)
-				} else {
-					safeFileName
-				}
-				val finalFileName = if (item.isEdited) {
-					text.resources.getString(R.string.connector_message_edited, decoratedFileName)
-				} else {
-					decoratedFileName
-				}
-				fileName.text = finalFileName
+				fileName.text = decoratedText
 				val details = ConnectorFileMetadataFormatter.formatFileDetails(
 					text.resources,
 					mimeType,
@@ -120,20 +106,37 @@ internal class ConnectorConversationAdapter(
 				)
 				fileDetails.text = details
 				fileDetails.visibility = if (details.isNotEmpty()) View.VISIBLE else View.GONE
-				fileLayout.contentDescription = ConnectorFileMetadataFormatter.formatFileAccessibility(
-					text.resources,
-					safeFileName,
-					mimeType,
-					formattedSize,
-				)
+				fileLayout.contentDescription =
+					ConnectorFileMetadataFormatter.formatFileAccessibility(
+						text.resources,
+						decoratedText,
+						mimeType,
+						formattedSize,
+						reactionSummary,
+					)
 				fileLayout.visibility = View.VISIBLE
-				text.visibility = View.GONE
+				if (reactionSummary != null) {
+					text.text = reactionSummary
+					text.visibility = View.VISIBLE
+				} else {
+					text.text = ""
+					text.visibility = View.GONE
+				}
 			} else {
 				fileLayout.visibility = View.GONE
 				fileLayout.contentDescription = null
 				fileName.text = ""
 				fileDetails.text = ""
 				fileDetails.visibility = View.GONE
+				text.text = if (reactionSummary == null) {
+					decoratedText
+				} else {
+					text.resources.getString(
+						R.string.connector_message_with_reactions,
+						decoratedText,
+						reactionSummary,
+					)
+				}
 				text.visibility = View.VISIBLE
 			}
 			direction.setText(

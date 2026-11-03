@@ -56,25 +56,37 @@ internal object ConnectorFileMetadataFormatter {
 
 	fun formatFileAccessibility(
 		resources: Resources,
-		safeName: String,
+		fileName: String,
 		mimeType: String?,
 		formattedSize: String?,
-	): String = when {
-		mimeType != null && formattedSize != null ->
-			resources.getString(
-				R.string.connector_file_accessibility_with_details,
-				safeName,
-				mimeType,
-				formattedSize,
-			)
-		mimeType != null || formattedSize != null ->
+		reactionSummary: String? = null,
+	): String {
+		val base = when {
+			mimeType != null && formattedSize != null ->
+				resources.getString(
+					R.string.connector_file_accessibility_with_details,
+					fileName,
+					mimeType,
+					formattedSize,
+				)
+			mimeType != null || formattedSize != null ->
+				resources.getString(
+					R.string.connector_file_accessibility,
+					fileName,
+					mimeType ?: formattedSize,
+				)
+			else ->
+				resources.getString(R.string.connector_message_file) + ": " + fileName
+		}
+		return if (reactionSummary.isNullOrEmpty()) {
+			base
+		} else {
 			resources.getString(
 				R.string.connector_file_accessibility,
-				safeName,
-				mimeType ?: formattedSize,
+				base,
+				reactionSummary,
 			)
-		else ->
-			resources.getString(R.string.connector_message_file) + ": " + safeName
+		}
 	}
 
 	private fun isDisallowedCodePoint(cp: Int): Boolean {
