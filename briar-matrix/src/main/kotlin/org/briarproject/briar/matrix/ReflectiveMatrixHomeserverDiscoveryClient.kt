@@ -14,6 +14,7 @@ import org.briarproject.briar.api.connector.ConnectorMessageType
 import org.briarproject.briar.api.connector.ConnectorReactionSummary
 import org.briarproject.briar.api.connector.ConnectorUnreadMarker.PreparedMarkUnread
 import org.briarproject.briar.api.connector.ConnectorRoomLeaver.PreparedLeave
+import org.briarproject.briar.api.connector.ConnectorRoomObserver.RoomSubscription
 import org.briarproject.briar.api.connector.ConnectorTypingSender.PreparedTyping
 import java.util.concurrent.Executor
 import java.util.concurrent.Executors
@@ -91,6 +92,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		var busy = false
 	}
 	private val typingLanes = mutableMapOf<String, TypingLane>()
+	private val activeRoomSubscriptions = mutableSetOf<RoomSubscription>()
 
 	// Unlike invokeUnit, this lane waits for real native completion, not a timeout. A hung
 	// operation cannot release a later stop/start out of order or block message sending.
@@ -442,10 +444,13 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 	}
 
 	private fun beginGeneration(generation: Any) {
+		var detached = emptyList<RoomSubscription>()
 		synchronized(lifecycleLock) {
 			activeGeneration = generation
 			typingLanes.clear()
+			detached = detachRoomSubscriptions()
 		}
+		cancelRoomSubscriptions(detached)
 		val previous = loginClient
 		loginClient = null
 		activeStore = null
@@ -1083,22 +1088,32 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		}
 	}
 
+	private fun createTimelineListener(
+		listenerClass: Class<*>,
+		onUpdate: (Any?) -> Unit,
+	): Any = Proxy.newProxyInstance(
+		listenerClass.classLoader,
+		arrayOf(listenerClass),
+	) { proxy, method, arguments ->
+		when (method.name) {
+			"onUpdate" -> {
+				onUpdate(arguments?.firstOrNull())
+				null
+			}
+			"equals" -> proxy === arguments?.firstOrNull()
+			"hashCode" -> System.identityHashCode(proxy)
+			"toString" -> "MatrixTimelineListener"
+			else -> null
+		}
+	}
+
 	private fun readTimelineSnapshot(
 		timeline: Any,
 		listenerClass: Class<*>,
 	): List<MatrixMessageSnapshot> {
 		val update = TimelineSnapshotUpdate()
-		val listener = Proxy.newProxyInstance(
-			listenerClass.classLoader,
-			arrayOf(listenerClass),
-		) { proxy, method, arguments ->
-			when (method.name) {
-				"onUpdate" -> update.onUpdate(arguments?.firstOrNull())
-				"equals" -> proxy === arguments?.firstOrNull()
-				"hashCode" -> System.identityHashCode(proxy)
-				"toString" -> "MatrixTimelineListener"
-				else -> null
-			}
+		val listener = createTimelineListener(listenerClass) { argument ->
+			update.onUpdate(argument)
 		}
 		var listenerTask: Any? = null
 		return try {
@@ -1158,6 +1173,113 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			}
 			return (outcome.get() ?: throw SnapshotAdapterFailure()).getOrThrow()
 		}
+	}
+
+	@Synchronized
+	override fun observeRoom(
+		roomId: String,
+		onUpdate: () -> Unit,
+	): RoomSubscription? {
+		if (roomId.isBlank()) return null
+		val generation = synchronized(lifecycleLock) { activeGeneration } ?: return null
+		val client = loginClient ?: return null
+		var room: Any? = null
+		var timeline: Any? = null
+		var listenerTask: Any? = null
+		return try {
+			room = client.javaClass.getMethod("getRoom", String::class.java).invoke(client, roomId)
+				?: throw SnapshotAdapterFailure()
+			val membership = room.javaClass.getMethod("membership").invoke(room) as? Enum<*>
+			if (membership?.name != "JOINED") {
+				closeQuietly(room)
+				return null
+			}
+			val loadedTimeline =
+				invokeCloseableValue(room, "timeline", emptyArray(), emptyArray(), ::closeQuietly)
+			timeline = loadedTimeline
+			val initialDelivered = AtomicBoolean(false)
+			val subscriptionCancelled = AtomicBoolean(false)
+			val listenerClass = Class.forName(TIMELINE_LISTENER_CLASS_NAME)
+			val listener = createTimelineListener(listenerClass) { argument ->
+				val diffs = try {
+					(argument as? List<*>)?.mapNotNull { it } ?: emptyList()
+				} catch (e: Exception) {
+					emptyList<Any>()
+				}
+				try {
+					if (subscriptionCancelled.get()) return@createTimelineListener
+					val current = synchronized(lifecycleLock) { activeGeneration === generation }
+					if (!current) return@createTimelineListener
+					if (initialDelivered.compareAndSet(false, true)) {
+						return@createTimelineListener
+					}
+					if (diffs.isNotEmpty()) {
+						onUpdate()
+					}
+				} finally {
+					diffs.forEach(::destroyQuietly)
+				}
+			}
+			val createdTask = invokeCloseableValue(
+				loadedTimeline,
+				"addListener",
+				arrayOf(listenerClass),
+				arrayOf(listener),
+				::cancelAndCloseQuietly,
+			)
+			listenerTask = createdTask
+			val retainedRoom = room
+			val retainedTimeline = timeline
+			val sub = object : RoomSubscription {
+				override fun cancel() {
+					if (!subscriptionCancelled.compareAndSet(false, true)) return
+					synchronized(lifecycleLock) { activeRoomSubscriptions.remove(this) }
+					cancelAndCloseQuietly(createdTask)
+					closeQuietly(retainedTimeline)
+					closeQuietly(retainedRoom)
+				}
+
+				override fun close() = cancel()
+			}
+			val current = synchronized(lifecycleLock) {
+				(activeGeneration === generation).also { if (it) activeRoomSubscriptions.add(sub) }
+			}
+			if (!current) {
+				// Native teardown must run outside lifecycleLock (see saveSession).
+				sub.cancel()
+				return null
+			}
+			sub
+		} catch (e: InterruptedException) {
+			Thread.currentThread().interrupt()
+			cancelAndCloseQuietly(listenerTask)
+			closeQuietly(timeline)
+			closeQuietly(room)
+			null
+		} catch (e: Exception) {
+			cancelAndCloseQuietly(listenerTask)
+			closeQuietly(timeline)
+			closeQuietly(room)
+			null
+		} catch (e: LinkageError) {
+			cancelAndCloseQuietly(listenerTask)
+			closeQuietly(timeline)
+			closeQuietly(room)
+			null
+		}
+	}
+
+	// Caller holds lifecycleLock. Only detaches; the native teardown happens in
+	// cancelRoomSubscriptions after the lock is released, because a native cancel/close may
+	// wait for an in-flight listener callback that itself takes lifecycleLock.
+	private fun detachRoomSubscriptions(): List<RoomSubscription> {
+		val detached = activeRoomSubscriptions.toList()
+		activeRoomSubscriptions.clear()
+		return detached
+	}
+
+	private fun cancelRoomSubscriptions(subscriptions: List<RoomSubscription>) {
+		subscriptions.forEach { it.cancel() }
 	}
 
 	private fun reduceTimelineDiffs(diffs: List<Any>): List<Any> {
@@ -1346,11 +1468,14 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 
 	@Synchronized
 	override fun logout() {
+		var detached = emptyList<RoomSubscription>()
 		synchronized(lifecycleLock) {
 			activeGeneration = null
 			typingLanes.clear()
+			detached = detachRoomSubscriptions()
 			activeStore?.let { sessionFile(it).delete() }
 		}
+		cancelRoomSubscriptions(detached)
 		activeStore = null
 		val client = loginClient ?: return
 		loginClient = null
@@ -1367,10 +1492,13 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 
 	@Synchronized
 	override fun close() {
+		var detached = emptyList<RoomSubscription>()
 		synchronized(lifecycleLock) {
 			activeGeneration = null
 			typingLanes.clear()
+			detached = detachRoomSubscriptions()
 		}
+		cancelRoomSubscriptions(detached)
 		val client = loginClient
 		loginClient = null
 		activeStore = null

@@ -40,6 +40,7 @@ import org.briarproject.briar.api.connector.ConnectorMessageReadResult
 import org.briarproject.briar.api.connector.ConnectorMessageType
 import org.briarproject.briar.api.connector.ConnectorReadMarker
 import org.briarproject.briar.api.connector.ConnectorRoomLeaver
+import org.briarproject.briar.api.connector.ConnectorRoomObserver
 import org.briarproject.briar.api.connector.ConnectorUnreadMarker
 import org.briarproject.briar.api.connector.ConnectorRegistry
 import org.briarproject.briar.api.connector.ConnectorSources
@@ -272,6 +273,8 @@ class ConnectorConversationActivity : BriarActivity() {
 	private val imageDocumentLauncher =
 		registerForActivityResult(OpenImageDocumentAdvanced(), ::onImageChosen)
 	private var messageState = ConnectorConversationMessageListState()
+	private var roomObserverSubscription: ConnectorRoomObserver.RoomSubscription? = null
+	private var roomUpdateCoalescer: ConnectorRoomUpdateCoalescer? = null
 	private var automaticRefreshRunning = false
 	private val automaticRefresh = Runnable {
 		if (!automaticRefreshRunning && !messageState.isLoading) loadMessages(showLoading = false)
@@ -454,9 +457,11 @@ class ConnectorConversationActivity : BriarActivity() {
 	override fun onStart() {
 		super.onStart()
 		list.startPeriodicUpdate(REFRESH_INTERVAL_MS, automaticRefresh)
+		startRoomObserver()
 	}
 
 	override fun onStop() {
+		stopRoomObserver()
 		list.stopPeriodicUpdate()
 		super.onStop()
 	}
@@ -540,6 +545,7 @@ class ConnectorConversationActivity : BriarActivity() {
 	}
 
 	override fun onDestroy() {
+		stopRoomObserver()
 		typing?.stop()
 		leaveOwner.invalidate()
 		leaveDialog?.dismiss()
@@ -769,6 +775,43 @@ class ConnectorConversationActivity : BriarActivity() {
 					getString(emptyTextForState(availabilityState), sourceName),
 				),
 			)
+			roomUpdateCoalescer?.onRefreshCompleted()
+		}
+	}
+
+	internal fun startRoomObserver() {
+		val observer = connector as? ConnectorRoomObserver ?: return
+		if (!hasValidThreadId(threadId)) return
+		stopRoomObserver()
+		val room = threadId
+		val coalescer = ConnectorRoomUpdateCoalescer {
+			runOnUiThread {
+				if (!isFinishing && !isDestroyed) {
+					loadMessages(showLoading = false)
+				}
+			}
+		}
+		synchronized(this) { roomUpdateCoalescer = coalescer }
+		ioExecutor.execute {
+			val sub = observer.observeRoom(room) {
+				coalescer.onUpdate()
+			}
+			synchronized(this) {
+				if (roomUpdateCoalescer === coalescer) {
+					roomObserverSubscription = sub
+				} else {
+					sub?.cancel()
+				}
+			}
+		}
+	}
+
+	internal fun stopRoomObserver() {
+		synchronized(this) {
+			roomUpdateCoalescer?.cancel()
+			roomUpdateCoalescer = null
+			roomObserverSubscription?.cancel()
+			roomObserverSubscription = null
 		}
 	}
 
