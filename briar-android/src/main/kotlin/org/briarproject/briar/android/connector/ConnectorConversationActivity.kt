@@ -588,7 +588,6 @@ class ConnectorConversationActivity : BriarActivity() {
 	}
 
 	private fun loadMessages(showLoading: Boolean = true, isInitialOpen: Boolean = false) {
-		bindTopic(supportActionBar, null)
 		automaticRefreshRunning = !showLoading
 		val loadGeneration = loadOwner.begin()
 		val activeConnector = connector
