@@ -348,6 +348,25 @@ class ConnectorConversationAdapterTest {
 		val renderedName = view.findViewById<TextView>(R.id.connectorFileName).text.toString()
 		assertTrue(renderedName.length <= ConnectorFileMetadataFormatter.MAX_FILENAME_LENGTH)
 		assertTrue(renderedName.endsWith("….pdf"))
+
+		// Oversized name with surrogate pair at cut boundary avoids dangling surrogate
+		// available = 100 - 4 (.pdf) - 1 (…) = 95
+		// 94 'a's + emoji surrogate pair (\uD83D\uDE00) -> cut at 95 lands on high surrogate
+		val surrogateName = "a".repeat(94) + "\uD83D\uDE00" + "b".repeat(50) + ".pdf"
+		val surrogateItem = pathItem.copy(
+			attachment = ConnectorAttachmentMetadata(
+				fileName = surrogateName,
+				mimeType = "application/pdf",
+			),
+		)
+		holder.bind(surrogateItem)
+		val renderedSurrogateName = view.findViewById<TextView>(R.id.connectorFileName).text.toString()
+		assertTrue(renderedSurrogateName.length <= ConnectorFileMetadataFormatter.MAX_FILENAME_LENGTH)
+		assertTrue(renderedSurrogateName.endsWith("….pdf"))
+		// Verify no dangling high surrogate at truncation point
+		assertFalse(
+			Character.isHighSurrogate(renderedSurrogateName[renderedSurrogateName.indexOf('…') - 1]),
+		)
 	}
 
 	@Test

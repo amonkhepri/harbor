@@ -105,9 +105,20 @@ internal object ConnectorFileMetadataFormatter {
 			val ext = name.substring(dotIndex)
 			val available = maxLen - ext.length - 1
 			if (available > 0) {
-				return "${name.take(available)}…$ext"
+				return "${takeSafeChars(name, available)}…$ext"
 			}
 		}
-		return "${name.take(maxLen - 1)}…"
+		return "${takeSafeChars(name, maxLen - 1)}…"
+	}
+
+	private fun takeSafeChars(str: String, count: Int): String {
+		if (count <= 0) return ""
+		if (count >= str.length) return str
+		val cut = if (Character.isHighSurrogate(str[count - 1])) {
+			count - 1
+		} else {
+			count
+		}
+		return str.substring(0, cut)
 	}
 }
