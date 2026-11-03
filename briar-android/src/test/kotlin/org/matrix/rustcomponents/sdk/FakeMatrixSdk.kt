@@ -104,6 +104,18 @@ class Room(
 		FakeMatrixSdkState.typingOperation(typing)
 	}
 
+	fun subscribeToTypingNotifications(listener: TypingNotificationsListener): TaskHandle {
+		FakeMatrixSdkState.typingListenerAddCount++
+		synchronized(FakeMatrixSdkState.activeTypingListeners) {
+			FakeMatrixSdkState.activeTypingListeners.add(listener)
+		}
+		return TaskHandle {
+			synchronized(FakeMatrixSdkState.activeTypingListeners) {
+				FakeMatrixSdkState.activeTypingListeners.remove(listener)
+			}
+		}
+	}
+
 	suspend fun setUnreadFlag(newValue: Boolean) {
 		FakeMatrixSdkState.markedUnreadRooms[roomId] = newValue
 	}
@@ -117,6 +129,10 @@ class Room(
 
 interface TimelineListener {
 	fun onUpdate(diffs: List<TimelineDiff>)
+}
+
+interface TypingNotificationsListener {
+	fun call(typingUserIds: List<String>)
 }
 
 class Timeline {
@@ -656,6 +672,8 @@ class Client internal constructor(
 		this.session = session
 	}
 
+	fun userId(): String = session?.userId ?: throw ClientException.Generic("no session", "no session")
+
 	suspend fun logout() {
 		FakeMatrixSdkState.onDispose?.invoke()
 		FakeMatrixSdkState.logoutCallCount++
@@ -866,6 +884,13 @@ object FakeMatrixSdkState {
 	var paginationFailureToThrow: Exception? = null
 	var timelineCloseCount = 0
 	val activeTimelineListeners = mutableListOf<TimelineListener>()
+	val activeTypingListeners = mutableListOf<TypingNotificationsListener>()
+	var typingListenerAddCount = 0
+
+	fun simulateTypingNotification(typingUserIds: List<String>) {
+		val listeners = synchronized(activeTypingListeners) { activeTypingListeners.toList() }
+		listeners.forEach { it.call(typingUserIds) }
+	}
 
 	/** Runs inside [TaskHandle.cancel], e.g. to emulate a native cancel awaiting callbacks. */
 	var onTaskCancel: (() -> Unit)? = null
@@ -974,6 +999,8 @@ object FakeMatrixSdkState {
 		paginationFailureToThrow = null
 		timelineCloseCount = 0
 		activeTimelineListeners.clear()
+		activeTypingListeners.clear()
+		typingListenerAddCount = 0
 		onTaskCancel = null
 		taskCancelCount = 0
 		taskCloseCount = 0

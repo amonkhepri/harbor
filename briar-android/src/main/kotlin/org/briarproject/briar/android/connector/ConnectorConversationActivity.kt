@@ -41,6 +41,7 @@ import org.briarproject.briar.api.connector.ConnectorMessageType
 import org.briarproject.briar.api.connector.ConnectorReadMarker
 import org.briarproject.briar.api.connector.ConnectorRoomLeaver
 import org.briarproject.briar.api.connector.ConnectorRoomObserver
+import org.briarproject.briar.api.connector.ConnectorTypingObserver
 import org.briarproject.briar.api.connector.ConnectorUnreadMarker
 import org.briarproject.briar.api.connector.ConnectorRegistry
 import org.briarproject.briar.api.connector.ConnectorSources
@@ -120,6 +121,7 @@ class ConnectorConversationActivity : BriarActivity() {
 
 		private const val MESSAGE_LIMIT = 50
 		private const val REFRESH_INTERVAL_MS = 15_000L
+		internal const val TYPING_EXPIRY_MS = 5_000L
 		private const val STATE_LAYOUT_MANAGER = "layoutManager"
 		private const val DEFAULT_IMAGE_FILE_EXTENSION = "jpg"
 		private const val STATE_PENDING_IMAGE = "pendingImage"
@@ -284,6 +286,11 @@ class ConnectorConversationActivity : BriarActivity() {
 	private var loadFailedSnackbar: Snackbar? = null
 	private var roomObserverSubscription: ConnectorRoomObserver.RoomSubscription? = null
 	private var roomUpdateCoalescer: ConnectorRoomUpdateCoalescer? = null
+	private lateinit var typingIndicator: TextView
+	private val typingIndicatorHandler = android.os.Handler(android.os.Looper.getMainLooper())
+	private val typingExpiryRunnable = Runnable { clearTypingIndicator() }
+	private var typingObserverSubscription: ConnectorTypingObserver.TypingSubscription? = null
+	private var isObservingTyping = false
 	private var automaticRefreshRunning = false
 	private val automaticRefresh = Runnable {
 		if (!automaticRefreshRunning && !messageState.isLoading) loadMessages(showLoading = false)
@@ -326,6 +333,7 @@ class ConnectorConversationActivity : BriarActivity() {
 		list.setLayoutManager(layoutManager)
 		list.setAdapter(adapter)
 		list.findViewById<View>(R.id.emptyAction)?.setOnClickListener { retryRefresh() }
+		typingIndicator = findViewById(R.id.connectorConversationTypingIndicator)
 
 		findBar = findViewById(R.id.connectorConversationFindBar)
 		findQuery = findViewById(R.id.connectorConversationFindQuery)
@@ -468,10 +476,12 @@ class ConnectorConversationActivity : BriarActivity() {
 		super.onStart()
 		list.startPeriodicUpdate(REFRESH_INTERVAL_MS, automaticRefresh)
 		startRoomObserver()
+		startTypingObserver()
 	}
 
 	override fun onStop() {
 		stopRoomObserver()
+		stopTypingObserver()
 		list.stopPeriodicUpdate()
 		super.onStop()
 	}
@@ -561,6 +571,7 @@ class ConnectorConversationActivity : BriarActivity() {
 
 	override fun onDestroy() {
 		stopRoomObserver()
+		stopTypingObserver()
 		retryCoalescer.cancel()
 		loadFailedSnackbar?.dismiss()
 		loadFailedSnackbar = null
@@ -868,6 +879,65 @@ class ConnectorConversationActivity : BriarActivity() {
 			roomUpdateCoalescer = null
 			roomObserverSubscription?.cancel()
 			roomObserverSubscription = null
+		}
+	}
+
+	internal fun getTypingIndicator(): TextView = typingIndicator
+
+	internal fun startTypingObserver() {
+		val observer = connector as? ConnectorTypingObserver ?: return
+		if (!hasValidThreadId(threadId)) return
+		stopTypingObserver()
+		val room = threadId
+		synchronized(this) {
+			isObservingTyping = true
+		}
+		ioExecutor.execute {
+			val sub = observer.observeTyping(room) { isTyping ->
+				runOnUiThread {
+					if (!isFinishing && !isDestroyed) {
+						updateTypingIndicator(isTyping)
+					}
+				}
+			}
+			synchronized(this) {
+				if (isObservingTyping && threadId == room) {
+					typingObserverSubscription = sub
+				} else {
+					sub?.cancel()
+				}
+			}
+		}
+	}
+
+	internal fun stopTypingObserver() {
+		synchronized(this) {
+			isObservingTyping = false
+			typingObserverSubscription?.cancel()
+			typingObserverSubscription = null
+		}
+		clearTypingIndicator()
+	}
+
+	internal fun updateTypingIndicator(isTyping: Boolean) {
+		val stillObserving = synchronized(this) { isObservingTyping }
+		if (!stillObserving || isFinishing || isDestroyed) {
+			clearTypingIndicator()
+			return
+		}
+		typingIndicatorHandler.removeCallbacks(typingExpiryRunnable)
+		if (isTyping) {
+			typingIndicator.visibility = View.VISIBLE
+			typingIndicatorHandler.postDelayed(typingExpiryRunnable, TYPING_EXPIRY_MS)
+		} else {
+			typingIndicator.visibility = View.GONE
+		}
+	}
+
+	internal fun clearTypingIndicator() {
+		typingIndicatorHandler.removeCallbacks(typingExpiryRunnable)
+		if (::typingIndicator.isInitialized) {
+			typingIndicator.visibility = View.GONE
 		}
 	}
 

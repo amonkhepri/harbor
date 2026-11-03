@@ -4,6 +4,7 @@ import org.briarproject.briar.api.connector.ConnectorAttachmentMetadata
 import org.briarproject.briar.api.connector.ConnectorMessageType
 import org.briarproject.briar.api.connector.ConnectorReactionSummary
 import org.briarproject.briar.api.connector.ConnectorRoomObserver.RoomSubscription
+import org.briarproject.briar.api.connector.ConnectorTypingObserver.TypingSubscription
 
 /**
  * Narrow, fakeable boundary over recent-message reading for one joined Matrix room on an SDK
@@ -36,6 +37,15 @@ interface MatrixMessageSnapshotClient {
 	 * is retained or [roomId] cannot be observed.
 	 */
 	fun observeRoom(roomId: String, onUpdate: () -> Unit): RoomSubscription? = null
+
+	/**
+	 * Subscribes to typing notifications for [roomId] (MX-047). Returns null if no session
+	 * is retained or [roomId] cannot be observed.
+	 */
+	fun observeTyping(
+		roomId: String,
+		onTypingChanged: (isTyping: Boolean) -> Unit,
+	): TypingSubscription? = null
 }
 
 /**

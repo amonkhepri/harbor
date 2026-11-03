@@ -55,6 +55,20 @@
 		android:layout_weight="1"
 		app:scrollToEnd="false" />
 
+	<TextView
+		android:id="@+id/connectorConversationTypingIndicator"
+		android:layout_width="match_parent"
+		android:layout_height="wrap_content"
+		android:paddingStart="16dp"
+		android:paddingEnd="16dp"
+		android:paddingTop="4dp"
+		android:paddingBottom="4dp"
+		android:textSize="12sp"
+		android:textColor="?android:attr/textColorSecondary"
+		android:text="@string/connector_typing_indicator"
+		android:accessibilityLiveRegion="polite"
+		android:visibility="gone" />
+
 	<LinearLayout
 		android:id="@+id/connectorConversationComposeBar"
 		android:layout_width="match_parent"

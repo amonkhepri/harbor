@@ -2,6 +2,7 @@ package org.briarproject.briar.matrix
 
 import org.briarproject.bramble.api.system.Clock
 import org.briarproject.briar.api.connector.ConnectorRoomObserver.RoomSubscription
+import org.briarproject.briar.api.connector.ConnectorTypingObserver.TypingSubscription
 import org.briarproject.briar.api.matrix.MatrixAuthSession
 import org.briarproject.briar.api.matrix.MatrixAuthSession.RecoverableErrorDetail.NONE
 import org.briarproject.briar.api.matrix.MatrixAuthSession.Snapshot
@@ -49,7 +50,12 @@ class MatrixRoomConnectorObserverTest {
 			fakeSnapshotClient,
 			object : MatrixMessageSendClient {
 				override fun sendTextMessage(roomId: String, text: String) = false
-				override fun sendImageMessage(r: String, b: ByteArray, f: String, m: String) = false
+				override fun sendImageMessage(
+					roomId: String,
+					imageBytes: ByteArray,
+					fileName: String,
+					mimeType: String,
+				) = false
 				override fun markRead(roomId: String) = false
 				override fun deleteMessage(roomId: String, eventId: String) = false
 			},
@@ -87,7 +93,12 @@ class MatrixRoomConnectorObserverTest {
 			fakeSnapshotClient,
 			object : MatrixMessageSendClient {
 				override fun sendTextMessage(roomId: String, text: String) = false
-				override fun sendImageMessage(r: String, b: ByteArray, f: String, m: String) = false
+				override fun sendImageMessage(
+					roomId: String,
+					imageBytes: ByteArray,
+					fileName: String,
+					mimeType: String,
+				) = false
 				override fun markRead(roomId: String) = false
 				override fun deleteMessage(roomId: String, eventId: String) = false
 			},
@@ -203,6 +214,136 @@ class MatrixRoomConnectorObserverTest {
 
 		assertFalse(callbackBlocked)
 		assertEquals(cancelsBefore + 2, FakeMatrixSdkState.taskCancelCount)
+	}
+
+	@Test
+	fun observeTypingFailsClosedWhenConnectorIsNotAuthorized() {
+		var clientObserved = false
+		val fakeSnapshotClient = object : MatrixMessageSnapshotClient {
+			override fun getRecentMessages(roomId: String, limit: Int) = null
+			override fun observeTyping(
+				roomId: String,
+				onTypingChanged: (Boolean) -> Unit,
+			): TypingSubscription {
+				clientObserved = true
+				return object : TypingSubscription {
+					override fun cancel() {}
+					override fun close() {}
+				}
+			}
+		}
+		val unauthSession = FakeMatrixAuthSession(MatrixAuthState.HOMESERVER_ENTRY)
+		val connector = MatrixRoomConnector(
+			object : MatrixRoomSnapshotClient {
+				override fun getJoinedRooms(limit: Int) = emptyList<MatrixRoomSnapshot>()
+			},
+			unauthSession,
+			fakeSnapshotClient,
+			object : MatrixMessageSendClient {
+				override fun sendTextMessage(roomId: String, text: String) = false
+				override fun sendImageMessage(
+					roomId: String,
+					imageBytes: ByteArray,
+					fileName: String,
+					mimeType: String,
+				) = false
+				override fun markRead(roomId: String) = false
+				override fun deleteMessage(roomId: String, eventId: String) = false
+			},
+			object : Clock {
+				override fun currentTimeMillis() = 0L
+				override fun sleep(ms: Long) {}
+			},
+		)
+
+		val subscription = connector.observeTyping("!room:example.org") {}
+		assertNull(subscription)
+		assertFalse(clientObserved)
+	}
+
+	@Test
+	fun observeTypingDelegatesToMessageSnapshotClientWhenAuthorized() {
+		var clientObservedRoomId: String? = null
+		val expectedSubscription = object : TypingSubscription {
+			override fun cancel() {}
+			override fun close() {}
+		}
+		val fakeSnapshotClient = object : MatrixMessageSnapshotClient {
+			override fun getRecentMessages(roomId: String, limit: Int) = null
+			override fun observeTyping(
+				roomId: String,
+				onTypingChanged: (Boolean) -> Unit,
+			): TypingSubscription {
+				clientObservedRoomId = roomId
+				return expectedSubscription
+			}
+		}
+		val readySession = FakeMatrixAuthSession(MatrixAuthState.READY)
+		val connector = MatrixRoomConnector(
+			object : MatrixRoomSnapshotClient {
+				override fun getJoinedRooms(limit: Int) = emptyList<MatrixRoomSnapshot>()
+			},
+			readySession,
+			fakeSnapshotClient,
+			object : MatrixMessageSendClient {
+				override fun sendTextMessage(roomId: String, text: String) = false
+				override fun sendImageMessage(
+					roomId: String,
+					imageBytes: ByteArray,
+					fileName: String,
+					mimeType: String,
+				) = false
+				override fun markRead(roomId: String) = false
+				override fun deleteMessage(roomId: String, eventId: String) = false
+			},
+			object : Clock {
+				override fun currentTimeMillis() = 0L
+				override fun sleep(ms: Long) {}
+			},
+		)
+
+		val subscription = connector.observeTyping("!room:example.org") {}
+		assertEquals(expectedSubscription, subscription)
+		assertEquals("!room:example.org", clientObservedRoomId)
+	}
+
+	@Test
+	fun reflectiveClientObservesTypingExcludesCurrentUserAndStopsOnCancelAndLogout() {
+		val client = ReflectiveMatrixHomeserverDiscoveryClient(discoveryTimeoutMs = 1_000L)
+		client.login("https://matrix.example.org", "alice", "swordfish")
+		FakeMatrixSdkState.roomsToReturn = listOf(
+			FakeRoomSpec("!room:example.org", membership = Membership.JOINED),
+		)
+
+		val typingEvents = mutableListOf<Boolean>()
+		val subscription = client.observeTyping("!room:example.org") { isTyping ->
+			typingEvents.add(isTyping)
+		}
+		assertNotNull(subscription)
+		assertEquals(1, FakeMatrixSdkState.typingListenerAddCount)
+
+		// Typing notification with only the current user (@alice:matrix.example.org) excluded -> false
+		FakeMatrixSdkState.simulateTypingNotification(listOf("@alice:matrix.example.org"))
+		assertEquals(listOf(false), typingEvents)
+
+		// Peer user typing -> true
+		FakeMatrixSdkState.simulateTypingNotification(listOf("@bob:matrix.example.org"))
+		assertEquals(listOf(false, true), typingEvents)
+
+		// Both current user and peer typing -> true
+		FakeMatrixSdkState.simulateTypingNotification(
+			listOf("@alice:matrix.example.org", "@bob:matrix.example.org"),
+		)
+		assertEquals(listOf(false, true, true), typingEvents)
+
+		// Empty list (peer stopped) -> false
+		FakeMatrixSdkState.simulateTypingNotification(emptyList())
+		assertEquals(listOf(false, true, true, false), typingEvents)
+
+		// Cancellation removes listener and stops future updates
+		subscription!!.cancel()
+		FakeMatrixSdkState.simulateTypingNotification(listOf("@bob:matrix.example.org"))
+		assertEquals(listOf(false, true, true, false), typingEvents)
 	}
 
 	private class FakeMatrixAuthSession(var state: MatrixAuthState) : MatrixAuthSession {
