@@ -189,6 +189,10 @@
 	<string name="connector_message_sending">Sending…</string>
 	<string name="connector_message_sent">Sent</string>
 	<string name="connector_inbox_refresh">Refresh connector inbox</string>
+	<string name="inbox_filter_title">Filter conversations</string>
+	<string name="inbox_filter_all">All</string>
+	<string name="inbox_filter_matrix">Matrix</string>
+	<string name="inbox_filter_briar">Briar</string>
 
 	<!-- Notifications -->
 	<string name="reminder_notification_title">Signed out of Harbor</string>

@@ -371,6 +371,61 @@ class ContactListViewModelTest {
 		}
 	}
 
+	@Test
+	fun testSourceFilterDefaultsToAllAndUpdatesOnSet() {
+		val viewModel = createViewModel()
+		assertEquals(InboxSourceFilter.All, getOrAwaitValue(viewModel.sourceFilter))
+
+		viewModel.setSourceFilter(InboxSourceFilter.Matrix)
+		assertEquals(InboxSourceFilter.Matrix, getOrAwaitValue(viewModel.sourceFilter))
+
+		viewModel.setSourceFilter(InboxSourceFilter.Briar)
+		assertEquals(InboxSourceFilter.Briar, getOrAwaitValue(viewModel.sourceFilter))
+
+		viewModel.setSourceFilter(InboxSourceFilter.All)
+		assertEquals(InboxSourceFilter.All, getOrAwaitValue(viewModel.sourceFilter))
+	}
+
+	@Test
+	fun testLoadConnectorThreadsResetsFilterToAllWhenNoConnectorsEnabled() {
+		val viewModel = createViewModel()
+		viewModel.setSourceFilter(InboxSourceFilter.Matrix)
+		assertEquals(InboxSourceFilter.Matrix, getOrAwaitValue(viewModel.sourceFilter))
+
+		viewModel.loadConnectorThreads()
+		assertEquals(InboxSourceFilter.All, getOrAwaitValue(viewModel.sourceFilter))
+	}
+
+	@Test
+	fun testLoadConnectorThreadsResetsFilterWhenConnectorBecomesDisabled() {
+		val matrixConnector = connector(ConnectorSources.MATRIX, mock(ConnectorThread::class.java))
+		`when`(matrixConnector.isEnabled()).thenReturn(true)
+		`when`(matrixConnector.isAuthorized()).thenReturn(true)
+		val viewModel = createViewModel(matrixConnector)
+
+		viewModel.setSourceFilter(InboxSourceFilter.Matrix)
+		assertEquals(InboxSourceFilter.Matrix, getOrAwaitValue(viewModel.sourceFilter))
+
+		`when`(matrixConnector.isEnabled()).thenReturn(false)
+		viewModel.loadConnectorThreads()
+
+		assertEquals(InboxSourceFilter.All, getOrAwaitValue(viewModel.sourceFilter))
+	}
+
+	@Test
+	fun testLoadConnectorThreadsPreservesFilterWhenConnectorsEnabled() {
+		val matrixConnector = connector(ConnectorSources.MATRIX, mock(ConnectorThread::class.java))
+		`when`(matrixConnector.isEnabled()).thenReturn(true)
+		`when`(matrixConnector.isAuthorized()).thenReturn(true)
+		val viewModel = createViewModel(matrixConnector)
+
+		viewModel.setSourceFilter(InboxSourceFilter.Matrix)
+		assertEquals(InboxSourceFilter.Matrix, getOrAwaitValue(viewModel.sourceFilter))
+
+		viewModel.loadConnectorThreads()
+		assertEquals(InboxSourceFilter.Matrix, getOrAwaitValue(viewModel.sourceFilter))
+	}
+
 	private fun connector(source: ConnectorSource, thread: ConnectorThread) =
 		mock(ReadOnlyConnector::class.java).also { connector ->
 			`when`(connector.source).thenReturn(source)
