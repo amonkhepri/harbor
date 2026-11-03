@@ -336,6 +336,16 @@ class ConnectorConversationAdapterTest {
 		holder.bind(maliciousItem)
 		assertEquals("normalfdp.exe", view.findViewById<TextView>(R.id.connectorFileName).text.toString())
 
+		// Unpaired surrogates stripped
+		val loneSurrogateItem = pathItem.copy(
+			attachment = ConnectorAttachmentMetadata(
+				fileName = "file\uD800name\uDC00.txt",
+				mimeType = "text/plain",
+			),
+		)
+		holder.bind(loneSurrogateItem)
+		assertEquals("filename.txt", view.findViewById<TextView>(R.id.connectorFileName).text.toString())
+
 		// Oversized name bounded to MAX_FILENAME_LENGTH while preserving extension
 		val longName = "a".repeat(150) + ".pdf"
 		val oversizedItem = pathItem.copy(

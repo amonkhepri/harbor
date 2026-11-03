@@ -84,6 +84,8 @@ internal object ConnectorFileMetadataFormatter {
 		if (cp in 0x200E..0x200F || cp in 0x202A..0x202E || cp in 0x2066..0x2069) return true
 		// Zero-width and formatting invisibles (ZWSP, ZWNJ, ZWJ, WJ, BOM)
 		if (cp in 0x200B..0x200D || cp == 0x2060 || cp == 0xFEFF) return true
+		// Unpaired surrogates
+		if (cp in 0xD800..0xDFFF) return true
 		return false
 	}
 
