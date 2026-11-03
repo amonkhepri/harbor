@@ -71,7 +71,7 @@ class MatrixRoomConnector(
 	override fun isAuthorized(): Boolean = authSession.getSnapshot().authState == MatrixAuthState.READY
 
 	override fun getThreadTopic(threadId: String): String? = if (isAuthorized()) {
-		roomSnapshotClient.getJoinedRooms(Int.MAX_VALUE).firstOrNull { it.roomId == threadId }?.topic
+		roomSnapshotClient.getRoomTopic(threadId)
 	} else {
 		null
 	}
