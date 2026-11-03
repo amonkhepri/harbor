@@ -290,7 +290,7 @@ class ConnectorConversationActivity : BriarActivity() {
 	private val typingIndicatorHandler = android.os.Handler(android.os.Looper.getMainLooper())
 	private val typingExpiryRunnable = Runnable { clearTypingIndicator() }
 	private var typingObserverSubscription: ConnectorTypingObserver.TypingSubscription? = null
-	private var isObservingTyping = false
+	private var typingGeneration: Any? = null
 	private var automaticRefreshRunning = false
 	private val automaticRefresh = Runnable {
 		if (!automaticRefreshRunning && !messageState.isLoading) loadMessages(showLoading = false)
@@ -889,19 +889,20 @@ class ConnectorConversationActivity : BriarActivity() {
 		if (!hasValidThreadId(threadId)) return
 		stopTypingObserver()
 		val room = threadId
+		val generation = Any()
 		synchronized(this) {
-			isObservingTyping = true
+			typingGeneration = generation
 		}
 		ioExecutor.execute {
 			val sub = observer.observeTyping(room) { isTyping ->
 				runOnUiThread {
 					if (!isFinishing && !isDestroyed) {
-						updateTypingIndicator(isTyping)
+						updateTypingIndicator(generation, isTyping)
 					}
 				}
 			}
 			synchronized(this) {
-				if (isObservingTyping && threadId == room) {
+				if (typingGeneration === generation && threadId == room) {
 					typingObserverSubscription = sub
 				} else {
 					sub?.cancel()
@@ -912,16 +913,17 @@ class ConnectorConversationActivity : BriarActivity() {
 
 	internal fun stopTypingObserver() {
 		synchronized(this) {
-			isObservingTyping = false
+			typingGeneration = null
 			typingObserverSubscription?.cancel()
 			typingObserverSubscription = null
 		}
 		clearTypingIndicator()
 	}
 
-	internal fun updateTypingIndicator(isTyping: Boolean) {
-		val stillObserving = synchronized(this) { isObservingTyping }
-		if (!stillObserving || isFinishing || isDestroyed) {
+	internal fun updateTypingIndicator(generation: Any, isTyping: Boolean) {
+		val stillObserving = synchronized(this) { typingGeneration === generation }
+		if (!stillObserving) return
+		if (isFinishing || isDestroyed) {
 			clearTypingIndicator()
 			return
 		}

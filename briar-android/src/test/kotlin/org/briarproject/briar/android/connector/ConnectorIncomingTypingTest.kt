@@ -55,6 +55,7 @@ class ConnectorIncomingTypingTest {
 
 		override fun sendText(threadId: String, text: String) = true
 
+		val subscriptions = mutableListOf<FakeSubscription>()
 		var activeSubscription: FakeSubscription? = null
 
 		override fun observeTyping(
@@ -62,6 +63,7 @@ class ConnectorIncomingTypingTest {
 			onTypingChanged: (Boolean) -> Unit,
 		): TypingSubscription {
 			val sub = FakeSubscription(onTypingChanged)
+			subscriptions.add(sub)
 			activeSubscription = sub
 			return sub
 		}
@@ -218,6 +220,51 @@ class ConnectorIncomingTypingTest {
 		// Further updates after leaving screen do not show indicator
 		sub.onTypingChanged(true)
 		drainWork()
+		assertEquals(View.GONE, indicator.visibility)
+	}
+
+	@Test
+	fun delayedSetupAcrossStopAndStartRejectsOldSubscriptionAndCallbacks() {
+		val activity = createActivity()
+
+		// Start A begins and queues asynchronous setup
+		activity.startTypingObserver()
+		assertEquals(1, work.size)
+		val setupA = work.removeFirst()
+
+		// Before setup A finishes, stop observer (e.g. onStop) and start B (e.g. onStart)
+		activity.stopTypingObserver()
+		activity.startTypingObserver()
+		assertEquals(1, work.size)
+		val setupB = work.removeFirst()
+
+		// Setup A completes delayed
+		setupA.run()
+		ShadowLooper.idleMainLooper()
+		val subA = fakeConnector.subscriptions[0]
+		// Subscription A should have been immediately cancelled rather than retained
+		assertTrue(subA.cancelled)
+
+		// Stale callback from A cannot show typing on restarted screen
+		val indicator = activity.getTypingIndicator()
+		subA.onTypingChanged(true)
+		ShadowLooper.idleMainLooper()
+		assertEquals(View.GONE, indicator.visibility)
+
+		// Setup B completes
+		setupB.run()
+		ShadowLooper.idleMainLooper()
+		val subB = fakeConnector.subscriptions[1]
+		assertFalse(subB.cancelled)
+
+		// Callback from B updates typing indicator
+		subB.onTypingChanged(true)
+		ShadowLooper.idleMainLooper()
+		assertEquals(View.VISIBLE, indicator.visibility)
+
+		// Subsequent stop cancels subB and hides indicator
+		activity.stopTypingObserver()
+		assertTrue(subB.cancelled)
 		assertEquals(View.GONE, indicator.visibility)
 	}
 }
