@@ -261,4 +261,32 @@ class ContactListFragmentTest {
 			ContactListFragment.checkedIdForFilter(InboxSourceFilter.Telegram),
 		)
 	}
+
+	@Test
+	fun testEffectiveFilterResetsToAllWhenConnectorsDisabled() {
+		assertEquals(
+			InboxSourceFilter.All,
+			ContactListFragment.effectiveFilter(false, InboxSourceFilter.Matrix),
+		)
+		assertEquals(
+			InboxSourceFilter.All,
+			ContactListFragment.effectiveFilter(false, InboxSourceFilter.Briar),
+		)
+		assertEquals(
+			InboxSourceFilter.All,
+			ContactListFragment.effectiveFilter(false, InboxSourceFilter.All),
+		)
+		assertEquals(
+			InboxSourceFilter.Matrix,
+			ContactListFragment.effectiveFilter(true, InboxSourceFilter.Matrix),
+		)
+		assertEquals(
+			InboxSourceFilter.Briar,
+			ContactListFragment.effectiveFilter(true, InboxSourceFilter.Briar),
+		)
+		assertEquals(
+			InboxSourceFilter.All,
+			ContactListFragment.effectiveFilter(true, InboxSourceFilter.All),
+		)
+	}
 }

@@ -190,7 +190,7 @@ public class ContactListFragment extends BaseFragment
 		if (filterItem != null) {
 			filterItem.setVisible(shouldShowFilterAction(
 					viewModel.isAnyConnectorEnabled()));
-			MenuItem checkedItem = menu.findItem(checkedIdForFilter(currentFilter));
+			MenuItem checkedItem = menu.findItem(checkedIdForFilter(getEffectiveFilter()));
 			if (checkedItem != null) checkedItem.setChecked(true);
 		}
 	}
@@ -267,16 +267,30 @@ public class ContactListFragment extends BaseFragment
 	}
 
 	private void submitInboxItems() {
-		updateEmptyState();
+		InboxSourceFilter effective = getEffectiveFilter();
+		updateEmptyState(effective);
 		adapter.submitList(InboxThreadMerger.merge(briarItems, connectorItems,
-				currentFilter), list::showData);
+				effective), list::showData);
 	}
 
 	private void updateEmptyState() {
-		list.setEmptyText(currentFilter.emptyText(connectorAvailabilityState));
-		int actionRes = currentFilter.emptyAction(connectorAvailabilityState);
+		updateEmptyState(getEffectiveFilter());
+	}
+
+	private void updateEmptyState(InboxSourceFilter filter) {
+		list.setEmptyText(filter.emptyText(connectorAvailabilityState));
+		int actionRes = filter.emptyAction(connectorAvailabilityState);
 		if (actionRes == 0) list.setEmptyAction("");
 		else list.setEmptyAction(actionRes);
+	}
+
+	private InboxSourceFilter getEffectiveFilter() {
+		return effectiveFilter(viewModel.isAnyConnectorEnabled(), currentFilter);
+	}
+
+	static InboxSourceFilter effectiveFilter(boolean connectorEnabled,
+			InboxSourceFilter filter) {
+		return connectorEnabled ? filter : InboxSourceFilter.All.INSTANCE;
 	}
 
 	static boolean shouldShowFilterAction(boolean connectorEnabled) {

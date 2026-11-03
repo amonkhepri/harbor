@@ -106,6 +106,9 @@ internal class ContactListViewModel @Inject constructor(
 		if (connectors.isEmpty()) {
 			_connectorAvailabilityStates.value = emptyMap()
 			_connectorThreadItems.value = emptyList()
+			if (_sourceFilter.value != InboxSourceFilter.All) {
+				_sourceFilter.value = InboxSourceFilter.All
+			}
 			return
 		}
 		val previousItems = _connectorThreadItems.value.orEmpty().groupBy {
