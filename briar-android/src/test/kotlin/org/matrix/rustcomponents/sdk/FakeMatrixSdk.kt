@@ -218,6 +218,7 @@ class Timeline {
 class TaskHandle(private val onCancel: (() -> Unit)? = null) {
 	fun cancel() {
 		FakeMatrixSdkState.taskCancelCount++
+		FakeMatrixSdkState.onTaskCancel?.invoke()
 		onCancel?.invoke()
 	}
 
@@ -838,6 +839,9 @@ object FakeMatrixSdkState {
 	var timelineCloseCount = 0
 	val activeTimelineListeners = mutableListOf<TimelineListener>()
 
+	/** Runs inside [TaskHandle.cancel], e.g. to emulate a native cancel awaiting callbacks. */
+	var onTaskCancel: (() -> Unit)? = null
+
 	fun simulateRemoteEvent(diffs: List<TimelineDiff>) {
 		val listeners = synchronized(activeTimelineListeners) { activeTimelineListeners.toList() }
 		listeners.forEach { it.onUpdate(diffs) }
@@ -942,6 +946,7 @@ object FakeMatrixSdkState {
 		paginationFailureToThrow = null
 		timelineCloseCount = 0
 		activeTimelineListeners.clear()
+		onTaskCancel = null
 		taskCancelCount = 0
 		taskCloseCount = 0
 		timelineDiffDestroyCount = 0

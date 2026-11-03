@@ -8,6 +8,7 @@ import org.briarproject.briar.api.matrix.MatrixAuthSession.Snapshot
 import org.briarproject.briar.api.matrix.MatrixAuthState
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -164,6 +165,44 @@ class MatrixRoomConnectorObserverTest {
 		)
 		FakeMatrixSdkState.simulateRemoteEvent(listOf(TimelineDiff.PushBack(TimelineItem(eventSpec))))
 		assertEquals(0, updateCount)
+	}
+
+	@Test
+	fun logoutRunsNativeCancelOutsideLifecycleLock() {
+		val client = ReflectiveMatrixHomeserverDiscoveryClient(discoveryTimeoutMs = 1_000L)
+		client.login("https://matrix.example.org", "alice", "swordfish")
+		FakeMatrixSdkState.roomsToReturn = listOf(
+			FakeRoomSpec("!a:example.org", membership = Membership.JOINED),
+			FakeRoomSpec("!b:example.org", membership = Membership.JOINED),
+		)
+		assertNotNull(client.observeRoom("!a:example.org") {})
+		assertNotNull(client.observeRoom("!b:example.org") {})
+		val eventSpec = FakeTimelineEventSpec(
+			EventOrTransactionId.EventId("\$inflight:example.org"),
+			"@bob:example.org",
+			"in flight",
+			1_700_000_000_000uL,
+		)
+		// Emulate an SDK whose native cancel waits for in-flight callbacks on its shared
+		// dispatcher thread. If teardown held lifecycleLock, the other room's callback would
+		// block on it and this wait would time out.
+		var callbackBlocked = false
+		FakeMatrixSdkState.onTaskCancel = {
+			val dispatcher = Thread {
+				FakeMatrixSdkState.simulateRemoteEvent(
+					listOf(TimelineDiff.PushBack(TimelineItem(eventSpec))),
+				)
+			}
+			dispatcher.start()
+			dispatcher.join(2_000L)
+			if (dispatcher.isAlive) callbackBlocked = true
+		}
+
+		val cancelsBefore = FakeMatrixSdkState.taskCancelCount
+		client.logout()
+
+		assertFalse(callbackBlocked)
+		assertEquals(cancelsBefore + 2, FakeMatrixSdkState.taskCancelCount)
 	}
 
 	private class FakeMatrixAuthSession(var state: MatrixAuthState) : MatrixAuthSession {

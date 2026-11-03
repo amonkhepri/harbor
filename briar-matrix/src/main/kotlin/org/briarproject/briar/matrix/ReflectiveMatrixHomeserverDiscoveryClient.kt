@@ -443,12 +443,13 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 	}
 
 	private fun beginGeneration(generation: Any) {
+		var detached = emptyList<RoomSubscription>()
 		synchronized(lifecycleLock) {
 			activeGeneration = generation
 			typingLanes.clear()
-			activeRoomSubscriptions.toList().forEach { it.cancel() }
-			activeRoomSubscriptions.clear()
+			detached = detachRoomSubscriptions()
 		}
+		cancelRoomSubscriptions(detached)
 		val previous = loginClient
 		loginClient = null
 		activeStore = null
@@ -1239,12 +1240,13 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 
 				override fun close() = cancel()
 			}
-			synchronized(lifecycleLock) {
-				if (activeGeneration !== generation) {
-					sub.cancel()
-					return null
-				}
-				activeRoomSubscriptions.add(sub)
+			val current = synchronized(lifecycleLock) {
+				(activeGeneration === generation).also { if (it) activeRoomSubscriptions.add(sub) }
+			}
+			if (!current) {
+				// Native teardown must run outside lifecycleLock (see saveSession).
+				sub.cancel()
+				return null
 			}
 			sub
 		} catch (e: InterruptedException) {
@@ -1264,6 +1266,19 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			closeQuietly(room)
 			null
 		}
+	}
+
+	// Caller holds lifecycleLock. Only detaches; the native teardown happens in
+	// cancelRoomSubscriptions after the lock is released, because a native cancel/close may
+	// wait for an in-flight listener callback that itself takes lifecycleLock.
+	private fun detachRoomSubscriptions(): List<RoomSubscription> {
+		val detached = activeRoomSubscriptions.toList()
+		activeRoomSubscriptions.clear()
+		return detached
+	}
+
+	private fun cancelRoomSubscriptions(subscriptions: List<RoomSubscription>) {
+		subscriptions.forEach { it.cancel() }
 	}
 
 	private fun reduceTimelineDiffs(diffs: List<Any>): List<Any> {
@@ -1397,13 +1412,14 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 
 	@Synchronized
 	override fun logout() {
+		var detached = emptyList<RoomSubscription>()
 		synchronized(lifecycleLock) {
 			activeGeneration = null
 			typingLanes.clear()
-			activeRoomSubscriptions.toList().forEach { it.cancel() }
-			activeRoomSubscriptions.clear()
+			detached = detachRoomSubscriptions()
 			activeStore?.let { sessionFile(it).delete() }
 		}
+		cancelRoomSubscriptions(detached)
 		activeStore = null
 		val client = loginClient ?: return
 		loginClient = null
@@ -1420,12 +1436,13 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 
 	@Synchronized
 	override fun close() {
+		var detached = emptyList<RoomSubscription>()
 		synchronized(lifecycleLock) {
 			activeGeneration = null
 			typingLanes.clear()
-			activeRoomSubscriptions.toList().forEach { it.cancel() }
-			activeRoomSubscriptions.clear()
+			detached = detachRoomSubscriptions()
 		}
+		cancelRoomSubscriptions(detached)
 		val client = loginClient
 		loginClient = null
 		activeStore = null
