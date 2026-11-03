@@ -168,6 +168,7 @@
 	<string name="connector_conversation_disabled">%1$s connector unavailable in this build</string>
 	<string name="connector_conversation_account_unavailable">%1$s account unavailable</string>
 	<string name="connector_conversation_load_failed">%1$s messages could not be loaded</string>
+	<string name="connector_conversation_retry_refresh">Retry</string>
 	<string name="connector_conversation_refresh">Refresh messages</string>
 	<string name="connector_conversation_direction_incoming">Incoming</string>
 	<string name="connector_conversation_direction_outgoing">Outgoing</string>
