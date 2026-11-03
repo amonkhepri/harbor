@@ -12,6 +12,10 @@ import org.matrix.rustcomponents.sdk.EventOrTransactionId
 import org.matrix.rustcomponents.sdk.FakeMatrixSdkState
 import org.matrix.rustcomponents.sdk.FakeRoomSpec
 import org.matrix.rustcomponents.sdk.FakeTimelineEventSpec
+import org.matrix.rustcomponents.sdk.FileInfo
+import org.matrix.rustcomponents.sdk.FileMessageContent
+import org.matrix.rustcomponents.sdk.ImageInfo
+import org.matrix.rustcomponents.sdk.ImageMessageContent
 import org.matrix.rustcomponents.sdk.MessageType
 import org.matrix.rustcomponents.sdk.Reaction
 import org.matrix.rustcomponents.sdk.ReactionSenderData
@@ -105,6 +109,112 @@ class ReflectiveMatrixHomeserverDiscoveryClientMessagesTest {
 		assertEquals(ConnectorMessageType.PHOTO, result?.single()?.type)
 		assertEquals(1, FakeMatrixSdkState.messageContentDestroyCount)
 		assertEquals(1, FakeMatrixSdkState.eventTimelineItemDestroyCount)
+	}
+
+	@Test
+	fun `getRecentMessages maps Matrix file attachment metadata`() {
+		val client = loggedInClient()
+		FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec("!room:example.org"))
+		val fileContent = FileMessageContent(
+			filename = "contract.pdf",
+			info = FileInfo(
+				mimetype = "application/pdf",
+				size = 5000uL,
+				thumbnailInfo = null,
+				thumbnailSource = null,
+			),
+		)
+		FakeMatrixSdkState.timelineDiffsToReturn = listOf(
+			TimelineDiff.Reset(
+				listOf(
+					remoteEvent(
+						"\$file:example.org",
+						"contract.pdf",
+						2_000uL,
+						messageType = MessageType.File(fileContent),
+					),
+				),
+			),
+		)
+
+		val result = client.getRecentMessages("!room:example.org", 1)
+		val msg = result?.single()
+
+		assertEquals(ConnectorMessageType.FILE, msg?.type)
+		assertEquals("contract.pdf", msg?.attachment?.fileName)
+		assertEquals("application/pdf", msg?.attachment?.mimeType)
+		assertEquals(5000L, msg?.attachment?.size)
+		assertEquals(1, FakeMatrixSdkState.messageContentDestroyCount)
+		assertEquals(1, FakeMatrixSdkState.eventTimelineItemDestroyCount)
+	}
+
+	@Test
+	fun `getRecentMessages maps Matrix image attachment metadata`() {
+		val client = loggedInClient()
+		FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec("!room:example.org"))
+		val imageContent = ImageMessageContent(
+			filename = "photo.jpg",
+			info = ImageInfo(
+				height = null,
+				width = null,
+				mimetype = "image/jpeg",
+				size = 12345uL,
+				thumbnailInfo = null,
+				thumbnailSource = null,
+				blurhash = null,
+				isAnimated = null,
+			),
+		)
+		FakeMatrixSdkState.timelineDiffsToReturn = listOf(
+			TimelineDiff.Reset(
+				listOf(
+					remoteEvent(
+						"\$img:example.org",
+						"photo.jpg",
+						2_000uL,
+						messageType = MessageType.Image(imageContent),
+					),
+				),
+			),
+		)
+
+		val result = client.getRecentMessages("!room:example.org", 1)
+		val msg = result?.single()
+
+		assertEquals(ConnectorMessageType.PHOTO, msg?.type)
+		assertEquals("photo.jpg", msg?.attachment?.fileName)
+		assertEquals("image/jpeg", msg?.attachment?.mimeType)
+		assertEquals(12345L, msg?.attachment?.size)
+	}
+
+	@Test
+	fun `getRecentMessages handles null attachment info without failing`() {
+		val client = loggedInClient()
+		FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec("!room:example.org"))
+		val fileContentNoInfo = FileMessageContent(
+			filename = "unknown.bin",
+			info = null,
+		)
+		FakeMatrixSdkState.timelineDiffsToReturn = listOf(
+			TimelineDiff.Reset(
+				listOf(
+					remoteEvent(
+						"\$file:example.org",
+						"unknown.bin",
+						2_000uL,
+						messageType = MessageType.File(fileContentNoInfo),
+					),
+				),
+			),
+		)
+
+		val result = client.getRecentMessages("!room:example.org", 1)
+		val msg = result?.single()
+
+		assertEquals(ConnectorMessageType.FILE, msg?.type)
+		assertEquals("unknown.bin", msg?.attachment?.fileName)
+		assertNull(msg?.attachment?.mimeType)
+		assertNull(msg?.attachment?.size)
 	}
 
 	@Test

@@ -1028,4 +1028,7 @@
 	<string name="connector_leave_room_retry">Retry</string>
 	<string name="connector_leave_room_action">Leave</string>
 	<string name="connector_thread_marked_unread">Marked unread</string>
+	<string name="connector_file_details">%1$s • %2$s</string>
+	<string name="connector_file_accessibility">%1$s, %2$s</string>
+	<string name="connector_file_accessibility_with_details">%1$s, %2$s, %3$s</string>
 </resources>

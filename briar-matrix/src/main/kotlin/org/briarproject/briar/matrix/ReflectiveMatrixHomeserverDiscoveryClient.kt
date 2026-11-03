@@ -7,6 +7,7 @@ import org.briarproject.briar.api.matrix.MatrixAuthSession.RecoverableErrorDetai
 import org.briarproject.briar.api.matrix.MatrixAuthSession.RecoverableErrorDetail.NONE
 import org.briarproject.briar.api.matrix.MatrixHomeserverDiscoveryClient
 import org.briarproject.briar.api.matrix.MatrixHomeserverDiscoveryClient.DiscoveryResult
+import org.briarproject.briar.api.connector.ConnectorAttachmentMetadata
 import org.briarproject.briar.api.connector.ConnectorFileSender
 import org.briarproject.briar.api.connector.ConnectorImageSender
 import org.briarproject.briar.api.connector.ConnectorMessageType
@@ -1268,13 +1269,20 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			// consistent with message/kind/msgLike/content also being left undestroyed.
 			val inReplyTo = msgLike.javaClass.getMethod("getInReplyTo").invoke(msgLike)
 			val reactions = readReactionSummaries(msgLike)
+			val rawTypeName = messageType.javaClass.simpleName
+			val typeName = if (rawTypeName == "Companion") {
+				messageType.javaClass.enclosingClass?.simpleName ?: rawTypeName
+			} else {
+				rawTypeName
+			}
+			val attachment = readAttachmentMetadata(messageType)
 			MatrixMessageSnapshot(
 				eventId = identifier.javaClass.getMethod("getEventId").invoke(identifier) as String,
 				senderId = eventClass.getMethod("getSender").invoke(event) as String,
 				bodyText = message.javaClass.getMethod("getBody").invoke(message) as String,
 				originServerTimestampSeconds = (timestampMillis.toULong() / 1_000uL).toLong(),
 				isOutgoing = eventClass.getMethod("isOwn").invoke(event) as Boolean,
-				type = when (messageType.javaClass.simpleName) {
+				type = when (typeName) {
 					"Image" -> ConnectorMessageType.PHOTO
 					"Video", "Audio", "File", "Gallery" -> ConnectorMessageType.FILE
 					else -> ConnectorMessageType.TEXT
@@ -1282,9 +1290,57 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 				isEdited = message.javaClass.getMethod("isEdited").invoke(message) as Boolean,
 				isReply = inReplyTo != null,
 				reactions = reactions,
+				attachment = attachment,
 			)
 		} finally {
 			destroyQuietly(event)
+		}
+	}
+
+	private fun readAttachmentMetadata(messageType: Any?): ConnectorAttachmentMetadata? {
+		if (messageType == null) return null
+		val rawTypeName = messageType.javaClass.simpleName
+		val typeName = if (rawTypeName == "Companion") {
+			messageType.javaClass.enclosingClass?.simpleName ?: rawTypeName
+		} else {
+			rawTypeName
+		}
+		if (typeName !in ATTACHMENT_TYPE_NAMES) return null
+		return try {
+			val contentMethod = messageType.javaClass.methods.firstOrNull {
+				it.name == "getContent" && it.parameterTypes.isEmpty()
+			} ?: return null
+			val content = contentMethod.invoke(messageType) ?: return null
+			val contentClass = content.javaClass
+			val filenameMethod = contentClass.methods.firstOrNull {
+				it.name == "getFilename" && it.parameterTypes.isEmpty()
+			}
+			val rawFilename = filenameMethod?.invoke(content) as? String
+			val infoMethod = contentClass.methods.firstOrNull {
+				it.name == "getInfo" && it.parameterTypes.isEmpty()
+			}
+			val info = infoMethod?.invoke(content)
+			var rawMime: String? = null
+			var rawSize: Long? = null
+			if (info != null) {
+				val infoClass = info.javaClass
+				val mimeMethod = infoClass.methods.firstOrNull {
+					it.name == "getMimetype" && it.parameterTypes.isEmpty()
+				}
+				rawMime = mimeMethod?.invoke(info) as? String
+				val sizeMethod = infoClass.methods.firstOrNull {
+					it.name.startsWith("getSize") && it.parameterTypes.isEmpty()
+				}
+				val sizeObj = sizeMethod?.invoke(info)
+				rawSize = sizeObj?.toString()?.toLongOrNull()?.takeIf { it >= 0L }
+			}
+			ConnectorAttachmentMetadata(
+				fileName = rawFilename,
+				mimeType = rawMime,
+				size = rawSize,
+			)
+		} catch (e: Exception) {
+			null
 		}
 	}
 
@@ -1511,6 +1567,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		IOException("Matrix store already opened in this process")
 
 	private companion object {
+		val ATTACHMENT_TYPE_NAMES = setOf("File", "Image", "Video", "Audio")
 		val openedStores = HashSet<String>()
 		const val CLIENT_BUILDER_CLASS_NAME = "org.matrix.rustcomponents.sdk.ClientBuilder"
 		const val SQLITE_STORE_BUILDER_CLASS_NAME = "org.matrix.rustcomponents.sdk.SqliteStoreBuilder"

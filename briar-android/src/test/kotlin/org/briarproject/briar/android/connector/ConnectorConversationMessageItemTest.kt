@@ -1,5 +1,6 @@
 package org.briarproject.briar.android.connector
 
+import org.briarproject.briar.api.connector.ConnectorAttachmentMetadata
 import org.briarproject.briar.api.connector.ConnectorMessage
 import org.briarproject.briar.api.connector.ConnectorMessageType
 import org.briarproject.briar.api.connector.ConnectorReactionSummary
@@ -99,6 +100,30 @@ class ConnectorConversationMessageItemTest {
 		assertEquals(reactions, item.reactions)
 	}
 
+	@Test
+	fun testFromMessagesPreservesAttachmentMetadata() {
+		val attachment = ConnectorAttachmentMetadata(
+			fileName = "sample.pdf",
+			mimeType = "application/pdf",
+			size = 1000L,
+		)
+		val item = ConnectorConversationMessageItem.fromMessages(
+			listOf(
+				connectorMessage(
+					"1",
+					10,
+					false,
+					"",
+					1L,
+					type = ConnectorMessageType.FILE,
+					attachment = attachment,
+				),
+			),
+		).single()
+
+		assertEquals(attachment, item.attachment)
+	}
+
 	private fun connectorMessageItem(
 		messageId: String,
 		isOutgoing: Boolean,
@@ -125,6 +150,7 @@ class ConnectorConversationMessageItemTest {
 		isEdited: Boolean = false,
 		isReply: Boolean = false,
 		reactions: List<ConnectorReactionSummary> = emptyList(),
+		attachment: ConnectorAttachmentMetadata? = null,
 	): ConnectorMessage = ConnectorMessage(
 		source = CONNECTOR_SOURCE,
 		threadId = "thread-1",
@@ -137,6 +163,7 @@ class ConnectorConversationMessageItemTest {
 		isEdited = isEdited,
 		isReply = isReply,
 		reactions = reactions,
+		attachment = attachment,
 	)
 
 	companion object {

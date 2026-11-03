@@ -336,15 +336,43 @@ sealed class MessageType {
 	 * fixture usage compiling unchanged.
 	 */
 	class Text(val content: TextMessageContent = TextMessageContent("", null)) : MessageType()
-	object Image : MessageType()
+	open class Image(val content: ImageMessageContent? = null) : MessageType() {
+		companion object : Image(null)
+	}
 	object Video : MessageType()
 	object Audio : MessageType()
-	object File : MessageType()
+	open class File(val content: FileMessageContent? = null) : MessageType() {
+		companion object : File(null)
+	}
 	object Gallery : MessageType()
 	object Location : MessageType()
 	object Notice : MessageType()
 	object Emote : MessageType()
 	object Other : MessageType()
+}
+
+class FileMessageContent(
+	val filename: String,
+	val caption: String? = null,
+	val formattedCaption: FormattedBody? = null,
+	val source: MediaSource? = null,
+	val info: FileInfo? = null,
+) {
+	fun destroy() {
+		FakeMatrixSdkState.messageContentDestroyCount++
+	}
+}
+
+class ImageMessageContent(
+	val filename: String,
+	val caption: String? = null,
+	val formattedCaption: FormattedBody? = null,
+	val source: MediaSource? = null,
+	val info: ImageInfo? = null,
+) {
+	fun destroy() {
+		FakeMatrixSdkState.messageContentDestroyCount++
+	}
 }
 
 /** Mirrors the pinned AAR's real shape: `TextMessageContent(String body, FormattedBody formatted)`. */

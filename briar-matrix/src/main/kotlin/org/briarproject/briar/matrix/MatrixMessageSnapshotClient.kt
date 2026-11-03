@@ -1,5 +1,6 @@
 package org.briarproject.briar.matrix
 
+import org.briarproject.briar.api.connector.ConnectorAttachmentMetadata
 import org.briarproject.briar.api.connector.ConnectorMessageType
 import org.briarproject.briar.api.connector.ConnectorReactionSummary
 
@@ -44,4 +45,5 @@ data class MatrixMessageSnapshot(
 	val isEdited: Boolean = false,
 	val isReply: Boolean = false,
 	val reactions: List<ConnectorReactionSummary> = emptyList(),
+	val attachment: ConnectorAttachmentMetadata? = null,
 )

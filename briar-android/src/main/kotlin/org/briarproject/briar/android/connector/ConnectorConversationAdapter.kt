@@ -45,11 +45,27 @@ internal class ConnectorConversationAdapter(
 			itemView.findViewById(R.id.connectorMessageDirection)
 		private val date: TextView =
 			itemView.findViewById(R.id.connectorMessageDate)
+		private val fileLayout: View =
+			itemView.findViewById(R.id.connectorFileLayout)
+		private val fileName: TextView =
+			itemView.findViewById(R.id.connectorFileName)
+		private val fileDetails: TextView =
+			itemView.findViewById(R.id.connectorFileDetails)
 
 		fun bind(item: ConnectorConversationMessageItem) {
+			val isFile = item.type == ConnectorMessageType.FILE
+			val fileFallbackName = text.resources.getString(R.string.connector_message_file)
+			val safeFileName = if (isFile) {
+				ConnectorFileMetadataFormatter.sanitizeFileName(
+					item.attachment?.fileName,
+					fileFallbackName,
+				)
+			} else {
+				""
+			}
 			val messageText = when (item.type) {
 				ConnectorMessageType.PHOTO -> text.resources.getString(R.string.connector_message_photo)
-				ConnectorMessageType.FILE -> text.resources.getString(R.string.connector_message_file)
+				ConnectorMessageType.FILE -> safeFileName
 				ConnectorMessageType.DELETED ->
 					text.resources.getString(R.string.connector_message_deleted)
 				else -> item.text
@@ -79,6 +95,46 @@ internal class ConnectorConversationAdapter(
 					decoratedText,
 					reactionText,
 				)
+			}
+			if (isFile) {
+				val mimeType = ConnectorFileMetadataFormatter.sanitizeMimeType(item.attachment?.mimeType)
+				val formattedSize = ConnectorFileMetadataFormatter.formatFileSize(
+					itemView.context,
+					item.attachment?.size,
+				)
+				val decoratedFileName = if (item.isReply) {
+					text.resources.getString(R.string.connector_message_reply, safeFileName)
+				} else {
+					safeFileName
+				}
+				val finalFileName = if (item.isEdited) {
+					text.resources.getString(R.string.connector_message_edited, decoratedFileName)
+				} else {
+					decoratedFileName
+				}
+				fileName.text = finalFileName
+				val details = ConnectorFileMetadataFormatter.formatFileDetails(
+					text.resources,
+					mimeType,
+					formattedSize,
+				)
+				fileDetails.text = details
+				fileDetails.visibility = if (details.isNotEmpty()) View.VISIBLE else View.GONE
+				fileLayout.contentDescription = ConnectorFileMetadataFormatter.formatFileAccessibility(
+					text.resources,
+					safeFileName,
+					mimeType,
+					formattedSize,
+				)
+				fileLayout.visibility = View.VISIBLE
+				text.visibility = View.GONE
+			} else {
+				fileLayout.visibility = View.GONE
+				fileLayout.contentDescription = null
+				fileName.text = ""
+				fileDetails.text = ""
+				fileDetails.visibility = View.GONE
+				text.visibility = View.VISIBLE
 			}
 			direction.setText(
 				when (item.localEchoStatus) {
@@ -138,6 +194,7 @@ internal class ConnectorConversationAdapter(
 			i1.isEdited == i2.isEdited &&
 			i1.isReply == i2.isReply &&
 			i1.reactions == i2.reactions &&
-			i1.localEchoStatus == i2.localEchoStatus
+			i1.localEchoStatus == i2.localEchoStatus &&
+			i1.attachment == i2.attachment
 	}
 }

@@ -121,6 +121,7 @@ class MatrixRoomConnector(
 					isEdited = snapshot.isEdited,
 					isReply = snapshot.isReply,
 					reactions = snapshot.reactions,
+					attachment = snapshot.attachment,
 				)
 			},
 		)
