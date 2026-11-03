@@ -61,8 +61,11 @@ internal class MatrixSetupViewModel(
 	fun logout(confirmed: Boolean) {
 		if (!confirmed || currentStep() != MatrixSetupStep.READY) return
 		runAction(reconcileLogoutFailure = true) {
-			session.logout()
-			ConnectorDraftStore.clearSource(ConnectorSources.MATRIX_ID)
+			try {
+				session.logout()
+			} finally {
+				ConnectorDraftStore.clearSource(ConnectorSources.MATRIX_ID)
+			}
 		}
 	}
 

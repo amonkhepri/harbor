@@ -1,11 +1,16 @@
 package org.briarproject.briar.android.matrix
 
 import androidx.arch.core.executor.testing.InstantTaskExecutorRule
+import org.briarproject.briar.android.connector.ConnectorDraftStore
+import org.briarproject.briar.api.connector.ConnectorSources
 import org.briarproject.briar.api.matrix.MatrixAuthSession
 import org.briarproject.briar.api.matrix.MatrixAuthSession.RecoverableErrorDetail
 import org.briarproject.briar.api.matrix.MatrixAuthSession.Snapshot
 import org.briarproject.briar.api.matrix.MatrixAuthState
 import org.junit.Assert.assertEquals
+import org.junit.After
+import org.junit.Before
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -14,6 +19,10 @@ import java.util.concurrent.Executor
 
 class MatrixSetupViewModelTest {
 	@get:Rule val rule = InstantTaskExecutorRule()
+
+	@Before
+	@After
+	fun clearDrafts() = ConnectorDraftStore.clearAll()
 
 	private class QueueExecutor : Executor {
 		val actions = ArrayDeque<Runnable>()
@@ -131,16 +140,24 @@ class MatrixSetupViewModelTest {
 			assertEquals(1, queue.actions.size)
 			queue.runNext()
 			assertEquals(MatrixSetupStep.READY, setupStep(model.state.value!!.snapshot!!))
+			ConnectorDraftStore.setDraft(ConnectorSources.MATRIX_ID, "room", "Matrix draft")
+			ConnectorDraftStore.setDraft(ConnectorSources.TELEGRAM_ID, "room", "Telegram draft")
 			model.logout(false)
 			assertTrue(queue.actions.isEmpty())
 			assertEquals(0, session.logouts)
 			assertEquals(MatrixSetupStep.READY, setupStep(model.state.value!!.snapshot!!))
+			assertEquals("Matrix draft", ConnectorDraftStore.getDraft(ConnectorSources.MATRIX_ID, "room"))
 			model.logout(true)
 			model.logout(true)
 			assertTrue(model.state.value!!.busy)
 			assertEquals(1, queue.actions.size)
 			assertEquals(0, session.logouts)
 			queue.runNext()
+			assertNull(ConnectorDraftStore.getDraft(ConnectorSources.MATRIX_ID, "room"))
+			assertEquals(
+				"Telegram draft",
+				ConnectorDraftStore.getDraft(ConnectorSources.TELEGRAM_ID, "room"),
+			)
 			assertEquals(1, session.logouts)
 			assertFalse(model.state.value!!.busy)
 			assertEquals(MatrixSetupStep.HOMESERVER, setupStep(model.state.value!!.snapshot!!))
