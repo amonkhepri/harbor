@@ -2,6 +2,7 @@ package org.briarproject.briar.matrix
 
 import org.briarproject.briar.api.connector.ConnectorMessageType
 import org.briarproject.briar.api.connector.ConnectorReactionSummary
+import org.briarproject.briar.api.connector.ConnectorRoomObserver.RoomSubscription
 
 /**
  * Narrow, fakeable boundary over recent-message reading for one joined Matrix room on an SDK
@@ -28,6 +29,12 @@ interface MatrixMessageSnapshotClient {
 	 * "loaded, zero messages". A non-positive [limit] returns an empty list immediately.
 	 */
 	fun getRecentMessages(roomId: String, limit: Int): List<MatrixMessageSnapshot>?
+
+	/**
+	 * Subscribes to live timeline updates for [roomId] (MX-045). Returns null if no session
+	 * is retained or [roomId] cannot be observed.
+	 */
+	fun observeRoom(roomId: String, onUpdate: () -> Unit): RoomSubscription? = null
 }
 
 /**
