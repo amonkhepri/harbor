@@ -273,6 +273,15 @@ class ConnectorConversationActivity : BriarActivity() {
 	private val imageDocumentLauncher =
 		registerForActivityResult(OpenImageDocumentAdvanced(), ::onImageChosen)
 	private var messageState = ConnectorConversationMessageListState()
+	private var retryRequested = false
+	private val retryCoalescer = ConnectorRoomUpdateCoalescer {
+		runOnUiThread {
+			if (!isFinishing && !isDestroyed) {
+				loadMessages(showLoading = messageState.messages.isEmpty())
+			}
+		}
+	}
+	private var loadFailedSnackbar: Snackbar? = null
 	private var roomObserverSubscription: ConnectorRoomObserver.RoomSubscription? = null
 	private var roomUpdateCoalescer: ConnectorRoomUpdateCoalescer? = null
 	private var automaticRefreshRunning = false
@@ -316,6 +325,7 @@ class ConnectorConversationActivity : BriarActivity() {
 		layoutManager = LinearLayoutManager(this).apply { stackFromEnd = true }
 		list.setLayoutManager(layoutManager)
 		list.setAdapter(adapter)
+		list.findViewById<View>(R.id.emptyAction)?.setOnClickListener { retryRefresh() }
 
 		findBar = findViewById(R.id.connectorConversationFindBar)
 		findQuery = findViewById(R.id.connectorConversationFindQuery)
@@ -535,7 +545,7 @@ class ConnectorConversationActivity : BriarActivity() {
 			onBackPressed()
 			return true
 		} else if (isManualRefreshAction(itemId)) {
-			loadMessages()
+			retryRefresh()
 			return true
 		} else if (isFindAction(itemId)) {
 			toggleFind()
@@ -544,8 +554,16 @@ class ConnectorConversationActivity : BriarActivity() {
 		return super.onOptionsItemSelected(item)
 	}
 
+	internal fun retryRefresh() {
+		retryRequested = true
+		retryCoalescer.onUpdate()
+	}
+
 	override fun onDestroy() {
 		stopRoomObserver()
+		retryCoalescer.cancel()
+		loadFailedSnackbar?.dismiss()
+		loadFailedSnackbar = null
 		typing?.stop()
 		leaveOwner.invalidate()
 		leaveDialog?.dismiss()
@@ -565,7 +583,7 @@ class ConnectorConversationActivity : BriarActivity() {
 			showMessages(loadGeneration, ConnectorConversationMessageListState(), LOAD_FAILED)
 			return
 		}
-		if (showLoading) {
+		if (showLoading && messageState.messages.isEmpty()) {
 			submitMessageState(
 				messageState.copy(
 					emptyText = getString(emptyTextForState(LOADING), sourceName),
@@ -574,7 +592,11 @@ class ConnectorConversationActivity : BriarActivity() {
 			)
 		}
 		ioExecutor.execute {
-			if (!loadOwner.owns(loadGeneration)) return@execute
+			if (!loadOwner.owns(loadGeneration)) {
+				roomUpdateCoalescer?.onRefreshCompleted()
+				retryCoalescer.onRefreshCompleted()
+				return@execute
+			}
 			try {
 				if (!activeConnector.isEnabled()) {
 					showMessages(loadGeneration, ConnectorConversationMessageListState(), DISABLED)
@@ -588,7 +610,11 @@ class ConnectorConversationActivity : BriarActivity() {
 					)
 					return@execute
 				}
-				if (!loadOwner.owns(loadGeneration)) return@execute
+				if (!loadOwner.owns(loadGeneration)) {
+					roomUpdateCoalescer?.onRefreshCompleted()
+					retryCoalescer.onRefreshCompleted()
+					return@execute
+				}
 				val result = activeConnector.getRecentMessageReadResult(
 					threadId,
 					MESSAGE_LIMIT,
@@ -760,24 +786,54 @@ class ConnectorConversationActivity : BriarActivity() {
 		topic: String? = null,
 	) {
 		runOnUiThread {
-			if (!loadOwner.owns(loadGeneration)) return@runOnUiThread
-			bindTopic(supportActionBar, topic)
-			automaticRefreshRunning = false
-			val next = if (availabilityState == EMPTY) {
-				messageState.reconcile(state.messages).copy(isLoading = false)
-			} else {
-				state
-			}
-			submitMessageState(
-				next.withAvailabilityState(
+			try {
+				if (!loadOwner.owns(loadGeneration)) return@runOnUiThread
+				bindTopic(supportActionBar, topic)
+				automaticRefreshRunning = false
+				val next = if (availabilityState == EMPTY) {
+					messageState.reconcile(state.messages).copy(isLoading = false)
+				} else {
+					state
+				}
+				val priorStatusText = messageState.visibleStatusText
+				val nextState = next.withAvailabilityState(
 					availabilityState,
 					if (availabilityState == EMPTY) next else messageState,
 					getString(emptyTextForState(availabilityState), sourceName),
-				),
-			)
-			roomUpdateCoalescer?.onRefreshCompleted()
+				)
+				submitMessageState(nextState)
+				if (availabilityState == LOAD_FAILED) {
+					showLoadFailedFeedback(nextState.messages.isEmpty(), priorStatusText)
+				} else {
+					retryRequested = false
+					loadFailedSnackbar?.dismiss()
+					loadFailedSnackbar = null
+					list.setEmptyAction("")
+				}
+			} finally {
+				roomUpdateCoalescer?.onRefreshCompleted()
+				retryCoalescer.onRefreshCompleted()
+			}
 		}
 	}
+
+	private fun showLoadFailedFeedback(isEmpty: Boolean, priorStatusText: String?) {
+		if (isEmpty) {
+			list.setEmptyAction(R.string.connector_conversation_retry_refresh)
+		}
+		val text = getString(R.string.connector_conversation_load_failed, sourceName)
+		val shouldShowSnackbar = retryRequested || priorStatusText != text
+		retryRequested = false
+		if (shouldShowSnackbar) {
+			loadFailedSnackbar?.dismiss()
+			loadFailedSnackbar = BriarSnackbarBuilder()
+				.setAction(R.string.connector_conversation_retry_refresh) { retryRefresh() }
+				.make(list, text, Snackbar.LENGTH_LONG)
+				.also { it.show() }
+		}
+	}
+
+	internal fun getLoadFailedSnackbar(): Snackbar? = loadFailedSnackbar
 
 	internal fun startRoomObserver() {
 		val observer = connector as? ConnectorRoomObserver ?: return
@@ -829,8 +885,11 @@ class ConnectorConversationActivity : BriarActivity() {
 				list.scrollToPosition(state.messages.lastIndex)
 			}
 		}
-		if (state.isLoading) list.showProgressBar()
-		state.visibleStatusText?.takeIf { it != messageState.visibleStatusText }?.let {
+		if (state.isLoading && state.messages.isEmpty()) list.showProgressBar()
+		state.visibleStatusText?.takeIf {
+			it != messageState.visibleStatusText &&
+				it != getString(R.string.connector_conversation_load_failed, sourceName)
+		}?.let {
 			BriarSnackbarBuilder()
 				.make(list, it, Snackbar.LENGTH_LONG)
 				.show()
