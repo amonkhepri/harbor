@@ -123,7 +123,10 @@ class Timeline {
 	suspend fun addListener(listener: TimelineListener): TaskHandle {
 		FakeMatrixSdkState.listenerAddCount++
 		FakeMatrixSdkState.timelineOperationOrder.add("listener")
-		val task = TaskHandle()
+		val task = TaskHandle {
+			FakeMatrixSdkState.activeTimelineListeners.remove(listener)
+		}
+		FakeMatrixSdkState.activeTimelineListeners.add(listener)
 		if (!FakeMatrixSdkState.listenerRegistrationSuspendAsynchronously) {
 			deliverTimelineUpdate(listener)
 			return task
@@ -190,6 +193,7 @@ class Timeline {
 
 	fun close() {
 		FakeMatrixSdkState.timelineCloseCount++
+		FakeMatrixSdkState.activeTimelineListeners.clear()
 	}
 
 	private fun deliverTimelineUpdate(listener: TimelineListener) {
@@ -211,13 +215,15 @@ class Timeline {
 	}
 }
 
-class TaskHandle {
+class TaskHandle(private val onCancel: (() -> Unit)? = null) {
 	fun cancel() {
 		FakeMatrixSdkState.taskCancelCount++
+		onCancel?.invoke()
 	}
 
 	fun close() {
 		FakeMatrixSdkState.taskCloseCount++
+		onCancel?.invoke()
 	}
 }
 
@@ -830,6 +836,13 @@ object FakeMatrixSdkState {
 	var paginationHitTimelineStart = false
 	var paginationFailureToThrow: Exception? = null
 	var timelineCloseCount = 0
+	val activeTimelineListeners = mutableListOf<TimelineListener>()
+
+	fun simulateRemoteEvent(diffs: List<TimelineDiff>) {
+		val listeners = synchronized(activeTimelineListeners) { activeTimelineListeners.toList() }
+		listeners.forEach { it.onUpdate(diffs) }
+	}
+
 	var taskCancelCount = 0
 	var taskCloseCount = 0
 	var timelineDiffDestroyCount = 0
@@ -928,6 +941,7 @@ object FakeMatrixSdkState {
 		paginationHitTimelineStart = false
 		paginationFailureToThrow = null
 		timelineCloseCount = 0
+		activeTimelineListeners.clear()
 		taskCancelCount = 0
 		taskCloseCount = 0
 		timelineDiffDestroyCount = 0

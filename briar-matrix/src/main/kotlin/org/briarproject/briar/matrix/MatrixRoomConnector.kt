@@ -11,6 +11,7 @@ import org.briarproject.briar.api.connector.ConnectorMessageReadResult.Success
 import org.briarproject.briar.api.connector.ConnectorMessageType
 import org.briarproject.briar.api.connector.ConnectorReadMarker
 import org.briarproject.briar.api.connector.ConnectorRoomLeaver
+import org.briarproject.briar.api.connector.ConnectorRoomObserver
 import org.briarproject.briar.api.connector.ConnectorSource
 import org.briarproject.briar.api.connector.ConnectorSources
 import org.briarproject.briar.api.connector.ConnectorTextSender
@@ -59,7 +60,8 @@ class MatrixRoomConnector(
 	ConnectorUnreadMarker,
 	ConnectorRoomLeaver,
 	ConnectorTypingSender,
-	ConnectorMessageDeleter {
+	ConnectorMessageDeleter,
+	ConnectorRoomObserver {
 	override val source: ConnectorSource = ConnectorSources.MATRIX
 
 	override fun isEnabled(): Boolean = true
@@ -174,6 +176,12 @@ class MatrixRoomConnector(
 		if (!isAuthorized()) return false
 		return messageSendClient.deleteMessage(threadId, messageId)
 	}
+
+	override fun observeRoom(
+		threadId: String,
+		onUpdate: () -> Unit,
+	): ConnectorRoomObserver.RoomSubscription? =
+		if (isAuthorized()) messageSnapshotClient.observeRoom(threadId, onUpdate) else null
 
 	companion object {
 		/** Overall wall-clock budget for [getRecentThreads]'s per-room preview loop (MX-034). */
