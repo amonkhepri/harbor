@@ -776,16 +776,24 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 				invokeCloseableValue(room, "timeline", emptyArray(), emptyArray(), ::closeQuietly)
 			timeline = loadedTimeline
 			val listenerClass = Class.forName(TIMELINE_LISTENER_CLASS_NAME)
-			initialSnapshot = readTimelineSnapshot(loadedTimeline, listenerClass)
-			if (initialSnapshot.size >= limit) return initialSnapshot.takeLast(limit)
-			val remaining = (limit - initialSnapshot.size).coerceAtMost(MAX_UNSIGNED_SHORT)
+			val initialEvents = readTimelineSnapshot(loadedTimeline, listenerClass)
+				.associateBy { it.eventId }
+				.values
+				.toList()
+			initialSnapshot = initialEvents
+			if (initialEvents.size >= limit) return initialEvents.takeLast(limit)
+			val remaining = (limit - initialEvents.size).coerceAtMost(MAX_UNSIGNED_SHORT)
 			invokeUnit(
 				loadedTimeline,
 				PAGINATE_BACKWARDS_METHOD_NAME,
 				arrayOf(Short::class.javaPrimitiveType ?: throw SnapshotAdapterFailure()),
 				arrayOf(remaining.toShort()),
 			)
-			readTimelineSnapshot(loadedTimeline, listenerClass).takeLast(limit)
+			readTimelineSnapshot(loadedTimeline, listenerClass)
+				.associateBy { it.eventId }
+				.values
+				.toList()
+				.takeLast(limit)
 		} catch (e: InterruptedException) {
 			Thread.currentThread().interrupt()
 			initialSnapshot

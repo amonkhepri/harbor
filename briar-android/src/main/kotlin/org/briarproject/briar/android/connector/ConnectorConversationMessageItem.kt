@@ -44,8 +44,8 @@ data class ConnectorConversationMessageItem(
 			it.sourceMessageOrder
 		}
 
-		fun fromMessages(messages: List<ConnectorMessage>): List<ConnectorConversationMessageItem> =
-			messages.sortedWith(byDateAscending)
+		fun fromMessages(messages: List<ConnectorMessage>): List<ConnectorConversationMessageItem> {
+			val items = messages.sortedWith(byDateAscending)
 				.filter {
 					it.type == ConnectorMessageType.PHOTO ||
 						it.type == ConnectorMessageType.FILE ||
@@ -53,6 +53,42 @@ data class ConnectorConversationMessageItem(
 						it.text.trim().isNotEmpty()
 				}
 				.map { from(it) }
+			if (items.isEmpty()) return emptyList()
+
+			val deduplicated = LinkedHashMap<String, ConnectorConversationMessageItem>()
+			for (item in items) {
+				val existing = deduplicated[item.stableId]
+				deduplicated[item.stableId] = if (existing == null) {
+					item
+				} else {
+					mergeItems(existing, item)
+				}
+			}
+			return deduplicated.values.toList()
+		}
+
+		private fun mergeItems(
+			first: ConnectorConversationMessageItem,
+			second: ConnectorConversationMessageItem,
+		): ConnectorConversationMessageItem {
+			val base = when {
+				first.isEdited && !second.isEdited -> first
+				!first.isEdited && second.isEdited -> second
+				else -> second
+			}
+			val reactions = if (second.reactions.isNotEmpty()) {
+				second.reactions
+			} else {
+				first.reactions
+			}
+			val attachment = second.attachment ?: first.attachment
+			val isReply = second.isReply || first.isReply
+			return base.copy(
+				reactions = reactions,
+				attachment = attachment,
+				isReply = isReply,
+			)
+		}
 
 		fun from(message: ConnectorMessage): ConnectorConversationMessageItem =
 			ConnectorConversationMessageItem(

@@ -73,6 +73,28 @@ class ConnectorConversationMessageItemTest {
 	}
 
 	@Test
+	fun testFromMessagesDeduplicatesOverlappingMessagesPreservingLatestState() {
+		val items = ConnectorConversationMessageItem.fromMessages(
+			listOf(
+				connectorMessage("1", 10, false, "old 1", 1L),
+				connectorMessage("2", 20, false, "message 2", 2L),
+				connectorMessage("1", 10, false, "updated 1", 1L, isEdited = true),
+				connectorMessage("3", 30, false, "message 3", 3L),
+				connectorMessage("2", 20, false, "message 2", 2L),
+			),
+		)
+
+		assertEquals(
+			listOf(
+				connectorMessageItem("1", false, "updated 1", 10000L).copy(isEdited = true),
+				connectorMessageItem("2", false, "message 2", 20000L),
+				connectorMessageItem("3", false, "message 3", 30000L),
+			),
+			items,
+		)
+	}
+
+	@Test
 	fun testFromMessagesPreservesEditedState() {
 		val item = ConnectorConversationMessageItem.fromMessages(
 			listOf(connectorMessage("1", 10, false, "edited", 1L, isEdited = true)),

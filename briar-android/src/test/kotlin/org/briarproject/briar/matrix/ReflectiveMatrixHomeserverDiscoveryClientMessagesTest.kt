@@ -498,6 +498,41 @@ class ReflectiveMatrixHomeserverDiscoveryClientMessagesTest {
 	}
 
 	@Test
+	fun `getRecentMessages deduplicates overlapping timeline events across pagination`() {
+		val client = loggedInClient()
+		FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec("!room:example.org"))
+		FakeMatrixSdkState.timelineDiffsToReturn = listOf(
+			TimelineDiff.Reset(
+				listOf(
+					remoteEvent("\$event2:example.org", "message 2", 2_000uL),
+					remoteEvent("\$event3:example.org", "message 3", 3_000uL),
+				),
+			),
+		)
+		FakeMatrixSdkState.timelineDiffsAfterPagination = listOf(
+			TimelineDiff.Reset(
+				listOf(
+					remoteEvent("\$event1:example.org", "message 1", 1_000uL),
+					remoteEvent("\$event2:example.org", "message 2 (updated)", 2_000uL),
+					remoteEvent("\$event2:example.org", "message 2 (updated)", 2_000uL),
+					remoteEvent("\$event3:example.org", "message 3", 3_000uL),
+				),
+			),
+		)
+
+		val result = client.getRecentMessages("!room:example.org", 3)
+
+		assertEquals(
+			listOf(
+				MatrixMessageSnapshot("\$event1:example.org", "@alice:example.org", "message 1", 1L, false),
+				MatrixMessageSnapshot("\$event2:example.org", "@alice:example.org", "message 2 (updated)", 2L, false),
+				MatrixMessageSnapshot("\$event3:example.org", "@alice:example.org", "message 3", 3L, false),
+			),
+			result,
+		)
+	}
+
+	@Test
 	fun `getRecentMessages clamps one pagination request to unsigned short range`() {
 		val client = loggedInClient()
 		FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec("!room:example.org"))

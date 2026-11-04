@@ -78,6 +78,7 @@ class ConnectorConversationRemoteRefreshTest {
 			work.removeFirst().run()
 			ShadowLooper.idleMainLooper()
 		}
+		ShadowLooper.idleMainLooper()
 	}
 
 	private fun createActivity(
@@ -242,5 +243,166 @@ class ConnectorConversationRemoteRefreshTest {
 		drainWork()
 
 		assertEquals(0, messageState(activity).messages.size)
+	}
+
+	@Test
+	fun loadMultiplePagesWithOverlappingEventsAndRemoteArrivalsPreservesAnchor() {
+		val activity = createActivity()
+		start(activity)
+		drainWork()
+
+		val sub = fakeConnector.activeSubscription
+		assertNotNull(sub)
+
+		fakeConnector.messages.addAll(
+			listOf(
+				ConnectorMessage(
+					source = ConnectorSources.MATRIX,
+					threadId = "!room1:matrix.org",
+					messageId = "\$event10",
+					dateSeconds = 1000,
+					isOutgoing = false,
+					text = "Message 10",
+					sourceMessageOrder = 1000L,
+					type = ConnectorMessageType.TEXT,
+				),
+				ConnectorMessage(
+					source = ConnectorSources.MATRIX,
+					threadId = "!room1:matrix.org",
+					messageId = "\$event11",
+					dateSeconds = 1001,
+					isOutgoing = false,
+					text = "Message 11",
+					sourceMessageOrder = 1001L,
+					type = ConnectorMessageType.TEXT,
+				),
+				ConnectorMessage(
+					source = ConnectorSources.MATRIX,
+					threadId = "!room1:matrix.org",
+					messageId = "\$event12",
+					dateSeconds = 1002,
+					isOutgoing = false,
+					text = "Message 12",
+					sourceMessageOrder = 1002L,
+					type = ConnectorMessageType.TEXT,
+				),
+			),
+		)
+		sub!!.onUpdate()
+		drainWork()
+
+		assertEquals(3, messageState(activity).messages.size)
+		val anchorItem = messageState(activity).messages[1]
+		assertEquals("\$event11", anchorItem.connectorMessageId)
+
+		fakeConnector.messages.clear()
+		fakeConnector.messages.addAll(
+			listOf(
+				ConnectorMessage(
+					source = ConnectorSources.MATRIX,
+					threadId = "!room1:matrix.org",
+					messageId = "\$event8",
+					dateSeconds = 998,
+					isOutgoing = false,
+					text = "Message 8",
+					sourceMessageOrder = 998L,
+					type = ConnectorMessageType.TEXT,
+				),
+				ConnectorMessage(
+					source = ConnectorSources.MATRIX,
+					threadId = "!room1:matrix.org",
+					messageId = "\$event9",
+					dateSeconds = 999,
+					isOutgoing = false,
+					text = "Message 9",
+					sourceMessageOrder = 999L,
+					type = ConnectorMessageType.TEXT,
+				),
+				ConnectorMessage(
+					source = ConnectorSources.MATRIX,
+					threadId = "!room1:matrix.org",
+					messageId = "\$event10",
+					dateSeconds = 1000,
+					isOutgoing = false,
+					text = "Message 10",
+					sourceMessageOrder = 1000L,
+					type = ConnectorMessageType.TEXT,
+				),
+				ConnectorMessage(
+					source = ConnectorSources.MATRIX,
+					threadId = "!room1:matrix.org",
+					messageId = "\$event11",
+					dateSeconds = 1001,
+					isOutgoing = false,
+					text = "Message 11 (updated)",
+					sourceMessageOrder = 1001L,
+					type = ConnectorMessageType.TEXT,
+					isEdited = true,
+				),
+				ConnectorMessage(
+					source = ConnectorSources.MATRIX,
+					threadId = "!room1:matrix.org",
+					messageId = "\$event10",
+					dateSeconds = 1000,
+					isOutgoing = false,
+					text = "Message 10",
+					sourceMessageOrder = 1000L,
+					type = ConnectorMessageType.TEXT,
+				),
+				ConnectorMessage(
+					source = ConnectorSources.MATRIX,
+					threadId = "!room1:matrix.org",
+					messageId = "\$event11",
+					dateSeconds = 1001,
+					isOutgoing = false,
+					text = "Message 11",
+					sourceMessageOrder = 1001L,
+					type = ConnectorMessageType.TEXT,
+				),
+				ConnectorMessage(
+					source = ConnectorSources.MATRIX,
+					threadId = "!room1:matrix.org",
+					messageId = "\$event12",
+					dateSeconds = 1002,
+					isOutgoing = false,
+					text = "Message 12",
+					sourceMessageOrder = 1002L,
+					type = ConnectorMessageType.TEXT,
+				),
+				ConnectorMessage(
+					source = ConnectorSources.MATRIX,
+					threadId = "!room1:matrix.org",
+					messageId = "\$event13",
+					dateSeconds = 1003,
+					isOutgoing = false,
+					text = "Message 13",
+					sourceMessageOrder = 1003L,
+					type = ConnectorMessageType.TEXT,
+				),
+				ConnectorMessage(
+					source = ConnectorSources.MATRIX,
+					threadId = "!room1:matrix.org",
+					messageId = "\$event14",
+					dateSeconds = 1004,
+					isOutgoing = false,
+					text = "Message 14",
+					sourceMessageOrder = 1004L,
+					type = ConnectorMessageType.TEXT,
+				),
+			),
+		)
+		sub.onUpdate()
+		drainWork()
+
+		val updatedMessages = messageState(activity).messages
+		assertEquals(7, updatedMessages.size)
+		assertEquals(
+			listOf("\$event8", "\$event9", "\$event10", "\$event11", "\$event12", "\$event13", "\$event14"),
+			updatedMessages.map { it.connectorMessageId },
+		)
+		val updatedAnchor = updatedMessages.first { it.connectorMessageId == "\$event11" }
+		assertEquals("Message 11 (updated)", updatedAnchor.text)
+		assertTrue(updatedAnchor.isEdited)
+		assertEquals(anchorItem.stableId, updatedAnchor.stableId)
 	}
 }
