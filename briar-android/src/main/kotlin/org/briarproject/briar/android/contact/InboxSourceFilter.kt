@@ -10,8 +10,6 @@ import org.briarproject.briar.api.connector.ConnectorSources
 
 sealed class InboxSourceFilter {
 
-	abstract val id: String?
-
 	abstract fun matches(item: InboxThreadItem): Boolean
 
 	open fun emptyText(state: ConnectorInboxAvailabilityState): Int = when (state) {
@@ -24,7 +22,6 @@ sealed class InboxSourceFilter {
 	open fun emptyAction(state: ConnectorInboxAvailabilityState): Int = 0
 
 	object All : InboxSourceFilter() {
-		override val id: String? = null
 		override fun matches(item: InboxThreadItem): Boolean = true
 		override fun emptyText(state: ConnectorInboxAvailabilityState): Int =
 			ContactListFragment.emptyTextForState(state)
@@ -33,34 +30,19 @@ sealed class InboxSourceFilter {
 	}
 
 	object Matrix : InboxSourceFilter() {
-		override val id: String = ConnectorSources.MATRIX_ID
 		override fun matches(item: InboxThreadItem): Boolean =
 			item.connectorSource?.id == ConnectorSources.MATRIX_ID
 	}
 
 	object Telegram : InboxSourceFilter() {
-		override val id: String = ConnectorSources.TELEGRAM_ID
 		override fun matches(item: InboxThreadItem): Boolean =
 			item.connectorSource?.id == ConnectorSources.TELEGRAM_ID
 	}
 
 	object Briar : InboxSourceFilter() {
-		override val id: String = BRIAR_SOURCE_ID
 		override fun matches(item: InboxThreadItem): Boolean = item.connectorSource == null
 		override fun emptyText(state: ConnectorInboxAvailabilityState): Int = R.string.no_contacts
 		override fun emptyAction(state: ConnectorInboxAvailabilityState): Int =
 			R.string.no_contacts_action
-	}
-
-	companion object {
-		const val BRIAR_SOURCE_ID = "briar"
-
-		@JvmStatic
-		fun fromId(id: String?): InboxSourceFilter = when (id) {
-			ConnectorSources.MATRIX_ID -> Matrix
-			ConnectorSources.TELEGRAM_ID -> Telegram
-			BRIAR_SOURCE_ID -> Briar
-			else -> All
-		}
 	}
 }

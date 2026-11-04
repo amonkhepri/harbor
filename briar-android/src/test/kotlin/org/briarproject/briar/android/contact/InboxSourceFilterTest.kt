@@ -3,7 +3,6 @@ package org.briarproject.briar.android.contact
 import org.briarproject.briar.api.connector.ConnectorSources
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -21,7 +20,6 @@ class InboxSourceFilterTest {
 
 	@Test
 	fun testAllFilterMatchesAnyItem() {
-		assertNull(InboxSourceFilter.All.id)
 		assertTrue(InboxSourceFilter.All.matches(matrixItem))
 		assertTrue(InboxSourceFilter.All.matches(telegramItem))
 		assertTrue(InboxSourceFilter.All.matches(briarItem))
@@ -29,7 +27,6 @@ class InboxSourceFilterTest {
 
 	@Test
 	fun testMatrixFilterMatchesOnlyMatrixItems() {
-		assertEquals(ConnectorSources.MATRIX_ID, InboxSourceFilter.Matrix.id)
 		assertTrue(InboxSourceFilter.Matrix.matches(matrixItem))
 		assertFalse(InboxSourceFilter.Matrix.matches(telegramItem))
 		assertFalse(InboxSourceFilter.Matrix.matches(briarItem))
@@ -37,7 +34,6 @@ class InboxSourceFilterTest {
 
 	@Test
 	fun testBriarFilterMatchesOnlyBriarItems() {
-		assertEquals(InboxSourceFilter.BRIAR_SOURCE_ID, InboxSourceFilter.Briar.id)
 		assertTrue(InboxSourceFilter.Briar.matches(briarItem))
 		assertFalse(InboxSourceFilter.Briar.matches(matrixItem))
 		assertFalse(InboxSourceFilter.Briar.matches(telegramItem))
@@ -45,20 +41,9 @@ class InboxSourceFilterTest {
 
 	@Test
 	fun testTelegramFilterMatchesOnlyTelegramItems() {
-		assertEquals(ConnectorSources.TELEGRAM_ID, InboxSourceFilter.Telegram.id)
 		assertTrue(InboxSourceFilter.Telegram.matches(telegramItem))
 		assertFalse(InboxSourceFilter.Telegram.matches(matrixItem))
 		assertFalse(InboxSourceFilter.Telegram.matches(briarItem))
-	}
-
-	@Test
-	fun testFromIdMapsExpectedFilters() {
-		assertEquals(InboxSourceFilter.All, InboxSourceFilter.fromId(null))
-		assertEquals(InboxSourceFilter.All, InboxSourceFilter.fromId(""))
-		assertEquals(InboxSourceFilter.All, InboxSourceFilter.fromId("unknown"))
-		assertEquals(InboxSourceFilter.Matrix, InboxSourceFilter.fromId("matrix"))
-		assertEquals(InboxSourceFilter.Briar, InboxSourceFilter.fromId("briar"))
-		assertEquals(InboxSourceFilter.Telegram, InboxSourceFilter.fromId("telegram"))
 	}
 
 	@Test
