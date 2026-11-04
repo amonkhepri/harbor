@@ -11,7 +11,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import org.briarproject.briar.R
 import org.briarproject.briar.api.connector.ConnectorSources
 
 class ConnectorConversationMessageListStateTest {
@@ -158,15 +157,19 @@ class ConnectorConversationMessageListStateTest {
 		}
 	}
 
-	@Test fun testFailedDeleteLeavesMessageVisibleWithFeedback() {
+	@Test fun testMarkMessageDeletedReplacesOnlyMatchingStableId() {
 		val item = messageItem("1").copy(isOutgoing = true)
-		val state = ConnectorConversationMessageListState(messages = listOf(item))
-		val failed = resolveDeleteOutcome(state, item, false)
-		assertEquals(listOf(item), failed.nextState.messages)
-		assertEquals(R.string.connector_conversation_delete_failed, failed.feedbackStringRes)
-		val succeeded = resolveDeleteOutcome(state, item, true)
-		assertEquals(listOf(item.copy(type = ConnectorMessageType.DELETED)), succeeded.nextState.messages)
-		assertNull(succeeded.feedbackStringRes)
+		val otherThread = item.copy(connectorThreadId = "thread-2")
+		val state = ConnectorConversationMessageListState(
+			messages = listOf(otherThread, item.copy(text = "refreshed")),
+		)
+
+		val deleted = markMessageDeleted(state, item)
+
+		assertEquals(
+			listOf(otherThread, item.copy(type = ConnectorMessageType.DELETED)),
+			deleted.messages,
+		)
 	}
 
 	companion object {

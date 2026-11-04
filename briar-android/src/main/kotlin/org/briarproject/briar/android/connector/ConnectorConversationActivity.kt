@@ -1233,9 +1233,7 @@ class ConnectorConversationActivity : BriarActivity() {
 				val item = messageState.messages.firstOrNull {
 					it.connectorThreadId == targetThreadId && it.connectorMessageId == connectorMessageId
 				} ?: return@runOnUiThread
-				val outcome = resolveDeleteOutcome(messageState, item, true)
-				outcome.feedbackStringRes?.let { Snackbar.make(list, it, Snackbar.LENGTH_LONG).show() }
-					?: submitMessageState(outcome.nextState)
+				submitMessageState(markMessageDeleted(messageState, item))
 			}
 		}
 	}
@@ -1316,19 +1314,11 @@ class ConnectorDeleteMessageDialogFragment : DialogFragment() {
 	}
 }
 
-internal data class ConnectorDeleteOutcome(
-	val nextState: ConnectorConversationMessageListState,
-	val feedbackStringRes: Int? = null,
-)
-
-internal fun resolveDeleteOutcome(
+internal fun markMessageDeleted(
 	state: ConnectorConversationMessageListState,
 	item: ConnectorConversationMessageItem,
-	success: Boolean,
-): ConnectorDeleteOutcome = if (success) {
+): ConnectorConversationMessageListState {
 	val updated = item.copy(type = ConnectorMessageType.DELETED)
 	val messages = state.messages.map { if (it.stableId == item.stableId) updated else it }
-	ConnectorDeleteOutcome(state.copy(messages = messages))
-} else {
-	ConnectorDeleteOutcome(state, R.string.connector_conversation_delete_failed)
+	return state.copy(messages = messages)
 }
