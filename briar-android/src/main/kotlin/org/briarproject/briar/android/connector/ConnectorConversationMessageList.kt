@@ -1,5 +1,6 @@
 package org.briarproject.briar.android.connector
 
+import org.briarproject.briar.android.connector.ConnectorLocalEchoStatus.PENDING
 import org.briarproject.briar.api.connector.ConnectorMessageType
 import org.briarproject.briar.api.connector.ConnectorSource
 import java.util.UUID
@@ -70,6 +71,22 @@ internal data class ConnectorConversationMessageListState(
 			// Completion updates visible rows without restoring echoes hidden by availability.
 			messages = messages.map { message ->
 				echoes.firstOrNull { it.item.stableId == message.stableId }?.item ?: message
+			},
+		)
+	}
+
+	fun retrySend(id: String): ConnectorConversationMessageListState {
+		val echoes = localEchoes.map { echo ->
+			if (echo.item.stableId != id) {
+				echo
+			} else {
+				echo.copy(completed = false, item = echo.item.copy(localEchoStatus = PENDING))
+			}
+		}
+		return copy(
+			localEchoes = echoes,
+			messages = messages.map { m ->
+				echoes.firstOrNull { it.item.stableId == m.stableId }?.item ?: m
 			},
 		)
 	}

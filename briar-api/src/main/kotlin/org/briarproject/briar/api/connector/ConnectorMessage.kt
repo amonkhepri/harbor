@@ -12,6 +12,7 @@ data class ConnectorMessage(
 	val isEdited: Boolean = false,
 	val isReply: Boolean = false,
 	val reactions: List<ConnectorReactionSummary> = emptyList(),
+	val attachment: ConnectorAttachmentMetadata? = null,
 )
 
 data class ConnectorReactionSummary(val key: String, val count: Int)

@@ -200,19 +200,19 @@ public class TestDataCreatorImpl implements TestDataCreator {
 		LocalAuthor localAuthor = identityManager.getLocalAuthor();
 		for (int i = 0; i < numContacts; i++) {
 			LocalAuthor remote = getRandomAuthor();
+			boolean verified = i == 0 ? false : (i == 1 ? true : random.nextBoolean());
 			Contact contact = addContact(localAuthor.getId(), remote,
-					random.nextBoolean(), avatarPercent);
+					random.nextBoolean(), avatarPercent, verified);
 			contacts.add(contact);
 		}
 		return contacts;
 	}
 
 	private Contact addContact(AuthorId localAuthorId, LocalAuthor remote,
-			boolean alias, int avatarPercent) throws DbException {
+			boolean alias, int avatarPercent, boolean verified) throws DbException {
 		// prepare to add contact
 		SecretKey secretKey = getSecretKey();
 		long timestamp = clock.currentTimeMillis();
-		boolean verified = random.nextBoolean();
 
 		// prepare transport properties
 		Map<TransportId, TransportProperties> props =
@@ -244,7 +244,8 @@ public class TestDataCreatorImpl implements TestDataCreator {
 		LocalAuthor localAuthor = identityManager.getLocalAuthor();
 		LocalAuthor remote = authorFactory.createLocalAuthor(name);
 		int avatarPercent = avatar ? 100 : 0;
-		return addContact(localAuthor.getId(), remote, alias, avatarPercent);
+		return addContact(localAuthor.getId(), remote, alias, avatarPercent,
+				random.nextBoolean());
 	}
 
 	private String getRandomAuthorName() {

@@ -13,6 +13,15 @@ interface MatrixRoomSnapshotClient {
 	 * retained or room enumeration fails.
 	 */
 	fun getJoinedRooms(limit: Int): List<MatrixRoomSnapshot>
+
+	/** Reads only the requested room's topic; null if unavailable or no session is retained. */
+	fun getRoomTopic(roomId: String): String? = null
 }
 
-data class MatrixRoomSnapshot(val roomId: String, val displayName: String)
+data class MatrixRoomSnapshot(
+	val roomId: String,
+	val displayName: String,
+	val unreadCount: Int? = null,
+	val isMarkedUnread: Boolean? = null,
+	val topic: String? = null,
+)

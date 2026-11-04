@@ -71,31 +71,32 @@ class GenericConnectorInboxThreadItemTest {
 	}
 
 	@Test
-	fun testBlankTitleLoadingRowBindsFallbackAndPreservesPreviewState() {
-		val loading = GenericConnectorInboxThreadItem(
+	fun testBlankTitleRowBindsFallbackAndPreservesPreviewState() {
+		val item = GenericConnectorInboxThreadItem(
 			connectorSource = ConnectorSources.MATRIX,
 			connectorThreadId = "!room:matrix.example.org",
 			title = " \t",
 			latestActivityMillis = 0L,
 			previewText = "",
 			isLastMessageOutgoing = false,
-			isPreviewLoading = true,
 			previewType = ConnectorMessageType.TEXT,
 		)
 
-		assertEquals(true, loading.isPreviewLoading)
-		assertEquals(false, loading.hasPreviewText())
+		assertEquals(false, item.hasPreviewText())
 		RuntimeEnvironment.getApplication().setTheme(R.style.BriarTheme)
 		EmojiManager.install(GoogleEmojiProvider())
 		val view = LayoutInflater.from(RuntimeEnvironment.getApplication())
 			.inflate(R.layout.list_item_connector_thread, null)
 		val holder = ConnectorInboxThreadViewHolder(view)
 		for (blankTitle in listOf(" \t", "", "   ", "\n\n")) {
-			holder.bind(loading.copy(title = blankTitle)) { _, _ -> }
+			holder.bind(item.copy(title = blankTitle)) { _, _ -> }
 			assertEquals("Chat", view.findViewById<TextView>(R.id.connectorThreadTitle).text.toString())
 		}
-		holder.bind(loading.copy(title = "Custom Room")) { _, _ -> }
-		assertEquals("Custom Room", view.findViewById<TextView>(R.id.connectorThreadTitle).text.toString())
+		holder.bind(item.copy(title = "Custom Room")) { _, _ -> }
+		assertEquals(
+			"Custom Room",
+			view.findViewById<TextView>(R.id.connectorThreadTitle).text.toString(),
+		)
 
 		val outgoingPhoto = GenericConnectorInboxThreadItem(
 			ConnectorThread(
@@ -111,5 +112,38 @@ class GenericConnectorInboxThreadItemTest {
 
 		assertEquals(true, outgoingPhoto.isLastMessageOutgoing)
 		assertEquals(ConnectorMessageType.PHOTO, outgoingPhoto.previewType)
+	}
+
+	@Test
+	fun testUnreadCountCarriesThroughFromConnectorThread() {
+		val withCount = GenericConnectorInboxThreadItem(
+			ConnectorThread(
+				ConnectorSources.MATRIX,
+				"!room:matrix.example.org",
+				"room",
+				42,
+				"preview",
+				false,
+				ConnectorMessageType.TEXT,
+				unreadCount = 12,
+				isMarkedUnread = true,
+			),
+		)
+		assertEquals(12, withCount.unreadCount)
+		assertEquals(true, withCount.isMarkedUnread)
+
+		val withoutCount = GenericConnectorInboxThreadItem(
+			ConnectorThread(
+				ConnectorSources.MATRIX,
+				"!room:matrix.example.org",
+				"room",
+				42,
+				"preview",
+				false,
+				ConnectorMessageType.TEXT,
+			),
+		)
+		assertEquals(null, withoutCount.unreadCount)
+		assertEquals(null, withoutCount.isMarkedUnread)
 	}
 }

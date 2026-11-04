@@ -7,10 +7,13 @@ import java.util.concurrent.TimeUnit.MILLISECONDS
 class TelegramTdlibAccessGate {
 
 	private val lock = Any()
+
 	@Volatile
 	private var stopLatch = CountDownLatch(1)
+
 	@Volatile
 	private var acceptingCalls = true
+
 	@Volatile
 	private var unconfirmedClose = false
 
@@ -42,14 +45,6 @@ class TelegramTdlibAccessGate {
 	 */
 	fun reportUnconfirmedClose() {
 		unconfirmedClose = true
-	}
-
-	/**
-	 * Backward-compatible alias for [reportUnconfirmedClose] for cancellations
-	 * during shutdown.
-	 */
-	fun reportUnconfirmedCancelledClose() {
-		reportUnconfirmedClose()
 	}
 
 	@Throws(ServiceException::class)

@@ -8,6 +8,7 @@ import org.briarproject.briar.matrix.MatrixLoginClient.RestoreResult
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -207,6 +208,18 @@ class ReflectiveMatrixHomeserverDiscoveryClientTest {
 	}
 
 	@Test
+	fun `synchronous url discovery uses homeserverUrl directly and resolves`() {
+		val result = ReflectiveMatrixHomeserverDiscoveryClient().discover("http://127.0.0.1:8008")
+
+		assertEquals(DiscoveryResult.Resolved("http://127.0.0.1:8008"), result)
+		assertEquals("http://127.0.0.1:8008", FakeMatrixSdkState.lastHomeserverUrl)
+		assertNull(FakeMatrixSdkState.lastServerName)
+		assertEquals(true, FakeMatrixSdkState.inMemoryStoreCalled)
+		assertEquals(1, FakeMatrixSdkState.clientCloseCount)
+		assertEquals(3, FakeMatrixSdkState.builderCloseCount)
+	}
+
+	@Test
 	fun `asynchronous success on another thread resolves the url and closes builders`() {
 		FakeMatrixSdkState.homeserverUrlToReturn = "https://matrix.example.org"
 		FakeMatrixSdkState.suspendAsynchronously = true
@@ -361,6 +374,99 @@ class ReflectiveMatrixHomeserverDiscoveryClientTest {
 		val result = client.getJoinedRooms(10)
 
 		assertEquals("!noname:example.org", result.single().displayName)
+	}
+
+	@Test
+	fun `getJoinedRooms preserves present empty and absent topics`() {
+		val client = newSessionClient()
+		client.login("https://matrix.example.org", "alice", "swordfish")
+		for (topic in listOf("Room purpose", "", null)) {
+			FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec("!a:example.org", topic = topic))
+			assertEquals(topic, client.getJoinedRooms(10).single().topic)
+		}
+	}
+
+	@Test
+	fun `getRoomTopic reads only the selected room and releases its handle`() {
+		val client = newSessionClient()
+		assertNull(client.getRoomTopic("!a:example.org"))
+		client.login("https://matrix.example.org", "alice", "swordfish")
+		for (topic in listOf("Room purpose", "", null)) {
+			FakeMatrixSdkState.roomsToReturn = listOf(
+				FakeRoomSpec("!a:example.org", topic = topic),
+				FakeRoomSpec("!b:example.org", topic = "Other room"),
+			)
+			val closedBefore = FakeMatrixSdkState.roomCloseCount
+			assertEquals(topic, client.getRoomTopic("!a:example.org"))
+			assertEquals(closedBefore + 1, FakeMatrixSdkState.roomCloseCount)
+		}
+		assertNull(client.getRoomTopic("!missing:example.org"))
+		assertEquals(0, FakeMatrixSdkState.roomInfoCallCount)
+	}
+
+	@Test
+	fun `getJoinedRooms carries unread message count and disposes roomInfo`() {
+		val client = newSessionClient()
+		client.login("https://matrix.example.org", "alice", "swordfish")
+		FakeMatrixSdkState.roomsToReturn = listOf(
+			FakeRoomSpec(
+				roomId = "!unread:example.org",
+				displayName = "Unread Room",
+				unreadMessagesCount = 42uL,
+			),
+			FakeRoomSpec(roomId = "!zero:example.org", displayName = "Zero Room", unreadMessagesCount = 0uL),
+			FakeRoomSpec(
+				roomId = "!nounread:example.org",
+				displayName = "No Unread",
+				unreadMessagesCount = null,
+			),
+		)
+
+		val result = client.getJoinedRooms(10)
+
+		assertEquals(3, result.size)
+		assertEquals(42, result.first { it.roomId == "!unread:example.org" }.unreadCount)
+		assertEquals(0, result.first { it.roomId == "!zero:example.org" }.unreadCount)
+		assertNull(result.first { it.roomId == "!nounread:example.org" }.unreadCount)
+		assertEquals(2, FakeMatrixSdkState.roomInfoDestroyCount)
+	}
+
+	@Test
+	fun `getJoinedRooms leaves unreadCount null when roomInfo throws`() {
+		val client = newSessionClient()
+		client.login("https://matrix.example.org", "alice", "swordfish")
+		FakeMatrixSdkState.roomsToReturn = listOf(
+			FakeRoomSpec(
+				roomId = "!throwing:example.org",
+				displayName = "Throwing Room",
+				unreadMessagesCount = 10uL,
+			),
+		)
+		FakeMatrixSdkState.roomInfoFailureToThrow = RuntimeException("SDK error")
+
+		val result = client.getJoinedRooms(10)
+
+		assertEquals(1, result.size)
+		assertEquals("Throwing Room", result.single().displayName)
+		assertNull(result.single().unreadCount)
+	}
+
+	@Test
+	fun `getJoinedRooms leaves unreadCount null when raw count has the sign bit set`() {
+		val client = newSessionClient()
+		client.login("https://matrix.example.org", "alice", "swordfish")
+		FakeMatrixSdkState.roomsToReturn = listOf(
+			FakeRoomSpec(
+				roomId = "!overflow:example.org",
+				displayName = "Overflow Room",
+				unreadMessagesCount = ULong.MAX_VALUE,
+			),
+		)
+
+		val result = client.getJoinedRooms(10)
+
+		assertEquals(1, result.size)
+		assertNull(result.single().unreadCount)
 	}
 
 	@Test

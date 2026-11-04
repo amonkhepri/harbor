@@ -599,7 +599,7 @@ class ReflectiveTelegramTdlibLoginClient(
 				pendingAuthorizationUpdate = null
 			}
 			if (!confirmed && accessGate.isStopped) {
-				accessGate.reportUnconfirmedCancelledClose()
+				accessGate.reportUnconfirmedClose()
 			}
 		}
 		if (waitUntilConfirmed && !confirmed) {

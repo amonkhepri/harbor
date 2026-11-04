@@ -13,6 +13,7 @@ import org.briarproject.briar.api.connector.ConnectorMessageType
 
 internal class ConnectorConversationAdapter(
 	private val onDeleteClicked: ((ConnectorConversationMessageItem) -> Unit)? = null,
+	private val onRetrySendClicked: ((ConnectorConversationMessageItem) -> Unit)? = null,
 ) : ListAdapter<
 	ConnectorConversationMessageItem,
 	ConnectorConversationAdapter.MessageViewHolder,
@@ -24,7 +25,7 @@ internal class ConnectorConversationAdapter(
 			parent,
 			false,
 		)
-		return MessageViewHolder(view, onDeleteClicked)
+		return MessageViewHolder(view, onDeleteClicked, onRetrySendClicked)
 	}
 
 	override fun onBindViewHolder(holder: MessageViewHolder, position: Int) {
@@ -34,18 +35,37 @@ internal class ConnectorConversationAdapter(
 	class MessageViewHolder(
 		itemView: View,
 		private val onDeleteClicked: ((ConnectorConversationMessageItem) -> Unit)? = null,
+		private val onRetrySendClicked: ((ConnectorConversationMessageItem) -> Unit)? = null,
 	) : RecyclerView.ViewHolder(itemView) {
+		constructor(itemView: View, onDeleteClicked: ((ConnectorConversationMessageItem) -> Unit)?) :
+			this(itemView, onDeleteClicked, null)
 		private val text: TextView =
 			itemView.findViewById(R.id.connectorMessageText)
 		private val direction: TextView =
 			itemView.findViewById(R.id.connectorMessageDirection)
 		private val date: TextView =
 			itemView.findViewById(R.id.connectorMessageDate)
+		private val fileLayout: View =
+			itemView.findViewById(R.id.connectorFileLayout)
+		private val fileName: TextView =
+			itemView.findViewById(R.id.connectorFileName)
+		private val fileDetails: TextView =
+			itemView.findViewById(R.id.connectorFileDetails)
 
 		fun bind(item: ConnectorConversationMessageItem) {
+			val isFile = item.type == ConnectorMessageType.FILE
+			val fileFallbackName = text.resources.getString(R.string.connector_message_file)
+			val safeFileName = if (isFile) {
+				ConnectorFileMetadataFormatter.sanitizeFileName(
+					item.attachment?.fileName,
+					fileFallbackName,
+				)
+			} else {
+				""
+			}
 			val messageText = when (item.type) {
 				ConnectorMessageType.PHOTO -> text.resources.getString(R.string.connector_message_photo)
-				ConnectorMessageType.FILE -> text.resources.getString(R.string.connector_message_file)
+				ConnectorMessageType.FILE -> safeFileName
 				ConnectorMessageType.DELETED ->
 					text.resources.getString(R.string.connector_message_deleted)
 				else -> item.text
@@ -60,21 +80,64 @@ internal class ConnectorConversationAdapter(
 			} else {
 				replyText
 			}
-			text.text = if (item.reactions.isEmpty()) {
-				decoratedText
+			val reactionSummary = if (item.reactions.isEmpty()) {
+				null
 			} else {
-				val reactionText = item.reactions.joinToString("  ") { reaction ->
+				item.reactions.joinToString("  ") { reaction ->
 					text.resources.getString(
 						R.string.connector_message_reaction_summary,
 						reaction.key,
 						reaction.count,
 					)
 				}
-				text.resources.getString(
-					R.string.connector_message_with_reactions,
-					decoratedText,
-					reactionText,
+			}
+			if (isFile) {
+				val mimeType =
+					ConnectorFileMetadataFormatter.sanitizeMimeType(item.attachment?.mimeType)
+				val formattedSize = ConnectorFileMetadataFormatter.formatFileSize(
+					itemView.context,
+					item.attachment?.size,
 				)
+				fileName.text = decoratedText
+				val details = ConnectorFileMetadataFormatter.formatFileDetails(
+					text.resources,
+					mimeType,
+					formattedSize,
+				)
+				fileDetails.text = details
+				fileDetails.visibility = if (details.isNotEmpty()) View.VISIBLE else View.GONE
+				fileLayout.contentDescription =
+					ConnectorFileMetadataFormatter.formatFileAccessibility(
+						text.resources,
+						decoratedText,
+						mimeType,
+						formattedSize,
+						reactionSummary,
+					)
+				fileLayout.visibility = View.VISIBLE
+				if (reactionSummary != null) {
+					text.text = reactionSummary
+					text.visibility = View.VISIBLE
+				} else {
+					text.text = ""
+					text.visibility = View.GONE
+				}
+			} else {
+				fileLayout.visibility = View.GONE
+				fileLayout.contentDescription = null
+				fileName.text = ""
+				fileDetails.text = ""
+				fileDetails.visibility = View.GONE
+				text.text = if (reactionSummary == null) {
+					decoratedText
+				} else {
+					text.resources.getString(
+						R.string.connector_message_with_reactions,
+						decoratedText,
+						reactionSummary,
+					)
+				}
+				text.visibility = View.VISIBLE
 			}
 			direction.setText(
 				when (item.localEchoStatus) {
@@ -90,6 +153,16 @@ internal class ConnectorConversationAdapter(
 			)
 			date.visibility = if (item.dateMillis > 0) View.VISIBLE else View.GONE
 			date.text = if (item.dateMillis > 0) formatDate(date.context, item.dateMillis) else ""
+			if (item.isOutgoing &&
+				item.type == ConnectorMessageType.TEXT &&
+				item.localEchoStatus == ConnectorLocalEchoStatus.FAILED &&
+				onRetrySendClicked != null
+			) {
+				itemView.setOnClickListener { onRetrySendClicked.invoke(item) }
+			} else {
+				itemView.setOnClickListener(null)
+				itemView.isClickable = false
+			}
 			itemView.setOnLongClickListener {
 				// Delete affordance is connector-neutral: own sent messages without pending
 				// local echo and not already deleted trigger the callback when delete is supported.
@@ -124,6 +197,7 @@ internal class ConnectorConversationAdapter(
 			i1.isEdited == i2.isEdited &&
 			i1.isReply == i2.isReply &&
 			i1.reactions == i2.reactions &&
-			i1.localEchoStatus == i2.localEchoStatus
+			i1.localEchoStatus == i2.localEchoStatus &&
+			i1.attachment == i2.attachment
 	}
 }

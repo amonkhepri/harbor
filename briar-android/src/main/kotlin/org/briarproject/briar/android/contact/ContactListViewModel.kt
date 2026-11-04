@@ -62,12 +62,20 @@ internal class ContactListViewModel @Inject constructor(
 	private val _connectorThreadItems = MutableLiveData<List<ConnectorInboxThreadItem>>(emptyList())
 	private val _connectorAvailabilityStates =
 		MutableLiveData<Map<ConnectorSource, ConnectorInboxAvailabilityState>>(emptyMap())
+	private val _sourceFilter = MutableLiveData<InboxSourceFilter>(InboxSourceFilter.All)
 
 	val hasPendingContacts: LiveData<Boolean> = _hasPendingContacts
 	val connectorThreadItems: LiveData<List<ConnectorInboxThreadItem>> = _connectorThreadItems
 	val connectorAvailabilityStates:
 		LiveData<Map<ConnectorSource, ConnectorInboxAvailabilityState>> =
 		_connectorAvailabilityStates
+	val sourceFilter: LiveData<InboxSourceFilter> = _sourceFilter
+
+	fun setSourceFilter(filter: InboxSourceFilter) {
+		if (_sourceFilter.value != filter) {
+			_sourceFilter.value = filter
+		}
+	}
 
 	override fun eventOccurred(event: Event) {
 		super.eventOccurred(event)
@@ -98,6 +106,9 @@ internal class ContactListViewModel @Inject constructor(
 		if (connectors.isEmpty()) {
 			_connectorAvailabilityStates.value = emptyMap()
 			_connectorThreadItems.value = emptyList()
+			if (_sourceFilter.value != InboxSourceFilter.All) {
+				_sourceFilter.value = InboxSourceFilter.All
+			}
 			return
 		}
 		val previousItems = _connectorThreadItems.value.orEmpty().groupBy {

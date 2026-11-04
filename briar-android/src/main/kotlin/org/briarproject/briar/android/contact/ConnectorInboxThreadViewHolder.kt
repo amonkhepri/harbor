@@ -8,6 +8,7 @@ import android.widget.TextView
 import androidx.annotation.DrawableRes
 import androidx.annotation.UiThread
 import androidx.recyclerview.widget.RecyclerView
+import java.util.Locale
 import org.briarproject.briar.R
 import org.briarproject.briar.android.util.UiUtils.formatDate
 import org.briarproject.briar.api.connector.ConnectorSources
@@ -20,6 +21,7 @@ class ConnectorInboxThreadViewHolder(view: View) : RecyclerView.ViewHolder(view)
 	private val date: TextView = view.findViewById(R.id.connectorThreadDate)
 	private val badge: TextView = view.findViewById(R.id.connectorThreadBadge)
 	private val preview: TextView = view.findViewById(R.id.connectorThreadPreview)
+	internal val unreadBadge: TextView = view.findViewById(R.id.connectorThreadUnreadBadge)
 
 	fun bind(
 		item: ConnectorInboxThreadItem,
@@ -32,9 +34,28 @@ class ConnectorInboxThreadViewHolder(view: View) : RecyclerView.ViewHolder(view)
 		sourceIcon.contentDescription =
 			sourceContentDescription(sourceIcon.resources, item)
 		badge.text = sourceLabel(item)
+		val unreadCount = item.unreadCount
+		if (item.connectorSource.id == ConnectorSources.MATRIX_ID &&
+			unreadCount != null &&
+			unreadCount > 0
+		) {
+			unreadBadge.visibility = View.VISIBLE
+			unreadBadge.text = unreadText(unreadCount)
+			unreadBadge.contentDescription =
+				unreadContentDescription(unreadBadge.resources, unreadCount)
+		} else if (item.connectorSource.id == ConnectorSources.MATRIX_ID &&
+			item.isMarkedUnread == true
+		) {
+			unreadBadge.visibility = View.VISIBLE
+			unreadBadge.text = "•"
+			unreadBadge.contentDescription =
+				unreadBadge.resources.getString(R.string.connector_thread_marked_unread)
+		} else {
+			unreadBadge.visibility = View.GONE
+			unreadBadge.text = ""
+			unreadBadge.contentDescription = null
+		}
 		preview.text = when {
-			item.isPreviewLoading ->
-				preview.resources.getString(R.string.connector_thread_preview_loading)
 			item.previewType == ConnectorMessageType.PHOTO ->
 				previewText(preview.resources, item, R.string.connector_message_photo)
 			item.previewType == ConnectorMessageType.FILE ->
@@ -143,5 +164,14 @@ class ConnectorInboxThreadViewHolder(view: View) : RecyclerView.ViewHolder(view)
 				text,
 			)
 		}
+
+		fun unreadText(count: Int): CharSequence = String.format(Locale.getDefault(), "%d", count)
+
+		fun unreadContentDescription(resources: Resources, count: Int): CharSequence =
+			resources.getQuantityString(
+				R.plurals.connector_thread_unread_messages,
+				count,
+				count,
+			)
 	}
 }

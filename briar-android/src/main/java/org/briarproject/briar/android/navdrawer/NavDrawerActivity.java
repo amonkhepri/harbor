@@ -167,6 +167,13 @@ public class NavDrawerActivity extends BriarActivity implements
 		};
 		drawerLayout.addDrawerListener(drawerToggle);
 		navigation.setNavigationItemSelectedListener(this);
+		toolbar.setOnClickListener(v -> {
+			if (!drawerLayout.isDrawerOpen(START) &&
+					drawerLayout.getDrawerLockMode(START) != LOCK_MODE_LOCKED_CLOSED) {
+				drawerLayout.openDrawer(START);
+			}
+		});
+		drawerToggle.syncState();
 
 		// Wait for the drawer to be laid out before trying to position the
 		// onboarding tap target
@@ -284,8 +291,19 @@ public class NavDrawerActivity extends BriarActivity implements
 	}
 
 	@Override
+	public boolean onOptionsItemSelected(MenuItem item) {
+		if (drawerToggle.onOptionsItemSelected(item)) {
+			return true;
+		}
+		return super.onOptionsItemSelected(item);
+	}
+
+	@Override
 	public boolean onNavigationItemSelected(@NonNull MenuItem item) {
 		drawerLayout.closeDrawer(START);
+		if (drawerLayout.getDrawerLockMode(START) == LOCK_MODE_LOCKED_CLOSED) {
+			return false;
+		}
 		if (item.getItemId() == R.id.nav_btn_lock) {
 			lockManager.setLocked(true);
 			ActivityCompat.finishAfterTransition(this);

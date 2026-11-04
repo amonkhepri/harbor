@@ -11,5 +11,6 @@ internal data class FakeConnectorInboxThreadItem(
 	override val previewText: String = "",
 	override val previewType: ConnectorMessageType = ConnectorMessageType.TEXT,
 	override val isLastMessageOutgoing: Boolean = false,
-	override val isPreviewLoading: Boolean = false,
+	override val unreadCount: Int? = null,
+	override val isMarkedUnread: Boolean? = null,
 ) : ConnectorInboxThreadItem

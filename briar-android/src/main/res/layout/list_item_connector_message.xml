@@ -8,6 +8,48 @@
 	android:paddingEnd="@dimen/margin_activity_horizontal"
 	android:paddingBottom="@dimen/margin_medium">
 
+	<LinearLayout
+		android:id="@+id/connectorFileLayout"
+		android:layout_width="match_parent"
+		android:layout_height="wrap_content"
+		android:gravity="center_vertical"
+		android:orientation="horizontal"
+		android:visibility="gone">
+
+		<ImageView
+			android:id="@+id/connectorFileIcon"
+			android:layout_width="32dp"
+			android:layout_height="32dp"
+			android:layout_marginEnd="@dimen/margin_small"
+			android:contentDescription="@null"
+			android:src="@drawable/ic_file" />
+
+		<LinearLayout
+			android:layout_width="0dp"
+			android:layout_height="wrap_content"
+			android:layout_weight="1"
+			android:orientation="vertical">
+
+			<TextView
+				android:id="@+id/connectorFileName"
+				android:layout_width="match_parent"
+				android:layout_height="wrap_content"
+				android:ellipsize="middle"
+				android:maxLines="1"
+				android:textColor="?android:attr/textColorPrimary"
+				android:textSize="@dimen/text_size_medium" />
+
+			<TextView
+				android:id="@+id/connectorFileDetails"
+				android:layout_width="match_parent"
+				android:layout_height="wrap_content"
+				android:textColor="?android:attr/textColorSecondary"
+				android:textSize="@dimen/text_size_small" />
+
+		</LinearLayout>
+
+	</LinearLayout>
+
 	<TextView
 		android:id="@+id/connectorMessageText"
 		android:layout_width="match_parent"

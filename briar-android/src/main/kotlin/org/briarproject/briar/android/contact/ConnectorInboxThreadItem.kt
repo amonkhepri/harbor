@@ -15,7 +15,10 @@ interface ConnectorInboxThreadItem : InboxThreadItem {
 
 	val isLastMessageOutgoing: Boolean
 
-	val isPreviewLoading: Boolean
+	val unreadCount: Int?
+		get() = null
+	val isMarkedUnread: Boolean?
+		get() = null
 
 	override val stableId: String
 		get() = "${connectorSource.id}:$connectorThreadId"

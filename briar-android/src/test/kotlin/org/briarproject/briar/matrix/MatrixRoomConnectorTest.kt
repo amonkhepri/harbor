@@ -19,6 +19,53 @@ import org.junit.Test
 import java.util.concurrent.atomic.AtomicLong
 
 class MatrixRoomConnectorTest {
+	@Test fun typingRequiresAuthorizationAndFencesQueuedStarts() {
+		val auth = FakeMatrixAuthSession(MatrixAuthState.CREDENTIAL_ENTRY)
+		var preparations = 0
+		var queued: (() -> Boolean)? = null
+		val sender = object : MatrixMessageSendClient by FakeMessageSendClient(true) {
+			override fun prepareTyping(
+				roomId: String,
+			): org.briarproject.briar.api.connector.ConnectorTypingSender.PreparedTyping {
+				preparations++
+				return object : org.briarproject.briar.api.connector.ConnectorTypingSender.PreparedTyping {
+					override fun isCurrent() = true
+					override fun send(typing: Boolean, wanted: () -> Boolean) {
+						queued = wanted
+					}
+				}
+			}
+		}
+		val connector = connector(authSession = auth, messageSendClient = sender)
+		assertNull(connector.prepareTyping("room"))
+		assertEquals(0, preparations)
+		auth.state = MatrixAuthState.READY
+		val prepared = connector.prepareTyping("room")!!
+		prepared.send(true) { true }
+		assertTrue(queued!!.invoke())
+		auth.state = MatrixAuthState.CREDENTIAL_ENTRY
+		assertFalse(prepared.isCurrent())
+		assertFalse(queued!!.invoke())
+	}
+
+	@Test fun leavePreparationRequiresAuthorizationAndUsesSelectedRoom() {
+		val auth = FakeMatrixAuthSession(MatrixAuthState.CREDENTIAL_ENTRY)
+		var preparedRoom: String? = null
+		val sender = object : MatrixMessageSendClient by FakeMessageSendClient(true) {
+			override fun prepareLeave(
+				roomId: String,
+			): org.briarproject.briar.api.connector.ConnectorRoomLeaver.PreparedLeave? {
+				preparedRoom = roomId
+				return null
+			}
+		}
+		val connector = connector(authSession = auth, messageSendClient = sender)
+		assertNull(connector.prepareLeave("room"))
+		assertNull(preparedRoom)
+		auth.state = MatrixAuthState.READY
+		connector.prepareLeave("room")
+		assertEquals("room", preparedRoom)
+	}
 
 	@Test
 	fun `enabled and reports authorized only when the auth session is ready`() {
@@ -55,6 +102,81 @@ class MatrixRoomConnectorTest {
 		assertEquals("", thread.latestMessageText)
 		assertFalse(thread.isLatestMessageOutgoing)
 		assertEquals(10, roomSnapshotClient.lastRequestedLimit)
+		assertNull(thread.unreadCount)
+	}
+
+	@Test
+	fun `topic lookup never enumerates rooms and fails closed without authorization`() {
+		val auth = FakeMatrixAuthSession(MatrixAuthState.READY)
+		val requestedRooms = mutableListOf<String>()
+		val connector = connector(
+			roomSnapshotClient = object : MatrixRoomSnapshotClient {
+				override fun getJoinedRooms(limit: Int): List<MatrixRoomSnapshot> =
+					error("Topic reads must not enumerate rooms or unread state")
+
+				override fun getRoomTopic(roomId: String): String? {
+					requestedRooms.add(roomId)
+					return "Purpose"
+				}
+			},
+			authSession = auth,
+		)
+		assertEquals("Purpose", connector.getThreadTopic("!a"))
+		auth.state = MatrixAuthState.CREDENTIAL_ENTRY
+		assertNull(connector.getThreadTopic("!a"))
+		assertEquals(listOf("!a"), requestedRooms)
+	}
+
+	@Test
+	fun `topics follow selected room and disappear without authorization`() {
+		val auth = FakeMatrixAuthSession(MatrixAuthState.READY)
+		val rooms = listOf(
+			MatrixRoomSnapshot("!a", "Alpha", topic = "Purpose"),
+			MatrixRoomSnapshot("!b", "Beta", topic = ""),
+			MatrixRoomSnapshot("!c", "Gamma"),
+		)
+		val connector = connector(
+			roomSnapshotClient = FakeRoomSnapshotClient(rooms),
+			messageSnapshotClient = FakeMessageSnapshotClient(emptyList()),
+			authSession = auth,
+		)
+		for (room in rooms) {
+			assertEquals(room.topic, connector.getThreadTopic(room.roomId))
+			assertEquals(
+				room.topic,
+				connector.getRecentThreads(10).first {
+					it.threadId == room.roomId
+				}.topic,
+			)
+		}
+		assertNull(connector.getThreadTopic("!missing"))
+		auth.state = MatrixAuthState.CREDENTIAL_ENTRY
+		assertNull(connector.getThreadTopic("!a"))
+	}
+
+	@Test
+	fun `getRecentThreads carries unread count from room snapshot`() {
+		val roomSnapshotClient = FakeRoomSnapshotClient(
+			listOf(
+				MatrixRoomSnapshot("!a:example.org", "Alpha", unreadCount = 5),
+				MatrixRoomSnapshot("!b:example.org", "Beta", unreadCount = 0, isMarkedUnread = true),
+				MatrixRoomSnapshot("!c:example.org", "Gamma", unreadCount = null),
+			),
+		)
+		val connector = connector(
+			roomSnapshotClient = roomSnapshotClient,
+			messageSnapshotClient = FakeMessageSnapshotClient(emptyList()),
+			authSession = FakeMatrixAuthSession(MatrixAuthState.READY),
+		)
+
+		val threads = connector.getRecentThreads(10)
+
+		assertEquals(3, threads.size)
+		assertEquals(5, threads[0].unreadCount)
+		assertEquals(0, threads[1].unreadCount)
+		assertEquals(true, threads[1].isMarkedUnread)
+		assertNull(threads[2].isMarkedUnread)
+		assertNull(threads[2].unreadCount)
 	}
 
 	@Test
@@ -413,6 +535,69 @@ class MatrixRoomConnectorTest {
 		// Should still be the old one, verifying no further call
 		assertEquals("!a:example.org", messageSendClient.lastMarkReadRoomId)
 	}
+
+	@Test
+	fun `markThreadRead success does not clear thread unread count until next room snapshot`() {
+		var snapshots = listOf(
+			MatrixRoomSnapshot("!a:example.org", "Alpha", unreadCount = 4),
+		)
+		val roomSnapshotClient = object : MatrixRoomSnapshotClient {
+			override fun getJoinedRooms(limit: Int): List<MatrixRoomSnapshot> = snapshots
+		}
+		val messageSendClient = FakeMessageSendClient(true)
+		val connector = connector(
+			roomSnapshotClient = roomSnapshotClient,
+			messageSendClient = messageSendClient,
+			authSession = FakeMatrixAuthSession(MatrixAuthState.READY),
+		)
+
+		val initialThreads = connector.getRecentThreads(10)
+		assertEquals(4, initialThreads.single().unreadCount)
+
+		val marked = connector.markThreadRead("!a:example.org")
+		assertTrue(marked)
+
+		val threadsAfterMark = connector.getRecentThreads(10)
+		assertEquals(4, threadsAfterMark.single().unreadCount)
+
+		snapshots = listOf(
+			MatrixRoomSnapshot("!a:example.org", "Alpha", unreadCount = 0),
+		)
+		val nextThreads = connector.getRecentThreads(10)
+		assertEquals(0, nextThreads.single().unreadCount)
+	}
+
+	@Test
+	fun `markThreadRead failure does not clear thread unread count until next room snapshot`() {
+		var snapshots = listOf(
+			MatrixRoomSnapshot("!a:example.org", "Alpha", unreadCount = 4),
+		)
+		val roomSnapshotClient = object : MatrixRoomSnapshotClient {
+			override fun getJoinedRooms(limit: Int): List<MatrixRoomSnapshot> = snapshots
+		}
+		val messageSendClient = FakeMessageSendClient(false)
+		val connector = connector(
+			roomSnapshotClient = roomSnapshotClient,
+			messageSendClient = messageSendClient,
+			authSession = FakeMatrixAuthSession(MatrixAuthState.READY),
+		)
+
+		val initialThreads = connector.getRecentThreads(10)
+		assertEquals(4, initialThreads.single().unreadCount)
+
+		val marked = connector.markThreadRead("!a:example.org")
+		assertFalse(marked)
+
+		val threadsAfterMark = connector.getRecentThreads(10)
+		assertEquals(4, threadsAfterMark.single().unreadCount)
+
+		snapshots = listOf(
+			MatrixRoomSnapshot("!a:example.org", "Alpha", unreadCount = 2),
+		)
+		val nextThreads = connector.getRecentThreads(10)
+		assertEquals(2, nextThreads.single().unreadCount)
+	}
+
 	private fun connector(
 		roomSnapshotClient: MatrixRoomSnapshotClient = FakeRoomSnapshotClient(emptyList()),
 		messageSnapshotClient: MatrixMessageSnapshotClient = FakeMessageSnapshotClient(emptyList()),
@@ -431,6 +616,9 @@ class MatrixRoomConnectorTest {
 
 	private class FakeRoomSnapshotClient(private val snapshots: List<MatrixRoomSnapshot>) :
 		MatrixRoomSnapshotClient {
+		override fun getRoomTopic(roomId: String): String? =
+			snapshots.firstOrNull { it.roomId == roomId }?.topic
+
 		var lastRequestedLimit: Int? = null
 			private set
 

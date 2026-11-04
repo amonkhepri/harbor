@@ -1,7 +1,10 @@
 package org.briarproject.briar.matrix
 
+import org.briarproject.briar.api.connector.ConnectorAttachmentMetadata
 import org.briarproject.briar.api.connector.ConnectorMessageType
 import org.briarproject.briar.api.connector.ConnectorReactionSummary
+import org.briarproject.briar.api.connector.ConnectorRoomObserver.RoomSubscription
+import org.briarproject.briar.api.connector.ConnectorTypingObserver.TypingSubscription
 
 /**
  * Narrow, fakeable boundary over recent-message reading for one joined Matrix room on an SDK
@@ -28,6 +31,21 @@ interface MatrixMessageSnapshotClient {
 	 * "loaded, zero messages". A non-positive [limit] returns an empty list immediately.
 	 */
 	fun getRecentMessages(roomId: String, limit: Int): List<MatrixMessageSnapshot>?
+
+	/**
+	 * Subscribes to live timeline updates for [roomId] (MX-045). Returns null if no session
+	 * is retained or [roomId] cannot be observed.
+	 */
+	fun observeRoom(roomId: String, onUpdate: () -> Unit): RoomSubscription? = null
+
+	/**
+	 * Subscribes to typing notifications for [roomId] (MX-047). Returns null if no session
+	 * is retained or [roomId] cannot be observed.
+	 */
+	fun observeTyping(
+		roomId: String,
+		onTypingChanged: (isTyping: Boolean) -> Unit,
+	): TypingSubscription? = null
 }
 
 /**
@@ -44,4 +62,5 @@ data class MatrixMessageSnapshot(
 	val isEdited: Boolean = false,
 	val isReply: Boolean = false,
 	val reactions: List<ConnectorReactionSummary> = emptyList(),
+	val attachment: ConnectorAttachmentMetadata? = null,
 )

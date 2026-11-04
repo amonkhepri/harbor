@@ -143,9 +143,12 @@
 	<string name="connector_thread_source_content_description">%1$s source</string>
 	<string name="connector_thread_default_source_content_description">Connector source</string>
 	<string name="connector_thread_title_fallback">Chat</string>
-	<string name="connector_thread_preview_loading">Loading preview...</string>
 	<string name="connector_thread_preview_empty">No recent text</string>
 	<string name="connector_thread_preview_outgoing">Outgoing: %1$s</string>
+	<plurals name="connector_thread_unread_messages">
+		<item quantity="one">%d unread message</item>
+		<item quantity="other">%d unread messages</item>
+	</plurals>
 	<string name="connector_message_photo">Photo</string>
 	<string name="connector_message_file">File</string>
 	<string name="connector_message_deleted">Message deleted</string>
@@ -164,6 +167,7 @@
 	<string name="connector_conversation_disabled">%1$s connector unavailable in this build</string>
 	<string name="connector_conversation_account_unavailable">%1$s account unavailable</string>
 	<string name="connector_conversation_load_failed">%1$s messages could not be loaded</string>
+	<string name="connector_conversation_retry_refresh">Retry</string>
 	<string name="connector_conversation_refresh">Refresh messages</string>
 	<string name="connector_conversation_direction_incoming">Incoming</string>
 	<string name="connector_conversation_direction_outgoing">Outgoing</string>
@@ -185,6 +189,10 @@
 	<string name="connector_message_sending">Sending…</string>
 	<string name="connector_message_sent">Sent</string>
 	<string name="connector_inbox_refresh">Refresh connector inbox</string>
+	<string name="inbox_filter_title">Filter conversations</string>
+	<string name="inbox_filter_all">All</string>
+	<string name="inbox_filter_matrix">Matrix</string>
+	<string name="inbox_filter_briar">Briar</string>
 
 	<!-- Notifications -->
 	<string name="reminder_notification_title">Signed out of Harbor</string>
@@ -1012,4 +1020,16 @@
     <string name="connector_conversation_attach_file">Send file (up to 10 MiB)</string>
     <string name="connector_file_sent">File sent</string>
     <string name="connector_file_failed">Could not send file. Choose a non-empty file up to 10 MiB and try again.</string>
+	<string name="connector_mark_unread">Mark unread and return to inbox</string>
+	<string name="connector_mark_unread_failed">Could not mark unread. Please try again.</string>
+	<string name="connector_leave_room">Leave room</string>
+	<string name="connector_leave_room_confirm">Leave room? You will need an invitation to rejoin private rooms.</string>
+	<string name="connector_leave_room_failed">Could not leave room.</string>
+	<string name="connector_leave_room_retry">Retry</string>
+	<string name="connector_leave_room_action">Leave</string>
+	<string name="connector_thread_marked_unread">Marked unread</string>
+	<string name="connector_file_details">%1$s • %2$s</string>
+	<string name="connector_file_accessibility">%1$s, %2$s</string>
+	<string name="connector_file_accessibility_with_details">%1$s, %2$s, %3$s</string>
+	<string name="connector_typing_indicator">Typing…</string>
 </resources>

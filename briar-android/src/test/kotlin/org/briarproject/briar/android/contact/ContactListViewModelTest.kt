@@ -276,6 +276,43 @@ class ContactListViewModelTest {
 	}
 
 	@Test
+	fun testTransientFailurePreservesLoadedThreadsWithUnreadCount() {
+		val connector = mock(ReadOnlyConnector::class.java)
+		val thread = connectorThread(ConnectorSources.MATRIX, "!room:example").copy(unreadCount = 5)
+		`when`(connector.source).thenReturn(ConnectorSources.MATRIX)
+		`when`(connector.isEnabled()).thenReturn(true)
+		`when`(connector.isAuthorized()).thenReturn(true)
+		`when`(connector.getRecentThreads(20))
+			.thenReturn(listOf(thread))
+			.thenThrow(IllegalStateException())
+			.thenReturn(listOf(thread.copy(unreadCount = 0)))
+		val viewModel = createViewModel(connector)
+
+		viewModel.loadConnectorThreads()
+		val initialItems = getOrAwaitValue(viewModel.connectorThreadItems)
+		assertEquals(1, initialItems.size)
+		assertEquals(5, initialItems.single().unreadCount)
+
+		viewModel.loadConnectorThreads()
+		val preservedItems = getOrAwaitValue(viewModel.connectorThreadItems)
+		assertEquals(1, preservedItems.size)
+		assertEquals(5, preservedItems.single().unreadCount)
+		assertEquals(
+			LOAD_FAILED,
+			getOrAwaitValue(viewModel.connectorAvailabilityStates)[ConnectorSources.MATRIX],
+		)
+
+		viewModel.loadConnectorThreads()
+		val updatedItems = getOrAwaitValue(viewModel.connectorThreadItems)
+		assertEquals(1, updatedItems.size)
+		assertEquals(0, updatedItems.single().unreadCount)
+		assertEquals(
+			NONE,
+			getOrAwaitValue(viewModel.connectorAvailabilityStates)[ConnectorSources.MATRIX],
+		)
+	}
+
+	@Test
 	fun testDeauthorizationClearsLoadedTelegramThreads() {
 		val connector = mock(ReadOnlyConnector::class.java)
 		`when`(connector.source).thenReturn(ConnectorSources.TELEGRAM)
@@ -332,6 +369,61 @@ class ContactListViewModelTest {
 			// Best-effort: if the guard's storage shape changes, the affected test fails
 			// loudly on its own assertions instead of here.
 		}
+	}
+
+	@Test
+	fun testSourceFilterDefaultsToAllAndUpdatesOnSet() {
+		val viewModel = createViewModel()
+		assertEquals(InboxSourceFilter.All, getOrAwaitValue(viewModel.sourceFilter))
+
+		viewModel.setSourceFilter(InboxSourceFilter.Matrix)
+		assertEquals(InboxSourceFilter.Matrix, getOrAwaitValue(viewModel.sourceFilter))
+
+		viewModel.setSourceFilter(InboxSourceFilter.Briar)
+		assertEquals(InboxSourceFilter.Briar, getOrAwaitValue(viewModel.sourceFilter))
+
+		viewModel.setSourceFilter(InboxSourceFilter.All)
+		assertEquals(InboxSourceFilter.All, getOrAwaitValue(viewModel.sourceFilter))
+	}
+
+	@Test
+	fun testLoadConnectorThreadsResetsFilterToAllWhenNoConnectorsEnabled() {
+		val viewModel = createViewModel()
+		viewModel.setSourceFilter(InboxSourceFilter.Matrix)
+		assertEquals(InboxSourceFilter.Matrix, getOrAwaitValue(viewModel.sourceFilter))
+
+		viewModel.loadConnectorThreads()
+		assertEquals(InboxSourceFilter.All, getOrAwaitValue(viewModel.sourceFilter))
+	}
+
+	@Test
+	fun testLoadConnectorThreadsResetsFilterWhenConnectorBecomesDisabled() {
+		val matrixConnector = connector(ConnectorSources.MATRIX, mock(ConnectorThread::class.java))
+		`when`(matrixConnector.isEnabled()).thenReturn(true)
+		`when`(matrixConnector.isAuthorized()).thenReturn(true)
+		val viewModel = createViewModel(matrixConnector)
+
+		viewModel.setSourceFilter(InboxSourceFilter.Matrix)
+		assertEquals(InboxSourceFilter.Matrix, getOrAwaitValue(viewModel.sourceFilter))
+
+		`when`(matrixConnector.isEnabled()).thenReturn(false)
+		viewModel.loadConnectorThreads()
+
+		assertEquals(InboxSourceFilter.All, getOrAwaitValue(viewModel.sourceFilter))
+	}
+
+	@Test
+	fun testLoadConnectorThreadsPreservesFilterWhenConnectorsEnabled() {
+		val matrixConnector = connector(ConnectorSources.MATRIX, mock(ConnectorThread::class.java))
+		`when`(matrixConnector.isEnabled()).thenReturn(true)
+		`when`(matrixConnector.isAuthorized()).thenReturn(true)
+		val viewModel = createViewModel(matrixConnector)
+
+		viewModel.setSourceFilter(InboxSourceFilter.Matrix)
+		assertEquals(InboxSourceFilter.Matrix, getOrAwaitValue(viewModel.sourceFilter))
+
+		viewModel.loadConnectorThreads()
+		assertEquals(InboxSourceFilter.Matrix, getOrAwaitValue(viewModel.sourceFilter))
 	}
 
 	private fun connector(source: ConnectorSource, thread: ConnectorThread) =

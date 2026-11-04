@@ -1,6 +1,7 @@
 package org.briarproject.briar.android.connector
 
 import android.app.Application
+import androidx.appcompat.app.AlertDialog
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.ImageButton
@@ -14,6 +15,8 @@ import org.briarproject.briar.api.connector.ConnectorMessage
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult
 import org.briarproject.briar.api.connector.ConnectorMessageType
 import org.briarproject.briar.api.connector.ConnectorReadMarker
+import org.briarproject.briar.api.connector.ConnectorRoomLeaver
+import org.briarproject.briar.api.connector.ConnectorUnreadMarker
 import org.briarproject.briar.api.connector.ConnectorSources
 import org.briarproject.briar.api.connector.ConnectorThread
 import org.briarproject.briar.api.connector.ReadOnlyConnector
@@ -32,6 +35,7 @@ class ConnectorReadMarkerTest {
 	private open class FakeConnector : ReadOnlyConnector {
 		override val source get() = ConnectorSources.TELEGRAM
 		var authorized = true
+		var enabled = true
 		var reads = 0
 		var result: ConnectorMessageReadResult = ConnectorMessageReadResult.Success(
 			listOf(
@@ -47,7 +51,7 @@ class ConnectorReadMarkerTest {
 				),
 			),
 		)
-		override fun isEnabled() = true
+		override fun isEnabled() = enabled
 		override fun isAuthorized() = authorized
 		override fun getRecentThreads(limit: Int) = emptyList<ConnectorThread>()
 		override fun getRecentMessageReadResult(
@@ -61,10 +65,37 @@ class ConnectorReadMarkerTest {
 
 	private class MarkingConnector :
 		FakeConnector(),
-		ConnectorReadMarker {
+		ConnectorReadMarker,
+		ConnectorRoomLeaver,
+		ConnectorUnreadMarker {
+		var leaves = 0
+		var leaveResult = true
+		var beforeLeave: () -> Unit = {}
+		override fun prepareLeave(threadId: String) = object : ConnectorRoomLeaver.PreparedLeave {
+			override fun isCurrent() = authorized
+			override fun leave(): Boolean {
+				leaves++
+				beforeLeave()
+				return leaveResult
+			}
+		}
 		override val source get() = ConnectorSources.MATRIX
 		var marks = 0
+		var unreadMarks = 0
+		var unreadResult = true
+		var beforeRead: () -> Unit = {}
+		var beforeUnread: () -> Unit = {}
+		override fun prepareMarkUnread(threadId: String) =
+			object : ConnectorUnreadMarker.PreparedMarkUnread {
+				override fun isCurrent() = authorized
+				override fun markUnread(): Boolean {
+					beforeUnread()
+					unreadMarks++
+					return unreadResult
+				}
+			}
 		override fun markThreadRead(threadId: String): Boolean {
+			beforeRead()
 			assertEquals("room", threadId)
 			marks++
 			return true
@@ -77,6 +108,19 @@ class ConnectorReadMarkerTest {
 		Localizer.initialize(RuntimeEnvironment.getApplication().getSharedPreferences("test", 0))
 		val activity = Robolectric.buildActivity(ConnectorConversationActivity::class.java).get()
 		activity.setTheme(R.style.BriarTheme)
+		val savedState = androidx.activity.ComponentActivity::class.java
+			.getDeclaredField("mSavedStateRegistryController").apply { isAccessible = true }
+			.get(activity) as androidx.savedstate.SavedStateRegistryController
+		savedState.performRestore(null)
+		val fragments = androidx.fragment.app.FragmentActivity::class.java
+			.getDeclaredField("mFragments").apply { isAccessible = true }
+			.get(activity) as androidx.fragment.app.FragmentController
+		fragments.attachHost(null)
+		fragments.dispatchCreate()
+		fragments.dispatchActivityCreated()
+		fragments.dispatchStart()
+		fragments.dispatchResume()
+
 		fun set(name: String, value: Any?) {
 			ConnectorConversationActivity::class.java.getDeclaredField(name).apply {
 				isAccessible = true
@@ -114,6 +158,249 @@ class ConnectorReadMarkerTest {
 			Boolean::class.javaPrimitiveType,
 			Boolean::class.javaPrimitiveType,
 		).apply { isAccessible = true }.invoke(activity, false, initial)
+	}
+
+	private fun markUnread(activity: ConnectorConversationActivity) {
+		ConnectorConversationActivity::class.java.getDeclaredMethod("markUnreadAndClose")
+			.apply { isAccessible = true }.invoke(activity)
+	}
+
+	private fun leaveDialog(activity: ConnectorConversationActivity): AlertDialog {
+		ConnectorConversationActivity::class.java.getDeclaredMethod("confirmLeaveRoom")
+			.apply { isAccessible = true }.invoke(activity)
+		return shownLeaveDialog(activity)!!
+	}
+
+	private fun shownLeaveDialog(activity: ConnectorConversationActivity): AlertDialog? = (
+		activity.supportFragmentManager.findFragmentByTag(ConnectorLeaveRoomDialogFragment.TAG)
+			as? ConnectorLeaveRoomDialogFragment
+		)?.dialog as? AlertDialog
+
+	private fun field(activity: ConnectorConversationActivity, name: String): Any? =
+		ConnectorConversationActivity::class.java.getDeclaredField(name)
+			.apply { isAccessible = true }.get(activity)
+
+	@Test fun restoredLeaveTargetUsesCurrentActivityAndRejectsDifferentRoom() {
+		val original = ConnectorLeaveRoomDialogFragment.newInstance("room")
+		val parcel = android.os.Parcel.obtain()
+		val arguments = try {
+			parcel.writeBundle(original.requireArguments())
+			parcel.setDataPosition(0)
+			parcel.readBundle(javaClass.classLoader)!!
+		} finally {
+			parcel.recycle()
+		}
+		val restored = androidx.fragment.app.FragmentFactory().instantiate(
+			javaClass.classLoader,
+			ConnectorLeaveRoomDialogFragment::class.java.name,
+		) as ConnectorLeaveRoomDialogFragment
+		restored.arguments = arguments
+		assertEquals("room", restored.requireArguments().getString("threadId"))
+		val connector = MarkingConnector()
+		val recreated = activity(connector)
+		recreated.confirmLeaveRoom("other")
+		assertEquals(0, work.size)
+		restored.showNow(recreated.supportFragmentManager, ConnectorLeaveRoomDialogFragment.TAG)
+		(restored.requireDialog() as AlertDialog).getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+		org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+		work.removeAt(0).run()
+		assertEquals(1, connector.leaves)
+		assertEquals(true, recreated.isFinishing)
+	}
+
+	@Test fun leaveRequiresConfirmationAndSuppressesDuplicates() {
+		val connector = MarkingConnector()
+		val activity = activity(connector)
+		leaveDialog(activity).getButton(AlertDialog.BUTTON_NEGATIVE).performClick()
+		org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+		assertEquals(0, work.size)
+		assertEquals(0, connector.leaves)
+		val dialog = leaveDialog(activity)
+		dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+		dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+		org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+		assertEquals(1, work.size)
+		assertEquals(0, connector.leaves)
+		work.removeAt(0).run()
+		assertEquals(1, connector.leaves)
+		assertEquals(true, activity.isFinishing)
+	}
+
+	@Test fun failedLeaveShowsRetryAndKeepsConversationOpen() {
+		val connector = MarkingConnector().apply { leaveResult = false }
+		val activity = activity(connector)
+		leaveDialog(activity).getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+		org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+		work.removeAt(0).run()
+		assertEquals(false, activity.isFinishing)
+		assertEquals(null, shownLeaveDialog(activity))
+		org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+		val root = (field(activity, "list") as BriarRecyclerView).parent as FrameLayout
+		assertEquals(
+			activity.getString(R.string.connector_leave_room_failed),
+			root.findViewById<TextView>(com.google.android.material.R.id.snackbar_text).text,
+		)
+		connector.leaveResult = true
+		root.findViewById<TextView>(com.google.android.material.R.id.snackbar_action).performClick()
+		shownLeaveDialog(activity)!!.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+		org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+		work.removeAt(0).run()
+		assertEquals(true, activity.isFinishing)
+	}
+
+	@Test fun leaveFencesQueuedWorkAndCallbacks() {
+		for (duringCall in listOf(false, true)) {
+			for (change in listOf("room", "destroy", "logout")) {
+				val connector = MarkingConnector()
+				val activity = activity(connector)
+				val invalidate = {
+					when (change) {
+						"room" -> ConnectorConversationActivity::class.java.getDeclaredField("threadId")
+							.apply { isAccessible = true }.set(activity, "other")
+						"destroy" -> (field(activity, "leaveOwner") as ConnectorConversationLoadOwner).invalidate()
+						else -> connector.authorized = false
+					}
+				}
+				leaveDialog(activity).getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+				org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+				if (duringCall) connector.beforeLeave = invalidate else invalidate()
+				work.removeAt(0).run()
+				assertEquals(if (duringCall) 1 else 0, connector.leaves)
+				assertEquals(false, activity.isFinishing)
+			}
+		}
+	}
+
+	@Test fun leaveMenuRequiresMatrixCapabilityAndAuthorization() {
+		val connector = MarkingConnector()
+		val activity = activity(connector)
+		val menu = android.widget.PopupMenu(activity, FrameLayout(activity)).menu
+		activity.menuInflater.inflate(R.menu.connector_conversation_actions, menu)
+		val action = menu.findItem(R.id.action_leave_connector_room)
+		activity.onPrepareOptionsMenu(menu)
+		assertEquals(true, action.isVisible)
+		leaveDialog(activity).getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+		org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+		activity.onPrepareOptionsMenu(menu)
+		assertEquals(false, action.isEnabled)
+		connector.authorized = false
+		activity.onPrepareOptionsMenu(menu)
+		assertEquals(false, action.isVisible)
+		activity(FakeConnector()).onPrepareOptionsMenu(menu)
+		assertEquals(false, action.isVisible)
+		activity(object : FakeConnector() {
+			override val source get() = org.briarproject.briar.api.connector.ConnectorSource(
+				"briar",
+				"Briar",
+			)
+		}).onPrepareOptionsMenu(menu)
+		assertEquals(false, action.isVisible)
+	}
+
+	@Test fun unreadSuccessClosesAndSuppressesDuplicateAndQueuedReads() {
+		val connector = MarkingConnector()
+		val activity = activity(connector)
+		load(activity, initial = true)
+		markUnread(activity)
+		markUnread(activity)
+		assertEquals(2, work.size)
+		work.removeAt(0).run()
+		assertEquals(0, connector.marks)
+		work.removeAt(0).run()
+		assertEquals(1, connector.unreadMarks)
+		assertEquals(true, activity.isFinishing)
+	}
+
+	@Test fun unreadFailureStaysOpenAndRestoresReadsAndRetry() {
+		val connector = MarkingConnector().apply { unreadResult = false }
+		val activity = activity(connector)
+		markUnread(activity)
+		work.removeAt(0).run()
+		assertEquals(false, activity.isFinishing)
+		load(activity, initial = true)
+		work.removeAt(0).run()
+		assertEquals(1, connector.marks)
+		connector.unreadResult = true
+		markUnread(activity)
+		work.removeAt(0).run()
+		assertEquals(true, activity.isFinishing)
+	}
+
+	@Test fun logoutDuringUnreadFencesNavigation() {
+		val connector = MarkingConnector()
+		val activity = activity(connector)
+		connector.beforeUnread = { connector.authorized = false }
+		markUnread(activity)
+		work.removeAt(0).run()
+		assertEquals(false, activity.isFinishing)
+	}
+
+	@Test fun menuIsCapabilityGatedAndDisabledWhilePending() {
+		val connector = MarkingConnector()
+		val activity = activity(connector)
+		val menu = android.widget.PopupMenu(activity, FrameLayout(activity)).menu
+		activity.menuInflater.inflate(R.menu.connector_conversation_actions, menu)
+		val action = menu.findItem(R.id.action_mark_unread_connector_conversation)
+		activity.onPrepareOptionsMenu(menu)
+		assertEquals(true, action.isVisible)
+		assertEquals(activity.getString(R.string.connector_mark_unread), action.title)
+		activity.onOptionsItemSelected(action)
+		activity.onPrepareOptionsMenu(menu)
+		assertEquals(false, action.isEnabled)
+		connector.authorized = false
+		activity.onPrepareOptionsMenu(menu)
+		assertEquals(false, action.isVisible)
+		connector.authorized = true
+		connector.enabled = false
+		activity.onPrepareOptionsMenu(menu)
+		assertEquals(false, action.isVisible)
+		activity(FakeConnector()).onPrepareOptionsMenu(menu)
+		assertEquals(false, action.isVisible)
+	}
+
+	@Test fun destroyedScreenOrChangedRoomCannotRunQueuedUnread() {
+		for (changeRoom in listOf(false, true)) {
+			val connector = MarkingConnector()
+			val activity = activity(connector)
+			markUnread(activity)
+			if (changeRoom) {
+				ConnectorConversationActivity::class.java.getDeclaredField("threadId")
+					.apply { isAccessible = true }.set(activity, "other")
+			} else {
+				val owner = ConnectorConversationActivity::class.java.getDeclaredField("unreadOwner")
+					.apply { isAccessible = true }.get(activity) as ConnectorConversationLoadOwner
+				owner.invalidate()
+			}
+			work.removeAt(0).run()
+			assertEquals(0, connector.unreadMarks)
+			assertEquals(false, activity.isFinishing)
+		}
+	}
+
+	@Test fun delayedReadCompletesBeforeUnread() {
+		val connector = MarkingConnector()
+		val activity = activity(connector)
+		val entered = java.util.concurrent.CountDownLatch(1)
+		val release = java.util.concurrent.CountDownLatch(1)
+		connector.beforeRead = {
+			entered.countDown()
+			check(release.await(5, java.util.concurrent.TimeUnit.SECONDS))
+		}
+		connector.beforeUnread = { assertEquals(1, connector.marks) }
+		load(activity, initial = true)
+		val read = Thread(work.removeAt(0)).apply { start() }
+		check(entered.await(5, java.util.concurrent.TimeUnit.SECONDS))
+		markUnread(activity)
+		val unread = Thread(work.removeAt(0)).apply { start() }
+		release.countDown()
+		read.join(5000)
+		unread.join(5000)
+		assertEquals(false, read.isAlive)
+		assertEquals(false, unread.isAlive)
+		assertEquals(1, connector.unreadMarks)
+		load(activity)
+		work.removeAt(0).run()
+		assertEquals(1, connector.marks)
 	}
 
 	@Test fun openingAndNonemptyRefreshEachMarkOnceOnExecutor() {
@@ -166,5 +453,30 @@ class ConnectorReadMarkerTest {
 		load(activity)
 		work.removeAt(0).run()
 		assertEquals(2, connector.reads)
+		assertEquals(null, connector.getThreadTopic("room"))
+	}
+
+	@Test fun refreshRebindsTopicAndErrorsClearIt() {
+		var topic: String? = null
+		val connector = object : FakeConnector() {
+			override fun getThreadTopic(threadId: String) = topic
+		}
+		val activity = activity(connector)
+		val bar = requireNotNull(activity.supportActionBar)
+		for (next in listOf("First\nroom", "Second room", "", null)) {
+			load(activity)
+			assertEquals(ConnectorConversationActivity.topicSubtitle(topic), bar.subtitle)
+			topic = next
+			work.removeAt(0).run()
+			assertEquals(ConnectorConversationActivity.topicSubtitle(next), bar.subtitle)
+		}
+		topic = "Restored"
+		load(activity)
+		work.removeAt(0).run()
+		assertEquals("Restored", bar.subtitle)
+		connector.result = ConnectorMessageReadResult.LoadFailed
+		load(activity)
+		work.removeAt(0).run()
+		assertEquals(null, bar.subtitle)
 	}
 }

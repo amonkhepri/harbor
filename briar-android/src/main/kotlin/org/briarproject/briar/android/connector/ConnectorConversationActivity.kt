@@ -1,5 +1,6 @@
 package org.briarproject.briar.android.connector
 
+import android.app.Dialog
 import android.net.Uri
 import android.os.Bundle
 import android.os.Parcelable
@@ -15,6 +16,8 @@ import android.widget.ImageButton
 import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
+import androidx.appcompat.app.ActionBar
+import androidx.fragment.app.DialogFragment
 import androidx.lifecycle.ViewModelProvider
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.google.android.material.snackbar.Snackbar
@@ -38,6 +41,10 @@ import org.briarproject.briar.api.connector.ConnectorMessageDeleter
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult
 import org.briarproject.briar.api.connector.ConnectorMessageType
 import org.briarproject.briar.api.connector.ConnectorReadMarker
+import org.briarproject.briar.api.connector.ConnectorRoomLeaver
+import org.briarproject.briar.api.connector.ConnectorRoomObserver
+import org.briarproject.briar.api.connector.ConnectorTypingObserver
+import org.briarproject.briar.api.connector.ConnectorUnreadMarker
 import org.briarproject.briar.api.connector.ConnectorRegistry
 import org.briarproject.briar.api.connector.ConnectorSources
 import org.briarproject.briar.api.connector.ConnectorTextSender
@@ -45,7 +52,9 @@ import org.briarproject.briar.api.connector.ReadOnlyConnector
 import org.briarproject.nullsafety.MethodsNotNullByDefault
 import org.briarproject.nullsafety.ParametersNotNullByDefault
 import java.io.IOException
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executor
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
 
@@ -71,6 +80,27 @@ internal class ConnectorConversationLoadOwner {
 	}
 }
 
+internal class ConnectorConversationRetryOwner {
+	private val generations = ConcurrentHashMap<String, Long>()
+	private val invalidated = AtomicBoolean(false)
+
+	fun begin(echoId: String): Long {
+		if (invalidated.get()) return -1L
+		return generations.compute(echoId) { _, cur -> (cur ?: 0L) + 1L } ?: -1L
+	}
+
+	fun owns(echoId: String, gen: Long): Boolean =
+		!invalidated.get() && gen != -1L && generations[echoId] == gen
+
+	fun clear(echoId: String) {
+		generations.remove(echoId)
+	}
+	fun invalidate() {
+		invalidated.set(true)
+		generations.clear()
+	}
+}
+
 /**
  * Timeline for one connector-neutral thread (MX-012), read-only unless the connector also
  * implements [ConnectorTextSender] (MX-013), in which case a compose bar is shown for sending
@@ -93,6 +123,7 @@ class ConnectorConversationActivity : BriarActivity() {
 
 		private const val MESSAGE_LIMIT = 50
 		private const val REFRESH_INTERVAL_MS = 15_000L
+		internal const val TYPING_EXPIRY_MS = 5_000L
 		private const val STATE_LAYOUT_MANAGER = "layoutManager"
 		private const val DEFAULT_IMAGE_FILE_EXTENSION = "jpg"
 		private const val STATE_PENDING_IMAGE = "pendingImage"
@@ -141,6 +172,34 @@ class ConnectorConversationActivity : BriarActivity() {
 			imageSender: ConnectorImageSender?,
 		): Boolean = imageSender != null && connectorEnabled && authorized && hasValidThreadId(threadId)
 
+		internal fun bindTopic(actionBar: ActionBar?, topic: String?) {
+			actionBar?.subtitle = topicSubtitle(topic)
+		}
+
+		internal fun topicSubtitle(topic: String?): String? {
+			val text = StringBuilder()
+			var index = 0
+			while (topic != null && index < topic.length) {
+				val point = topic.codePointAt(index)
+				index += Character.charCount(point)
+				when {
+					Character.isWhitespace(point) || Character.isSpaceChar(point) -> {
+						if (text.isNotEmpty() && text.last() != ' ') text.append(' ')
+					}
+					Character.getType(point).toByte() !in
+						listOf(Character.CONTROL, Character.FORMAT, Character.SURROGATE) ->
+						text.appendCodePoint(point)
+				}
+			}
+			val normalized = text.toString().trim()
+			if (normalized.isEmpty()) return null
+			return if (normalized.codePointCount(0, normalized.length) > 120) {
+				normalized.substring(0, normalized.offsetByCodePoints(0, 119)).trimEnd() + "…"
+			} else {
+				normalized
+			}
+		}
+
 		internal fun titleText(title: String?, fallback: String): String {
 			if (title == null) return fallback
 			var index = 0
@@ -162,7 +221,8 @@ class ConnectorConversationActivity : BriarActivity() {
 		}
 	}
 
-	private val adapter = ConnectorConversationAdapter(::onDeleteMessageClicked)
+	private val adapter =
+		ConnectorConversationAdapter(::onDeleteMessageClicked, ::onRetrySendClicked)
 
 	@Inject
 	lateinit var connectorRegistry: ConnectorRegistry
@@ -179,6 +239,12 @@ class ConnectorConversationActivity : BriarActivity() {
 	private var imageSender: ConnectorImageSender? = null
 	private var fileSender: ConnectorFileSender? = null
 	private var readMarker: ConnectorReadMarker? = null
+	private val readStateLock = Any()
+	private val unreadOwner = ConnectorConversationLoadOwner()
+	private val leaveOwner = ConnectorConversationLoadOwner()
+	private var leavePending = false
+
+	@Volatile private var unreadPending = false
 	private lateinit var fileButton: ImageButton
 	private lateinit var fileUpload: ConnectorFileUploadState
 	private val fileLauncher =
@@ -187,6 +253,8 @@ class ConnectorConversationActivity : BriarActivity() {
 	private var threadId = ""
 	private lateinit var composeBar: View
 	private lateinit var composeText: EditText
+	private var typing: ConnectorTypingController? = null
+	private var composerResumed = false
 	private lateinit var sendButton: Button
 	private lateinit var attachButton: ImageButton
 	private var sendInFlight = false
@@ -201,11 +269,30 @@ class ConnectorConversationActivity : BriarActivity() {
 	// Not restored across recreation: matches MX-015's local-only echo scope boundary.
 	private var pendingImageEchoId: String? = null
 	private var pendingFileEchoId: String? = null
+	private val inFlightRetryIds = mutableSetOf<String>()
+	private val retryOwner = ConnectorConversationRetryOwner()
 
 	private val imageContentLauncher = registerForActivityResult(GetImageAdvanced(), ::onImageChosen)
 	private val imageDocumentLauncher =
 		registerForActivityResult(OpenImageDocumentAdvanced(), ::onImageChosen)
 	private var messageState = ConnectorConversationMessageListState()
+	private var retryRequested = false
+	private val retryCoalescer = ConnectorRoomUpdateCoalescer {
+		runOnUiThread {
+			if (!isFinishing && !isDestroyed) {
+				loadMessages(showLoading = messageState.messages.isEmpty())
+			}
+		}
+	}
+	private var loadFailedSnackbar: Snackbar? = null
+	private var lastLoadFailed = false
+	private var roomObserverSubscription: ConnectorRoomObserver.RoomSubscription? = null
+	private var roomUpdateCoalescer: ConnectorRoomUpdateCoalescer? = null
+	private lateinit var typingIndicator: TextView
+	private val typingIndicatorHandler = android.os.Handler(android.os.Looper.getMainLooper())
+	private val typingExpiryRunnable = Runnable { clearTypingIndicator() }
+	private var typingObserverSubscription: ConnectorTypingObserver.TypingSubscription? = null
+	private var typingGeneration: Any? = null
 	private var automaticRefreshRunning = false
 	private val automaticRefresh = Runnable {
 		if (!automaticRefreshRunning && !messageState.isLoading) loadMessages(showLoading = false)
@@ -240,13 +327,15 @@ class ConnectorConversationActivity : BriarActivity() {
 		supportActionBar?.apply {
 			setDisplayHomeAsUpEnabled(true)
 			this.title = title
-			subtitle = sourceName
+			subtitle = null
 		}
 
 		list = findViewById(R.id.connectorConversationList)
 		layoutManager = LinearLayoutManager(this).apply { stackFromEnd = true }
 		list.setLayoutManager(layoutManager)
 		list.setAdapter(adapter)
+		list.findViewById<View>(R.id.emptyAction)?.setOnClickListener { retryRefresh() }
+		typingIndicator = findViewById(R.id.connectorConversationTypingIndicator)
 
 		findBar = findViewById(R.id.connectorConversationFindBar)
 		findQuery = findViewById(R.id.connectorConversationFindQuery)
@@ -268,6 +357,39 @@ class ConnectorConversationActivity : BriarActivity() {
 		composeBar = findViewById(R.id.connectorConversationComposeBar)
 		composeText = findViewById(R.id.connectorConversationComposeText)
 		composeText.hint = getString(R.string.connector_conversation_compose_hint, sourceName)
+		restoreDraft(state)
+		composeText.addTextChangedListener(object : TextWatcher {
+			override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+			override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
+			override fun afterTextChanged(s: Editable?) {
+				if (!sendInFlight) {
+					saveDraft()
+				}
+			}
+		})
+		val typingSender = connector as? org.briarproject.briar.api.connector.ConnectorTypingSender
+		if (typingSender != null) {
+			val handler = android.os.Handler(android.os.Looper.getMainLooper())
+			typing = ConnectorTypingController(
+				{ typingSender.prepareTyping(threadId) },
+				{
+					composerResumed &&
+						composeText.hasFocus() &&
+						composeText.hasWindowFocus() &&
+						composeText.isEnabled &&
+						!sendInFlight &&
+						textSender != null &&
+						connector?.isEnabled() == true &&
+						connector?.isAuthorized() == true &&
+						hasValidThreadId(threadId)
+				},
+				android.os.SystemClock::elapsedRealtime,
+				{ task, delay -> handler.postDelayed(task, delay) },
+				{ handler.removeCallbacks(it) },
+			)
+			(composeText as? ConnectorComposeText)?.onUserEdit = { typing?.edited(it) }
+			composeText.setOnFocusChangeListener { _, focused -> if (!focused) typing?.stop() }
+		}
 		sendButton = findViewById(R.id.connectorConversationSendButton)
 		sendButton.setOnClickListener { onSendClicked() }
 		attachButton = findViewById(R.id.connectorConversationAttachButton)
@@ -355,14 +477,61 @@ class ConnectorConversationActivity : BriarActivity() {
 	override fun onStart() {
 		super.onStart()
 		list.startPeriodicUpdate(REFRESH_INTERVAL_MS, automaticRefresh)
+		startRoomObserver()
+		startTypingObserver()
 	}
 
 	override fun onStop() {
+		stopRoomObserver()
+		stopTypingObserver()
 		list.stopPeriodicUpdate()
 		super.onStop()
 	}
 
+	override fun onResume() {
+		super.onResume()
+		composerResumed = true
+	}
+
+	override fun onPause() {
+		composerResumed = false
+		typing?.stop()
+		saveDraft()
+		super.onPause()
+	}
+
+	internal fun restoreDraft(state: Bundle?) {
+		if (state == null && ::composeText.isInitialized) {
+			val sourceId = intent?.getStringExtra(SOURCE_ID) ?: connector?.source?.id
+			val draft = ConnectorDraftStore.getDraft(sourceId, threadId)
+			if (!draft.isNullOrEmpty()) {
+				composeText.setText(draft)
+				composeText.setSelection(composeText.length())
+			}
+		}
+	}
+
+	internal fun saveDraft() {
+		if (::composeText.isInitialized && !sendInFlight) {
+			val sourceId = intent?.getStringExtra(SOURCE_ID) ?: connector?.source?.id
+			ConnectorDraftStore.setDraft(sourceId, threadId, composeText.text?.toString())
+		}
+	}
+
+	override fun onWindowFocusChanged(hasFocus: Boolean) {
+		super.onWindowFocusChanged(hasFocus)
+		if (!hasFocus) typing?.stop()
+	}
+
 	override fun onPrepareOptionsMenu(menu: Menu): Boolean {
+		menu.findItem(R.id.action_leave_connector_room)?.apply {
+			isVisible = canLeaveRoom()
+			isEnabled = !leavePending
+		}
+		menu.findItem(R.id.action_mark_unread_connector_conversation)?.apply {
+			isVisible = canMarkUnread()
+			isEnabled = !unreadPending
+		}
 		menu.findItem(R.id.action_refresh_connector_conversation)?.isVisible =
 			shouldShowManualRefreshAction(
 				connector?.isEnabled() == true,
@@ -376,11 +545,19 @@ class ConnectorConversationActivity : BriarActivity() {
 
 	override fun onOptionsItemSelected(item: MenuItem): Boolean {
 		val itemId = item.itemId
+		if (itemId == R.id.action_leave_connector_room) {
+			confirmLeaveRoom()
+			return true
+		}
+		if (itemId == R.id.action_mark_unread_connector_conversation) {
+			markUnreadAndClose()
+			return true
+		}
 		if (itemId == android.R.id.home) {
 			onBackPressed()
 			return true
 		} else if (isManualRefreshAction(itemId)) {
-			loadMessages()
+			retryRefresh()
 			return true
 		} else if (isFindAction(itemId)) {
 			toggleFind()
@@ -389,8 +566,24 @@ class ConnectorConversationActivity : BriarActivity() {
 		return super.onOptionsItemSelected(item)
 	}
 
+	internal fun retryRefresh() {
+		retryRequested = true
+		retryCoalescer.onUpdate()
+	}
+
 	override fun onDestroy() {
+		stopRoomObserver()
+		stopTypingObserver()
+		retryCoalescer.cancel()
+		loadFailedSnackbar?.dismiss()
+		loadFailedSnackbar = null
+		lastLoadFailed = false
+		typing?.stop()
+		leaveOwner.invalidate()
+		unreadOwner.invalidate()
 		loadOwner.invalidate()
+		retryOwner.invalidate()
+		inFlightRetryIds.clear()
 		super.onDestroy()
 	}
 
@@ -402,7 +595,7 @@ class ConnectorConversationActivity : BriarActivity() {
 			showMessages(loadGeneration, ConnectorConversationMessageListState(), LOAD_FAILED)
 			return
 		}
-		if (showLoading) {
+		if (showLoading && messageState.messages.isEmpty()) {
 			submitMessageState(
 				messageState.copy(
 					emptyText = getString(emptyTextForState(LOADING), sourceName),
@@ -411,7 +604,11 @@ class ConnectorConversationActivity : BriarActivity() {
 			)
 		}
 		ioExecutor.execute {
-			if (!loadOwner.owns(loadGeneration)) return@execute
+			if (!loadOwner.owns(loadGeneration)) {
+				roomUpdateCoalescer?.onRefreshCompleted()
+				retryCoalescer.onRefreshCompleted()
+				return@execute
+			}
 			try {
 				if (!activeConnector.isEnabled()) {
 					showMessages(loadGeneration, ConnectorConversationMessageListState(), DISABLED)
@@ -425,7 +622,11 @@ class ConnectorConversationActivity : BriarActivity() {
 					)
 					return@execute
 				}
-				if (!loadOwner.owns(loadGeneration)) return@execute
+				if (!loadOwner.owns(loadGeneration)) {
+					roomUpdateCoalescer?.onRefreshCompleted()
+					retryCoalescer.onRefreshCompleted()
+					return@execute
+				}
 				val result = activeConnector.getRecentMessageReadResult(
 					threadId,
 					MESSAGE_LIMIT,
@@ -435,7 +636,12 @@ class ConnectorConversationActivity : BriarActivity() {
 						val state = ConnectorConversationMessageListState(
 							ConnectorConversationMessageItem.fromMessages(result.messages),
 						)
-						showMessages(loadGeneration, state, EMPTY)
+						val topic = try {
+							activeConnector.getThreadTopic(threadId)
+						} catch (e: RuntimeException) {
+							null
+						}
+						showMessages(loadGeneration, state, EMPTY, topic)
 						if (isInitialOpen || result.messages.isNotEmpty()) {
 							markThreadRead(loadGeneration)
 						}
@@ -463,10 +669,139 @@ class ConnectorConversationActivity : BriarActivity() {
 	// room read after this screen no longer owns it.
 	private fun markThreadRead(loadGeneration: Long) {
 		val marker = readMarker ?: return
-		if (!loadOwner.owns(loadGeneration)) return
-		try {
-			marker.markThreadRead(threadId)
-		} catch (e: RuntimeException) {
+		synchronized(readStateLock) {
+			if (unreadPending || !loadOwner.owns(loadGeneration)) return
+			try {
+				marker.markThreadRead(threadId)
+			} catch (e: RuntimeException) {
+			}
+		}
+	}
+
+	private fun canLeaveRoom(): Boolean = connector is ConnectorRoomLeaver &&
+		connector?.source?.id == ConnectorSources.MATRIX_ID &&
+		connector?.isEnabled() == true &&
+		connector?.isAuthorized() == true &&
+		hasValidThreadId(threadId)
+
+	private fun confirmLeaveRoom() {
+		if (leavePending ||
+			!canLeaveRoom() ||
+			isFinishing ||
+			isDestroyed ||
+			supportFragmentManager.isStateSaved ||
+			supportFragmentManager.findFragmentByTag(ConnectorLeaveRoomDialogFragment.TAG) != null
+		) {
+			return
+		}
+		ConnectorLeaveRoomDialogFragment.newInstance(threadId)
+			.showNow(supportFragmentManager, ConnectorLeaveRoomDialogFragment.TAG)
+	}
+
+	internal fun confirmLeaveRoom(confirmedThreadId: String) {
+		if (leavePending ||
+			confirmedThreadId != threadId ||
+			!canLeaveRoom() ||
+			isFinishing ||
+			isDestroyed
+		) {
+			return
+		}
+		val active = connector ?: return
+		val room = confirmedThreadId
+		val prepared = (active as ConnectorRoomLeaver).prepareLeave(room)
+		val generation = leaveOwner.begin()
+		fun current() = leaveOwner.owns(generation) &&
+			connector === active &&
+			threadId == room &&
+			!isFinishing &&
+			!isDestroyed &&
+			active.isAuthorized() &&
+			prepared?.isCurrent() != false
+		if (!leavePending && current()) {
+			leavePending = true
+			invalidateOptionsMenu()
+			ioExecutor.execute {
+				if (!current()) return@execute
+				val success = try {
+					prepared?.leave() == true
+				} catch (e: RuntimeException) {
+					false
+				}
+				runOnUiThread {
+					if (!current()) return@runOnUiThread
+					leavePending = false
+					invalidateOptionsMenu()
+					if (success) {
+						ConnectorDraftStore.clearDraft(
+							intent?.getStringExtra(SOURCE_ID) ?: connector?.source?.id,
+							room,
+						)
+						// finish() triggers onPause(), whose saveDraft() would otherwise
+						// resurrect the just-cleared draft from the still-populated field.
+						if (::composeText.isInitialized) composeText.setText("")
+						// ContactListFragment.onStart reloads the unified inbox on return.
+						finish()
+					} else {
+						BriarSnackbarBuilder()
+							.setAction(R.string.connector_leave_room_retry) { confirmLeaveRoom() }
+							.make(list, R.string.connector_leave_room_failed, Snackbar.LENGTH_LONG)
+							.show()
+					}
+				}
+			}
+		}
+	}
+
+	private fun canMarkUnread(): Boolean = connector is ConnectorUnreadMarker &&
+		connector?.isEnabled() == true &&
+		connector?.isAuthorized() == true &&
+		hasValidThreadId(threadId)
+
+	private fun markUnreadAndClose() {
+		if (unreadPending || !canMarkUnread()) return
+		val activeConnector = connector ?: return
+		val room = threadId
+		val prepared = (activeConnector as ConnectorUnreadMarker).prepareMarkUnread(room)
+		val generation = unreadOwner.begin()
+		unreadPending = true
+		invalidateOptionsMenu()
+		ioExecutor.execute {
+			// Only background work takes this lock: finish an active read before setting unread.
+			val success = synchronized(readStateLock) {
+				if (!unreadOwner.owns(generation) ||
+					threadId != room ||
+					!activeConnector.isAuthorized()
+				) {
+					return@execute
+				}
+				try {
+					prepared?.markUnread() == true
+				} catch (e: RuntimeException) {
+					false
+				}
+			}
+			runOnUiThread {
+				if (!unreadOwner.owns(generation) ||
+					threadId != room ||
+					isFinishing ||
+					!activeConnector.isAuthorized() ||
+					prepared?.isCurrent() == false
+				) {
+					return@runOnUiThread
+				}
+				if (success) {
+					finish()
+				} else {
+					unreadPending = false
+					invalidateOptionsMenu()
+					BriarSnackbarBuilder().make(
+						list,
+						R.string.connector_mark_unread_failed,
+						Snackbar.LENGTH_LONG,
+					).show()
+				}
+			}
 		}
 	}
 
@@ -474,22 +809,153 @@ class ConnectorConversationActivity : BriarActivity() {
 		loadGeneration: Long,
 		state: ConnectorConversationMessageListState,
 		availabilityState: ConnectorConversationAvailabilityState,
+		topic: String? = null,
 	) {
 		runOnUiThread {
-			if (!loadOwner.owns(loadGeneration)) return@runOnUiThread
-			automaticRefreshRunning = false
-			val next = if (availabilityState == EMPTY) {
-				messageState.reconcile(state.messages).copy(isLoading = false)
-			} else {
-				state
-			}
-			submitMessageState(
-				next.withAvailabilityState(
+			try {
+				if (!loadOwner.owns(loadGeneration)) return@runOnUiThread
+				bindTopic(supportActionBar, topic)
+				automaticRefreshRunning = false
+				val next = if (availabilityState == EMPTY) {
+					messageState.reconcile(state.messages).copy(isLoading = false)
+				} else {
+					state
+				}
+				val nextState = next.withAvailabilityState(
 					availabilityState,
 					if (availabilityState == EMPTY) next else messageState,
 					getString(emptyTextForState(availabilityState), sourceName),
-				),
-			)
+				)
+				submitMessageState(nextState)
+				if (availabilityState == LOAD_FAILED) {
+					showLoadFailedFeedback(nextState.messages.isEmpty())
+				} else {
+					lastLoadFailed = false
+					retryRequested = false
+					loadFailedSnackbar?.dismiss()
+					loadFailedSnackbar = null
+					list.setEmptyAction("")
+				}
+			} finally {
+				roomUpdateCoalescer?.onRefreshCompleted()
+				retryCoalescer.onRefreshCompleted()
+			}
+		}
+	}
+
+	private fun showLoadFailedFeedback(isEmpty: Boolean) {
+		if (isEmpty) {
+			list.setEmptyAction(R.string.connector_conversation_retry_refresh)
+		}
+		val text = getString(R.string.connector_conversation_load_failed, sourceName)
+		val shouldShowSnackbar = retryRequested || !lastLoadFailed
+		lastLoadFailed = true
+		retryRequested = false
+		if (shouldShowSnackbar) {
+			loadFailedSnackbar?.dismiss()
+			loadFailedSnackbar = BriarSnackbarBuilder()
+				.setAction(R.string.connector_conversation_retry_refresh) { retryRefresh() }
+				.make(list, text, Snackbar.LENGTH_LONG)
+				.also { it.show() }
+		}
+	}
+
+	internal fun getLoadFailedSnackbar(): Snackbar? = loadFailedSnackbar
+
+	internal fun startRoomObserver() {
+		val observer = connector as? ConnectorRoomObserver ?: return
+		if (!hasValidThreadId(threadId)) return
+		stopRoomObserver()
+		val room = threadId
+		val coalescer = ConnectorRoomUpdateCoalescer {
+			runOnUiThread {
+				if (!isFinishing && !isDestroyed) {
+					loadMessages(showLoading = false)
+				}
+			}
+		}
+		synchronized(this) { roomUpdateCoalescer = coalescer }
+		ioExecutor.execute {
+			val sub = observer.observeRoom(room) {
+				coalescer.onUpdate()
+			}
+			synchronized(this) {
+				if (roomUpdateCoalescer === coalescer) {
+					roomObserverSubscription = sub
+				} else {
+					sub?.cancel()
+				}
+			}
+		}
+	}
+
+	internal fun stopRoomObserver() {
+		synchronized(this) {
+			roomUpdateCoalescer?.cancel()
+			roomUpdateCoalescer = null
+			roomObserverSubscription?.cancel()
+			roomObserverSubscription = null
+		}
+	}
+
+	internal fun getTypingIndicator(): TextView = typingIndicator
+
+	internal fun startTypingObserver() {
+		val observer = connector as? ConnectorTypingObserver ?: return
+		if (!hasValidThreadId(threadId)) return
+		stopTypingObserver()
+		val room = threadId
+		val generation = Any()
+		synchronized(this) {
+			typingGeneration = generation
+		}
+		ioExecutor.execute {
+			val sub = observer.observeTyping(room) { isTyping ->
+				runOnUiThread {
+					if (!isFinishing && !isDestroyed) {
+						updateTypingIndicator(generation, isTyping)
+					}
+				}
+			}
+			synchronized(this) {
+				if (typingGeneration === generation && threadId == room) {
+					typingObserverSubscription = sub
+				} else {
+					sub?.cancel()
+				}
+			}
+		}
+	}
+
+	internal fun stopTypingObserver() {
+		synchronized(this) {
+			typingGeneration = null
+			typingObserverSubscription?.cancel()
+			typingObserverSubscription = null
+		}
+		clearTypingIndicator()
+	}
+
+	internal fun updateTypingIndicator(generation: Any, isTyping: Boolean) {
+		val stillObserving = synchronized(this) { typingGeneration === generation }
+		if (!stillObserving) return
+		if (isFinishing || isDestroyed) {
+			clearTypingIndicator()
+			return
+		}
+		typingIndicatorHandler.removeCallbacks(typingExpiryRunnable)
+		if (isTyping) {
+			typingIndicator.visibility = View.VISIBLE
+			typingIndicatorHandler.postDelayed(typingExpiryRunnable, TYPING_EXPIRY_MS)
+		} else {
+			typingIndicator.visibility = View.GONE
+		}
+	}
+
+	internal fun clearTypingIndicator() {
+		typingIndicatorHandler.removeCallbacks(typingExpiryRunnable)
+		if (::typingIndicator.isInitialized) {
+			typingIndicator.visibility = View.GONE
 		}
 	}
 
@@ -507,8 +973,11 @@ class ConnectorConversationActivity : BriarActivity() {
 				list.scrollToPosition(state.messages.lastIndex)
 			}
 		}
-		if (state.isLoading) list.showProgressBar()
-		state.visibleStatusText?.takeIf { it != messageState.visibleStatusText }?.let {
+		if (state.isLoading && state.messages.isEmpty()) list.showProgressBar()
+		state.visibleStatusText?.takeIf {
+			it != messageState.visibleStatusText &&
+				it != getString(R.string.connector_conversation_load_failed, sourceName)
+		}?.let {
 			BriarSnackbarBuilder()
 				.make(list, it, Snackbar.LENGTH_LONG)
 				.show()
@@ -591,6 +1060,8 @@ class ConnectorConversationActivity : BriarActivity() {
 		if (text.isEmpty()) return
 		sendInFlight = true
 		setComposeEnabled(false)
+		val sourceId = intent?.getStringExtra(SOURCE_ID) ?: connector?.source?.id
+		ConnectorDraftStore.clearDraft(sourceId, threadId)
 		submitMessageState(messageState.beginTextSend(connector!!.source, threadId, text))
 		val echoId = messageState.localEchoes.last().item.stableId
 		val activeThreadId = threadId
@@ -703,6 +1174,7 @@ class ConnectorConversationActivity : BriarActivity() {
 		sendInFlight = false
 		setComposeEnabled(true)
 		if (sent) {
+			typing?.stop()
 			if (clearComposeText) composeText.setText("")
 			if (!clearComposeText) {
 				BriarSnackbarBuilder().make(
@@ -732,6 +1204,7 @@ class ConnectorConversationActivity : BriarActivity() {
 	}
 
 	private fun setComposeEnabled(enabled: Boolean) {
+		if (!enabled) typing?.stop()
 		composeText.isEnabled = enabled
 		sendButton.isEnabled = enabled
 		attachButton.isEnabled = enabled
@@ -743,50 +1216,144 @@ class ConnectorConversationActivity : BriarActivity() {
 
 	private fun onDeleteMessageClicked(item: ConnectorConversationMessageItem) {
 		// MX-020: Prompt to delete an outgoing message
-		val deleter = connector as? ConnectorMessageDeleter ?: return
-		val currentThreadId = threadId
-		if (currentThreadId.isEmpty()) return
+		if (connector !is ConnectorMessageDeleter) return
+		if (threadId.isEmpty()) return
 
-		AlertDialog.Builder(this, R.style.BriarDialogTheme)
-			.setTitle(R.string.delete)
-			.setMessage(R.string.dialog_message_delete)
-			.setPositiveButton(R.string.delete) { _, _ ->
-				executeDeleteMessage(deleter, currentThreadId, item)
-			}
-			.setNegativeButton(R.string.cancel, null)
-			.show()
+		ConnectorDeleteMessageDialogFragment.newInstance(item.connectorThreadId, item.connectorMessageId)
+			.show(supportFragmentManager, ConnectorDeleteMessageDialogFragment.TAG)
+	}
+
+	// Persisted ids let confirmation proceed before the post-rotation message reload finishes.
+	internal fun confirmDeleteMessage(targetThreadId: String, connectorMessageId: String) {
+		val deleter = connector as? ConnectorMessageDeleter ?: return
+		executeDeleteMessage(deleter, targetThreadId, connectorMessageId)
 	}
 
 	private fun executeDeleteMessage(
 		deleter: ConnectorMessageDeleter,
 		targetThreadId: String,
-		item: ConnectorConversationMessageItem,
+		connectorMessageId: String,
 	) {
 		ioExecutor.execute {
-			val success = deleter.deleteMessage(targetThreadId, item.connectorMessageId)
+			val success = deleter.deleteMessage(targetThreadId, connectorMessageId)
 			runOnUiThread {
 				if (isFinishing || isDestroyed) return@runOnUiThread
-				val outcome = resolveDeleteOutcome(messageState, item, success)
-				outcome.feedbackStringRes?.let { Snackbar.make(list, it, Snackbar.LENGTH_LONG).show() }
-					?: submitMessageState(outcome.nextState)
+				if (!success) {
+					Snackbar.make(list, R.string.connector_conversation_delete_failed, Snackbar.LENGTH_LONG).show()
+					return@runOnUiThread
+				}
+				val item = messageState.messages.firstOrNull {
+					it.connectorThreadId == targetThreadId && it.connectorMessageId == connectorMessageId
+				} ?: return@runOnUiThread
+				submitMessageState(markMessageDeleted(messageState, item))
+			}
+		}
+	}
+
+	internal fun onRetrySendClicked(item: ConnectorConversationMessageItem) {
+		if (item.type != ConnectorMessageType.TEXT ||
+			!item.isOutgoing ||
+			item.localEchoStatus != ConnectorLocalEchoStatus.FAILED
+		) {
+			return
+		}
+		val echoId = item.stableId
+		if (inFlightRetryIds.contains(echoId)) return
+		val activeConnector = connector ?: return
+		val sender = textSender ?: return
+		val unavailable = !activeConnector.isEnabled() || !activeConnector.isAuthorized()
+		if (unavailable || isFinishing || isDestroyed) return
+		val activeThreadId = threadId
+		if (activeThreadId.isEmpty()) return
+
+		inFlightRetryIds.add(echoId)
+		val generation = retryOwner.begin(echoId)
+		submitMessageState(messageState.retrySend(echoId))
+		ioExecutor.execute {
+			val sent = try {
+				if (!activeConnector.isAuthorized()) false else sender.sendText(activeThreadId, item.text)
+			} catch (e: RuntimeException) {
+				false
+			}
+			runOnUiThread {
+				inFlightRetryIds.remove(echoId)
+				val dead = !retryOwner.owns(echoId, generation) || isFinishing || isDestroyed
+				if (dead) {
+					retryOwner.clear(echoId)
+					return@runOnUiThread
+				}
+				retryOwner.clear(echoId)
+				submitMessageState(messageState.completeSend(echoId, sent))
+				if (sent) {
+					loadMessages(showLoading = false)
+				} else {
+					val res = R.string.connector_conversation_send_failed
+					BriarSnackbarBuilder().make(list, res, Snackbar.LENGTH_LONG).show()
+				}
 			}
 		}
 	}
 }
 
-internal data class ConnectorDeleteOutcome(
-	val nextState: ConnectorConversationMessageListState,
-	val feedbackStringRes: Int? = null,
-)
+class ConnectorLeaveRoomDialogFragment : DialogFragment() {
+	companion object {
+		const val TAG = "ConnectorLeaveRoomDialogFragment"
+		private const val ARG_THREAD_ID = "threadId"
 
-internal fun resolveDeleteOutcome(
+		fun newInstance(threadId: String) = ConnectorLeaveRoomDialogFragment().apply {
+			arguments = Bundle().apply { putString(ARG_THREAD_ID, threadId) }
+		}
+	}
+
+	override fun onCreateDialog(savedInstanceState: Bundle?): Dialog {
+		val activity = requireActivity() as ConnectorConversationActivity
+		val threadId = requireArguments().getString(ARG_THREAD_ID)!!
+		return AlertDialog.Builder(activity)
+			.setMessage(R.string.connector_leave_room_confirm)
+			.setNegativeButton(R.string.cancel, null)
+			.setPositiveButton(R.string.connector_leave_room_action) { _, _ ->
+				activity.confirmLeaveRoom(threadId)
+			}
+			.create()
+	}
+}
+
+class ConnectorDeleteMessageDialogFragment : DialogFragment() {
+	companion object {
+		const val TAG = "ConnectorDeleteMessageDialogFragment"
+		private const val ARG_THREAD_ID = "threadId"
+		private const val ARG_MESSAGE_ID = "messageId"
+
+		fun newInstance(threadId: String, messageId: String): ConnectorDeleteMessageDialogFragment {
+			val fragment = ConnectorDeleteMessageDialogFragment()
+			fragment.arguments = Bundle().apply {
+				putString(ARG_THREAD_ID, threadId)
+				putString(ARG_MESSAGE_ID, messageId)
+			}
+			return fragment
+		}
+	}
+
+	override fun onCreateDialog(savedInstanceState: Bundle?): Dialog {
+		val activity = requireActivity() as ConnectorConversationActivity
+		val threadId = requireArguments().getString(ARG_THREAD_ID)!!
+		val messageId = requireArguments().getString(ARG_MESSAGE_ID)!!
+		return AlertDialog.Builder(activity, R.style.BriarDialogTheme)
+			.setTitle(R.string.delete)
+			.setMessage(R.string.dialog_message_delete)
+			.setPositiveButton(R.string.delete) { _, _ ->
+				activity.confirmDeleteMessage(threadId, messageId)
+			}
+			.setNegativeButton(R.string.cancel, null)
+			.create()
+	}
+}
+
+internal fun markMessageDeleted(
 	state: ConnectorConversationMessageListState,
 	item: ConnectorConversationMessageItem,
-	success: Boolean,
-): ConnectorDeleteOutcome = if (success) {
+): ConnectorConversationMessageListState {
 	val updated = item.copy(type = ConnectorMessageType.DELETED)
 	val messages = state.messages.map { if (it.stableId == item.stableId) updated else it }
-	ConnectorDeleteOutcome(state.copy(messages = messages))
-} else {
-	ConnectorDeleteOutcome(state, R.string.connector_conversation_delete_failed)
+	return state.copy(messages = messages)
 }

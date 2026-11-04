@@ -7,10 +7,18 @@ import org.briarproject.briar.api.matrix.MatrixAuthSession.RecoverableErrorDetai
 import org.briarproject.briar.api.matrix.MatrixAuthSession.RecoverableErrorDetail.NONE
 import org.briarproject.briar.api.matrix.MatrixHomeserverDiscoveryClient
 import org.briarproject.briar.api.matrix.MatrixHomeserverDiscoveryClient.DiscoveryResult
+import org.briarproject.briar.api.connector.ConnectorAttachmentMetadata
 import org.briarproject.briar.api.connector.ConnectorFileSender
 import org.briarproject.briar.api.connector.ConnectorImageSender
 import org.briarproject.briar.api.connector.ConnectorMessageType
 import org.briarproject.briar.api.connector.ConnectorReactionSummary
+import org.briarproject.briar.api.connector.ConnectorUnreadMarker.PreparedMarkUnread
+import org.briarproject.briar.api.connector.ConnectorRoomLeaver.PreparedLeave
+import org.briarproject.briar.api.connector.ConnectorRoomObserver.RoomSubscription
+import org.briarproject.briar.api.connector.ConnectorTypingObserver.TypingSubscription
+import org.briarproject.briar.api.connector.ConnectorTypingSender.PreparedTyping
+import java.util.concurrent.Executor
+import java.util.concurrent.Executors
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.DataInputStream
@@ -67,6 +75,9 @@ import kotlin.coroutines.intrinsics.COROUTINE_SUSPENDED
 class ReflectiveMatrixHomeserverDiscoveryClient(
 	private val discoveryTimeoutMs: Long = 30_000L,
 	private val sessionDelegateFactory: MatrixClientSessionDelegateFactory? = null,
+	private val typingExecutor: Executor = Executors.newSingleThreadExecutor { task ->
+		Thread(task, "matrix-typing").apply { isDaemon = true }
+	},
 ) : MatrixHomeserverDiscoveryClient,
 	MatrixLoginClient,
 	MatrixRoomSnapshotClient,
@@ -77,6 +88,89 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 	private val lifecycleLock = Any()
 	private var activeGeneration: Any? = null
 	private var activeStore: MatrixStoreConfiguration? = null
+	private class TypingLane {
+		val queue = java.util.ArrayDeque<() -> Unit>()
+		var busy = false
+	}
+	private val typingLanes = mutableMapOf<String, TypingLane>()
+	private val activeRoomSubscriptions = mutableSetOf<RoomSubscription>()
+	private val activeTypingSubscriptions = mutableSetOf<TypingSubscription>()
+
+	// Unlike invokeUnit, this lane waits for real native completion, not a timeout. A hung
+	// operation cannot release a later stop/start out of order or block message sending.
+	override fun prepareTyping(roomId: String): PreparedTyping? {
+		val (generation, lane) = synchronized(lifecycleLock) {
+			val generation = activeGeneration ?: return null
+			generation to typingLanes.getOrPut(roomId) { TypingLane() }
+		}
+		return object : PreparedTyping {
+			private val pendingStart = AtomicBoolean()
+			override fun isCurrent() = synchronized(lifecycleLock) { activeGeneration === generation }
+			override fun send(typing: Boolean, wanted: () -> Boolean) {
+				if (typing && !pendingStart.compareAndSet(false, true)) return
+				typingExecutor.execute {
+					lane.queue.add operation@{
+						if (typing) pendingStart.set(false)
+						var room: Any? = null
+						val completed = AtomicBoolean()
+						fun complete() {
+							if (!completed.compareAndSet(false, true)) return
+							closeQuietly(room)
+							typingExecutor.execute {
+								lane.busy = false
+								drainTyping(lane)
+							}
+						}
+						try {
+							// Authorization takes its own lock; never call it under SDK locks.
+							if (typing && !wanted()) return@operation complete()
+							synchronized(this@ReflectiveMatrixHomeserverDiscoveryClient) {
+								synchronized(lifecycleLock) {
+									if (isCurrent()) {
+										val client = loginClient
+										room = client?.javaClass?.getMethod("getRoom", String::class.java)
+											?.invoke(client, roomId)
+									}
+								}
+							}
+							val target = room
+							if (target == null || (typing && !wanted())) {
+								complete()
+							} else {
+								synchronized(lifecycleLock) {
+									if (!isCurrent()) {
+										complete()
+									} else {
+										val continuation = object : Continuation<Unit> {
+											override val context = EmptyCoroutineContext
+											override fun resumeWith(result: Result<Unit>) = complete()
+										}
+										// SDK 26.08.05: fixed 4s expiry, 3s resend suppression.
+										val result = target.javaClass.getMethod(
+											"typingNotice",
+											Boolean::class.javaPrimitiveType,
+											Continuation::class.java,
+										)
+											.invoke(target, typing, continuation)
+										if (result !== COROUTINE_SUSPENDED) complete()
+									}
+								}
+							}
+						} catch (e: Throwable) {
+							complete()
+						}
+					}
+					drainTyping(lane)
+				}
+			}
+		}
+	}
+
+	private fun drainTyping(lane: TypingLane) {
+		if (lane.busy || lane.queue.isEmpty()) return
+		lane.busy = true
+		lane.queue.removeFirst().invoke()
+	}
 
 	override fun discover(serverName: String): DiscoveryResult {
 		// `serverName(...)` and `inMemoryStore()` each return their own
@@ -88,10 +182,19 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		return try {
 			val builderClass = Class.forName(CLIENT_BUILDER_CLASS_NAME)
 			var builder = track(builders, builderClass.getConstructor().newInstance())
-			builder = track(
-				builders,
-				builderClass.getMethod("serverName", String::class.java).invoke(builder, serverName),
-			)
+			builder = if (serverName.startsWith("http://", ignoreCase = true) ||
+				serverName.startsWith("https://", ignoreCase = true)
+			) {
+				track(
+					builders,
+					builderClass.getMethod("homeserverUrl", String::class.java).invoke(builder, serverName),
+				)
+			} else {
+				track(
+					builders,
+					builderClass.getMethod("serverName", String::class.java).invoke(builder, serverName),
+				)
+			}
 			builder = track(builders, builderClass.getMethod("inMemoryStore").invoke(builder))
 			client = buildClient(builder, builderClass)
 			DiscoveryResult.Resolved(readHomeserverUrl(client))
@@ -343,7 +446,13 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 	}
 
 	private fun beginGeneration(generation: Any) {
-		synchronized(lifecycleLock) { activeGeneration = generation }
+		val (detached, detachedTyping) = synchronized(lifecycleLock) {
+			activeGeneration = generation
+			typingLanes.clear()
+			Pair(detachRoomSubscriptions(), detachTypingSubscriptions())
+		}
+		cancelRoomSubscriptions(detached)
+		cancelTypingSubscriptions(detachedTyping)
 		val previous = loginClient
 		loginClient = null
 		activeStore = null
@@ -573,6 +682,22 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		}
 	}
 
+	@Synchronized
+	override fun getRoomTopic(roomId: String): String? {
+		val client = loginClient ?: return null
+		var room: Any? = null
+		return try {
+			room = client.javaClass.getMethod("getRoom", String::class.java).invoke(client, roomId)
+			room?.let(::readTopic)
+		} catch (e: ReflectiveOperationException) {
+			null
+		} catch (e: LinkageError) {
+			null
+		} finally {
+			closeQuietly(room)
+		}
+	}
+
 	private fun toJoinedRoomSnapshot(room: Any): MatrixRoomSnapshot? = try {
 		val roomClass = room.javaClass
 		val isSpace = roomClass.getMethod("isSpace").invoke(room) as Boolean
@@ -584,7 +709,8 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			val id = roomClass.getMethod("id").invoke(room) as String
 			val displayName = (roomClass.getMethod("displayName").invoke(room) as? String)
 				?.takeIf { it.isNotEmpty() } ?: id
-			MatrixRoomSnapshot(id, displayName)
+			val (unreadCount, markedUnread) = readUnreadState(room)
+			MatrixRoomSnapshot(id, displayName, unreadCount, markedUnread, readTopic(room))
 		}
 	} catch (e: InvocationTargetException) {
 		null
@@ -592,6 +718,42 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		null
 	} catch (e: LinkageError) {
 		null
+	}
+
+	private fun readTopic(room: Any): String? = try {
+		room.javaClass.getMethod("topic").invoke(room) as? String
+	} catch (e: ReflectiveOperationException) {
+		null
+	} catch (e: LinkageError) {
+		null
+	}
+
+	private fun readUnreadState(room: Any): Pair<Int?, Boolean?> {
+		var roomInfo: Any? = null
+		return try {
+			roomInfo = invokeCloseableValue(
+				target = room,
+				methodName = "roomInfo",
+				parameterTypes = emptyArray(),
+				arguments = emptyArray(),
+				abandon = ::destroyQuietly,
+			)
+			val method = roomInfo.javaClass.getMethod("getNumUnreadMessages-s-VKNKU")
+			val unread = method.invoke(roomInfo) as? Number
+			// getNumUnreadMessages-s-VKNKU returns an unsigned ULong whose underlying
+			// primitive is boxed as a signed Long by reflection: a raw value with the
+			// sign bit set is not a confirmed zero, so it must map to null, not be
+			// clamped into the valid range.
+			val count = unread?.toLong()?.takeIf { it >= 0 }
+				?.coerceAtMost(Int.MAX_VALUE.toLong())?.toInt()
+			count to (roomInfo.javaClass.getMethod("isMarkedUnread").invoke(roomInfo) as? Boolean)
+		} catch (e: Exception) {
+			null to null
+		} catch (e: LinkageError) {
+			null to null
+		} finally {
+			destroyQuietly(roomInfo)
+		}
 	}
 
 	/**
@@ -712,15 +874,61 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 	 * no session is retained, [roomId] cannot be found, or the SDK call fails.
 	 */
 	@Synchronized
-	override fun markRead(roomId: String): Boolean {
+	override fun markRead(roomId: String): Boolean = updateReadState(roomId, false)
+
+	override fun prepareMarkUnread(roomId: String): PreparedMarkUnread? {
+		val generation = synchronized(lifecycleLock) { activeGeneration } ?: return null
+		return object : PreparedMarkUnread {
+			override fun isCurrent(): Boolean = synchronized(lifecycleLock) {
+				activeGeneration === generation
+			}
+			override fun markUnread(): Boolean =
+				synchronized(this@ReflectiveMatrixHomeserverDiscoveryClient) {
+					isCurrent() && updateReadState(roomId, true) && isCurrent()
+				}
+		}
+	}
+
+	override fun prepareLeave(roomId: String): PreparedLeave? {
+		val generation = synchronized(lifecycleLock) { activeGeneration } ?: return null
+		return object : PreparedLeave {
+			override fun isCurrent() = synchronized(lifecycleLock) { activeGeneration === generation }
+			override fun leave(): Boolean = synchronized(this@ReflectiveMatrixHomeserverDiscoveryClient) {
+				if (!isCurrent()) return@synchronized false
+				var room: Any? = null
+				try {
+					val client = loginClient ?: return@synchronized false
+					room = client.javaClass.getMethod("getRoom", String::class.java).invoke(client, roomId)
+						?: return@synchronized false
+					invokeUnit(room, "leave", emptyArray(), emptyArray())
+					isCurrent()
+				} catch (e: InterruptedException) {
+					Thread.currentThread().interrupt()
+					false
+				} catch (e: Exception) {
+					false
+				} catch (e: LinkageError) {
+					false
+				} finally {
+					closeQuietly(room)
+				}
+			}
+		}
+	}
+
+	private fun updateReadState(roomId: String, unread: Boolean): Boolean {
 		val client = loginClient ?: return false
 		var room: Any? = null
 		return try {
 			room = client.javaClass.getMethod("getRoom", String::class.java).invoke(client, roomId)
 				?: throw SnapshotAdapterFailure()
-			val receiptTypeClass = Class.forName(RECEIPT_TYPE_CLASS_NAME)
-			val readReceiptType = receiptTypeClass.getField("READ_PRIVATE").get(null)
-			invokeUnit(room, "markAsRead", arrayOf(receiptTypeClass), arrayOf(readReceiptType))
+			if (!unread) {
+				val receiptTypeClass = Class.forName(RECEIPT_TYPE_CLASS_NAME)
+				val readReceiptType = receiptTypeClass.getField("READ_PRIVATE").get(null)
+				invokeUnit(room, "markAsRead", arrayOf(receiptTypeClass), arrayOf(readReceiptType))
+			}
+			// SDK 26.08.05 explicitly leaves the flag unchanged in markAsRead.
+			invokeUnit(room, "setUnreadFlag", arrayOf(Boolean::class.javaPrimitiveType!!), arrayOf(unread))
 			true
 		} catch (e: InterruptedException) {
 			Thread.currentThread().interrupt()
@@ -898,22 +1106,30 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		}
 	}
 
-	private fun readTimelineSnapshot(
-		timeline: Any,
-		listenerClass: Class<*>,
-	): List<MatrixMessageSnapshot> {
-		val update = TimelineSnapshotUpdate()
-		val listener = Proxy.newProxyInstance(
+	private fun createTimelineListener(listenerClass: Class<*>, onUpdate: (Any?) -> Unit): Any =
+		Proxy.newProxyInstance(
 			listenerClass.classLoader,
 			arrayOf(listenerClass),
 		) { proxy, method, arguments ->
 			when (method.name) {
-				"onUpdate" -> update.onUpdate(arguments?.firstOrNull())
+				"onUpdate" -> {
+					onUpdate(arguments?.firstOrNull())
+					null
+				}
 				"equals" -> proxy === arguments?.firstOrNull()
 				"hashCode" -> System.identityHashCode(proxy)
 				"toString" -> "MatrixTimelineListener"
 				else -> null
 			}
+		}
+
+	private fun readTimelineSnapshot(
+		timeline: Any,
+		listenerClass: Class<*>,
+	): List<MatrixMessageSnapshot> {
+		val update = TimelineSnapshotUpdate()
+		val listener = createTimelineListener(listenerClass) { argument ->
+			update.onUpdate(argument)
 		}
 		var listenerTask: Any? = null
 		return try {
@@ -972,6 +1188,216 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 				throw SnapshotAdapterFailure()
 			}
 			return (outcome.get() ?: throw SnapshotAdapterFailure()).getOrThrow()
+		}
+	}
+
+	@Synchronized
+	override fun observeRoom(roomId: String, onUpdate: () -> Unit): RoomSubscription? {
+		if (roomId.isBlank()) return null
+		val generation = synchronized(lifecycleLock) { activeGeneration } ?: return null
+		val client = loginClient ?: return null
+		var room: Any? = null
+		var timeline: Any? = null
+		var listenerTask: Any? = null
+		return try {
+			room = client.javaClass.getMethod("getRoom", String::class.java).invoke(client, roomId)
+				?: throw SnapshotAdapterFailure()
+			val membership = room.javaClass.getMethod("membership").invoke(room) as? Enum<*>
+			if (membership?.name != "JOINED") {
+				closeQuietly(room)
+				return null
+			}
+			val loadedTimeline =
+				invokeCloseableValue(room, "timeline", emptyArray(), emptyArray(), ::closeQuietly)
+			timeline = loadedTimeline
+			val initialDelivered = AtomicBoolean(false)
+			val subscriptionCancelled = AtomicBoolean(false)
+			val listenerClass = Class.forName(TIMELINE_LISTENER_CLASS_NAME)
+			val listener = createTimelineListener(listenerClass) { argument ->
+				val diffs = try {
+					(argument as? List<*>)?.mapNotNull { it } ?: emptyList()
+				} catch (e: Exception) {
+					emptyList<Any>()
+				}
+				try {
+					if (subscriptionCancelled.get()) return@createTimelineListener
+					val current = synchronized(lifecycleLock) { activeGeneration === generation }
+					if (!current) return@createTimelineListener
+					if (initialDelivered.compareAndSet(false, true)) {
+						return@createTimelineListener
+					}
+					if (diffs.isNotEmpty()) {
+						onUpdate()
+					}
+				} finally {
+					diffs.forEach(::destroyQuietly)
+				}
+			}
+			val createdTask = invokeCloseableValue(
+				loadedTimeline,
+				"addListener",
+				arrayOf(listenerClass),
+				arrayOf(listener),
+				::cancelAndCloseQuietly,
+			)
+			listenerTask = createdTask
+			val retainedRoom = room
+			val retainedTimeline = timeline
+			val sub = object : RoomSubscription {
+				override fun cancel() {
+					if (!subscriptionCancelled.compareAndSet(false, true)) return
+					synchronized(lifecycleLock) { activeRoomSubscriptions.remove(this) }
+					cancelAndCloseQuietly(createdTask)
+					closeQuietly(retainedTimeline)
+					closeQuietly(retainedRoom)
+				}
+
+				override fun close() = cancel()
+			}
+			val current = synchronized(lifecycleLock) {
+				(activeGeneration === generation).also { if (it) activeRoomSubscriptions.add(sub) }
+			}
+			if (!current) {
+				// Native teardown must run outside lifecycleLock (see saveSession).
+				sub.cancel()
+				return null
+			}
+			sub
+		} catch (e: InterruptedException) {
+			Thread.currentThread().interrupt()
+			cancelAndCloseQuietly(listenerTask)
+			closeQuietly(timeline)
+			closeQuietly(room)
+			null
+		} catch (e: Exception) {
+			cancelAndCloseQuietly(listenerTask)
+			closeQuietly(timeline)
+			closeQuietly(room)
+			null
+		} catch (e: LinkageError) {
+			cancelAndCloseQuietly(listenerTask)
+			closeQuietly(timeline)
+			closeQuietly(room)
+			null
+		}
+	}
+
+	// Caller holds lifecycleLock. Only detaches; the native teardown happens in
+	// cancelRoomSubscriptions after the lock is released, because a native cancel/close may
+	// wait for an in-flight listener callback that itself takes lifecycleLock.
+	private fun detachRoomSubscriptions(): List<RoomSubscription> {
+		val detached = activeRoomSubscriptions.toList()
+		activeRoomSubscriptions.clear()
+		return detached
+	}
+
+	private fun cancelRoomSubscriptions(subscriptions: List<RoomSubscription>) {
+		subscriptions.forEach { it.cancel() }
+	}
+
+	private fun detachTypingSubscriptions(): List<TypingSubscription> {
+		val detached = activeTypingSubscriptions.toList()
+		activeTypingSubscriptions.clear()
+		return detached
+	}
+
+	private fun cancelTypingSubscriptions(subscriptions: List<TypingSubscription>) {
+		subscriptions.forEach { it.cancel() }
+	}
+
+	@Synchronized
+	override fun observeTyping(
+		roomId: String,
+		onTypingChanged: (isTyping: Boolean) -> Unit,
+	): TypingSubscription? {
+		if (roomId.isBlank()) return null
+		val generation = synchronized(lifecycleLock) { activeGeneration } ?: return null
+		val client = loginClient ?: return null
+		var room: Any? = null
+		var listenerTask: Any? = null
+		return try {
+			room = client.javaClass.getMethod("getRoom", String::class.java).invoke(client, roomId)
+				?: throw SnapshotAdapterFailure()
+			val membership = room.javaClass.getMethod("membership").invoke(room) as? Enum<*>
+			if (membership?.name != "JOINED") {
+				closeQuietly(room)
+				return null
+			}
+			val currentUserId = try {
+				client.javaClass.getMethod("userId").invoke(client) as? String
+			} catch (e: Exception) {
+				null
+			}
+			val subscriptionCancelled = AtomicBoolean(false)
+			val listenerClass = Class.forName(TYPING_NOTIFICATIONS_LISTENER_CLASS_NAME)
+			val listener = createTypingNotificationsListener(listenerClass) { argument ->
+				val userIds = try {
+					(argument as? List<*>)?.filterIsInstance<String>() ?: emptyList()
+				} catch (e: Exception) {
+					emptyList<String>()
+				}
+				if (subscriptionCancelled.get()) return@createTypingNotificationsListener
+				val current = synchronized(lifecycleLock) { activeGeneration === generation }
+				if (!current) return@createTypingNotificationsListener
+				val peerTyping = userIds.any { it.isNotBlank() && it != currentUserId }
+				onTypingChanged(peerTyping)
+			}
+			val createdTask = room.javaClass.getMethod(
+				"subscribeToTypingNotifications",
+				listenerClass,
+			).invoke(room, listener)
+			listenerTask = createdTask
+			val retainedRoom = room
+			val sub = object : TypingSubscription {
+				override fun cancel() {
+					if (!subscriptionCancelled.compareAndSet(false, true)) return
+					synchronized(lifecycleLock) { activeTypingSubscriptions.remove(this) }
+					cancelAndCloseQuietly(createdTask)
+					closeQuietly(retainedRoom)
+				}
+
+				override fun close() = cancel()
+			}
+			val current = synchronized(lifecycleLock) {
+				(activeGeneration === generation).also { if (it) activeTypingSubscriptions.add(sub) }
+			}
+			if (!current) {
+				sub.cancel()
+				return null
+			}
+			sub
+		} catch (e: InterruptedException) {
+			Thread.currentThread().interrupt()
+			cancelAndCloseQuietly(listenerTask)
+			closeQuietly(room)
+			null
+		} catch (e: Exception) {
+			cancelAndCloseQuietly(listenerTask)
+			closeQuietly(room)
+			null
+		} catch (e: LinkageError) {
+			cancelAndCloseQuietly(listenerTask)
+			closeQuietly(room)
+			null
+		}
+	}
+
+	private fun createTypingNotificationsListener(
+		listenerClass: Class<*>,
+		onCall: (Any?) -> Unit,
+	): Any = Proxy.newProxyInstance(
+		listenerClass.classLoader,
+		arrayOf(listenerClass),
+	) { proxy, method, arguments ->
+		when (method.name) {
+			"call" -> {
+				onCall(arguments?.firstOrNull())
+				null
+			}
+			"equals" -> proxy === arguments?.firstOrNull()
+			"hashCode" -> System.identityHashCode(proxy)
+			"toString" -> "MatrixTypingNotificationsListener"
+			else -> null
 		}
 	}
 
@@ -1084,13 +1510,20 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			// consistent with message/kind/msgLike/content also being left undestroyed.
 			val inReplyTo = msgLike.javaClass.getMethod("getInReplyTo").invoke(msgLike)
 			val reactions = readReactionSummaries(msgLike)
+			val rawTypeName = messageType.javaClass.simpleName
+			val typeName = if (rawTypeName == "Companion") {
+				messageType.javaClass.enclosingClass?.simpleName ?: rawTypeName
+			} else {
+				rawTypeName
+			}
+			val attachment = readAttachmentMetadata(messageType)
 			MatrixMessageSnapshot(
 				eventId = identifier.javaClass.getMethod("getEventId").invoke(identifier) as String,
 				senderId = eventClass.getMethod("getSender").invoke(event) as String,
 				bodyText = message.javaClass.getMethod("getBody").invoke(message) as String,
 				originServerTimestampSeconds = (timestampMillis.toULong() / 1_000uL).toLong(),
 				isOutgoing = eventClass.getMethod("isOwn").invoke(event) as Boolean,
-				type = when (messageType.javaClass.simpleName) {
+				type = when (typeName) {
 					"Image" -> ConnectorMessageType.PHOTO
 					"Video", "Audio", "File", "Gallery" -> ConnectorMessageType.FILE
 					else -> ConnectorMessageType.TEXT
@@ -1098,18 +1531,72 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 				isEdited = message.javaClass.getMethod("isEdited").invoke(message) as Boolean,
 				isReply = inReplyTo != null,
 				reactions = reactions,
+				attachment = attachment,
 			)
 		} finally {
 			destroyQuietly(event)
 		}
 	}
 
+	private fun readAttachmentMetadata(messageType: Any?): ConnectorAttachmentMetadata? {
+		if (messageType == null) return null
+		val rawTypeName = messageType.javaClass.simpleName
+		val typeName = if (rawTypeName == "Companion") {
+			messageType.javaClass.enclosingClass?.simpleName ?: rawTypeName
+		} else {
+			rawTypeName
+		}
+		if (typeName !in ATTACHMENT_TYPE_NAMES) return null
+		return try {
+			val contentMethod = messageType.javaClass.methods.firstOrNull {
+				it.name == "getContent" && it.parameterTypes.isEmpty()
+			} ?: return null
+			val content = contentMethod.invoke(messageType) ?: return null
+			val contentClass = content.javaClass
+			val filenameMethod = contentClass.methods.firstOrNull {
+				it.name == "getFilename" && it.parameterTypes.isEmpty()
+			}
+			val rawFilename = filenameMethod?.invoke(content) as? String
+			val infoMethod = contentClass.methods.firstOrNull {
+				it.name == "getInfo" && it.parameterTypes.isEmpty()
+			}
+			val info = infoMethod?.invoke(content)
+			var rawMime: String? = null
+			var rawSize: Long? = null
+			if (info != null) {
+				val infoClass = info.javaClass
+				val mimeMethod = infoClass.methods.firstOrNull {
+					it.name == "getMimetype" && it.parameterTypes.isEmpty()
+				}
+				rawMime = mimeMethod?.invoke(info) as? String
+				val sizeMethod = infoClass.methods.firstOrNull {
+					it.name.startsWith("getSize") && it.parameterTypes.isEmpty()
+				}
+				val sizeObj = sizeMethod?.invoke(info)
+				rawSize = sizeObj?.toString()?.toLongOrNull()?.takeIf { it >= 0L }
+			}
+			ConnectorAttachmentMetadata(
+				fileName = rawFilename,
+				mimeType = rawMime,
+				size = rawSize,
+			)
+		} catch (e: Exception) {
+			null
+		}
+	}
+
 	@Synchronized
 	override fun logout() {
-		synchronized(lifecycleLock) {
+		val (detached, detachedTyping) = synchronized(lifecycleLock) {
 			activeGeneration = null
+			typingLanes.clear()
+			val r = detachRoomSubscriptions()
+			val t = detachTypingSubscriptions()
 			activeStore?.let { sessionFile(it).delete() }
+			Pair(r, t)
 		}
+		cancelRoomSubscriptions(detached)
+		cancelTypingSubscriptions(detachedTyping)
 		activeStore = null
 		val client = loginClient ?: return
 		loginClient = null
@@ -1126,7 +1613,13 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 
 	@Synchronized
 	override fun close() {
-		synchronized(lifecycleLock) { activeGeneration = null }
+		val (detached, detachedTyping) = synchronized(lifecycleLock) {
+			activeGeneration = null
+			typingLanes.clear()
+			Pair(detachRoomSubscriptions(), detachTypingSubscriptions())
+		}
+		cancelRoomSubscriptions(detached)
+		cancelTypingSubscriptions(detachedTyping)
 		val client = loginClient
 		loginClient = null
 		activeStore = null
@@ -1323,6 +1816,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		IOException("Matrix store already opened in this process")
 
 	private companion object {
+		val ATTACHMENT_TYPE_NAMES = setOf("File", "Image", "Video", "Audio")
 		val openedStores = HashSet<String>()
 		const val CLIENT_BUILDER_CLASS_NAME = "org.matrix.rustcomponents.sdk.ClientBuilder"
 		const val SQLITE_STORE_BUILDER_CLASS_NAME = "org.matrix.rustcomponents.sdk.SqliteStoreBuilder"
@@ -1331,6 +1825,8 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		const val SESSION_DELEGATE_FACTORY_CLASS_NAME =
 			"org.briarproject.briar.matrix.DirectMatrixClientSessionDelegateFactory"
 		const val TIMELINE_LISTENER_CLASS_NAME = "org.matrix.rustcomponents.sdk.TimelineListener"
+		const val TYPING_NOTIFICATIONS_LISTENER_CLASS_NAME =
+			"org.matrix.rustcomponents.sdk.TypingNotificationsListener"
 		const val FORMATTED_BODY_CLASS_NAME = "org.matrix.rustcomponents.sdk.FormattedBody"
 		const val TEXT_MESSAGE_CONTENT_CLASS_NAME = "org.matrix.rustcomponents.sdk.TextMessageContent"
 		const val MESSAGE_TYPE_CLASS_NAME = "org.matrix.rustcomponents.sdk.MessageType"
@@ -1343,7 +1839,8 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		const val MENTIONS_CLASS_NAME = "org.matrix.rustcomponents.sdk.Mentions"
 		const val IMAGE_INFO_CLASS_NAME = "org.matrix.rustcomponents.sdk.ImageInfo"
 		const val THUMBNAIL_INFO_CLASS_NAME = "org.matrix.rustcomponents.sdk.ThumbnailInfo"
-		const val EVENT_OR_TRANSACTION_ID_CLASS_NAME = "org.matrix.rustcomponents.sdk.EventOrTransactionId"
+		const val EVENT_OR_TRANSACTION_ID_CLASS_NAME =
+			"org.matrix.rustcomponents.sdk.EventOrTransactionId"
 		const val EVENT_ID_CLASS_NAME = "org.matrix.rustcomponents.sdk.EventOrTransactionId\$EventId"
 		const val MEDIA_SOURCE_CLASS_NAME = "org.matrix.rustcomponents.sdk.MediaSource"
 		const val RECEIPT_TYPE_CLASS_NAME = "org.matrix.rustcomponents.sdk.ReceiptType"

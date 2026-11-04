@@ -10,10 +10,15 @@ import org.briarproject.briar.api.connector.ConnectorMessageReadResult.LoadFaile
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult.Success
 import org.briarproject.briar.api.connector.ConnectorMessageType
 import org.briarproject.briar.api.connector.ConnectorReadMarker
+import org.briarproject.briar.api.connector.ConnectorRoomLeaver
+import org.briarproject.briar.api.connector.ConnectorRoomObserver
 import org.briarproject.briar.api.connector.ConnectorSource
 import org.briarproject.briar.api.connector.ConnectorSources
 import org.briarproject.briar.api.connector.ConnectorTextSender
 import org.briarproject.briar.api.connector.ConnectorThread
+import org.briarproject.briar.api.connector.ConnectorUnreadMarker
+import org.briarproject.briar.api.connector.ConnectorTypingSender
+import org.briarproject.briar.api.connector.ConnectorTypingObserver
 import org.briarproject.briar.api.matrix.MatrixAuthSession
 import org.briarproject.briar.api.matrix.MatrixAuthState
 import org.briarproject.briar.api.matrix.MatrixConnector
@@ -53,12 +58,23 @@ class MatrixRoomConnector(
 	ConnectorImageSender,
 	ConnectorFileSender,
 	ConnectorReadMarker,
-	ConnectorMessageDeleter {
+	ConnectorUnreadMarker,
+	ConnectorRoomLeaver,
+	ConnectorTypingSender,
+	ConnectorMessageDeleter,
+	ConnectorRoomObserver,
+	ConnectorTypingObserver {
 	override val source: ConnectorSource = ConnectorSources.MATRIX
 
 	override fun isEnabled(): Boolean = true
 
 	override fun isAuthorized(): Boolean = authSession.getSnapshot().authState == MatrixAuthState.READY
+
+	override fun getThreadTopic(threadId: String): String? = if (isAuthorized()) {
+		roomSnapshotClient.getRoomTopic(threadId)
+	} else {
+		null
+	}
 
 	override fun getRecentThreads(limit: Int): List<ConnectorThread> {
 		if (!isAuthorized()) return emptyList()
@@ -83,6 +99,9 @@ class MatrixRoomConnector(
 				latestMessageText = latest?.bodyText ?: "",
 				isLatestMessageOutgoing = latest?.isOutgoing ?: false,
 				latestMessageType = latest?.type ?: ConnectorMessageType.TEXT,
+				unreadCount = snapshot.unreadCount,
+				isMarkedUnread = snapshot.isMarkedUnread,
+				topic = snapshot.topic,
 			)
 		}
 	}
@@ -106,6 +125,7 @@ class MatrixRoomConnector(
 					isEdited = snapshot.isEdited,
 					isReply = snapshot.isReply,
 					reactions = snapshot.reactions,
+					attachment = snapshot.attachment,
 				)
 			},
 		)
@@ -114,6 +134,16 @@ class MatrixRoomConnector(
 	override fun sendText(threadId: String, text: String): Boolean {
 		if (!isAuthorized()) return false
 		return messageSendClient.sendTextMessage(threadId, text)
+	}
+
+	override fun prepareTyping(threadId: String): ConnectorTypingSender.PreparedTyping? {
+		if (!isAuthorized()) return null
+		val prepared = messageSendClient.prepareTyping(threadId) ?: return null
+		return object : ConnectorTypingSender.PreparedTyping {
+			override fun isCurrent() = isAuthorized() && prepared.isCurrent()
+			override fun send(typing: Boolean, wanted: () -> Boolean) =
+				prepared.send(typing) { wanted() && isCurrent() }
+		}
 	}
 
 	override fun prepareFileSend(threadId: String): ConnectorFileSender.PreparedFileSend? {
@@ -139,10 +169,28 @@ class MatrixRoomConnector(
 		return messageSendClient.markRead(threadId)
 	}
 
+	override fun prepareMarkUnread(threadId: String): ConnectorUnreadMarker.PreparedMarkUnread? =
+		if (isAuthorized()) messageSendClient.prepareMarkUnread(threadId) else null
+
+	override fun prepareLeave(threadId: String): ConnectorRoomLeaver.PreparedLeave? =
+		if (isAuthorized()) messageSendClient.prepareLeave(threadId) else null
+
 	override fun deleteMessage(threadId: String, messageId: String): Boolean {
 		if (!isAuthorized()) return false
 		return messageSendClient.deleteMessage(threadId, messageId)
 	}
+
+	override fun observeRoom(
+		threadId: String,
+		onUpdate: () -> Unit,
+	): ConnectorRoomObserver.RoomSubscription? =
+		if (isAuthorized()) messageSnapshotClient.observeRoom(threadId, onUpdate) else null
+
+	override fun observeTyping(
+		threadId: String,
+		onTypingChanged: (isTyping: Boolean) -> Unit,
+	): ConnectorTypingObserver.TypingSubscription? =
+		if (isAuthorized()) messageSnapshotClient.observeTyping(threadId, onTypingChanged) else null
 
 	companion object {
 		/** Overall wall-clock budget for [getRecentThreads]'s per-room preview loop (MX-034). */

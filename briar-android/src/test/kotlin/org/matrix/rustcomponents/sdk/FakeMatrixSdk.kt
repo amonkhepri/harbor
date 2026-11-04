@@ -44,18 +44,34 @@ enum class Membership { INVITED, JOINED, LEFT, KNOCKED, BANNED }
 
 enum class ReceiptType { READ, READ_PRIVATE, FULLY_READ }
 
+class RoomInfo(val numUnreadMessages: ULong = 0uL, val isMarkedUnread: Boolean = false) {
+	fun destroy() {
+		FakeMatrixSdkState.roomInfoDestroyCount++
+	}
+}
+
 /** Mirrors the pinned AAR's real shape: synchronous `id()`/`displayName()`/`isSpace()`/`membership()`. */
 class Room(
 	private val roomId: String,
 	private val roomDisplayName: String?,
 	private val space: Boolean,
 	private val roomMembership: Membership,
+	private val unreadMessagesCount: ULong? = null,
+	private val roomTopic: String? = null,
 ) {
 	fun id(): String = roomId
 	fun displayName(): String? = roomDisplayName
+	fun topic(): String? = roomTopic
 	fun isSpace(): Boolean = space
 	fun membership(): Membership = roomMembership
 	fun encryptionState(): EncryptionState = FakeMatrixSdkState.encryptionState
+
+	suspend fun roomInfo(): RoomInfo {
+		FakeMatrixSdkState.roomInfoCallCount++
+		FakeMatrixSdkState.roomInfoFailureToThrow?.let { throw it }
+		val count = unreadMessagesCount ?: throw ClientException.Generic("no roomInfo", "no roomInfo")
+		return RoomInfo(count, FakeMatrixSdkState.markedUnreadRooms[roomId] == true)
+	}
 
 	suspend fun timeline(): Timeline {
 		FakeMatrixSdkState.timelineCallCount++
@@ -82,17 +98,51 @@ class Room(
 		FakeMatrixSdkState.lastMarkAsReadReceiptType = receiptType
 		FakeMatrixSdkState.markAsReadFailureToThrow?.let { throw it }
 	}
+
+	suspend fun typingNotice(typing: Boolean) {
+		FakeMatrixSdkState.typingCalls.add(typing)
+		FakeMatrixSdkState.typingOperation(typing)
+	}
+
+	fun subscribeToTypingNotifications(listener: TypingNotificationsListener): TaskHandle {
+		FakeMatrixSdkState.typingListenerAddCount++
+		synchronized(FakeMatrixSdkState.activeTypingListeners) {
+			FakeMatrixSdkState.activeTypingListeners.add(listener)
+		}
+		return TaskHandle {
+			synchronized(FakeMatrixSdkState.activeTypingListeners) {
+				FakeMatrixSdkState.activeTypingListeners.remove(listener)
+			}
+		}
+	}
+
+	suspend fun setUnreadFlag(newValue: Boolean) {
+		FakeMatrixSdkState.markedUnreadRooms[roomId] = newValue
+	}
+
+	suspend fun leave() {
+		FakeMatrixSdkState.leaveCalls++
+		if (FakeMatrixSdkState.leaveFails) throw ClientException.Generic("failed", "failed")
+		FakeMatrixSdkState.roomsToReturn = FakeMatrixSdkState.roomsToReturn.filter { it.roomId != roomId }
+	}
 }
 
 interface TimelineListener {
 	fun onUpdate(diffs: List<TimelineDiff>)
 }
 
+interface TypingNotificationsListener {
+	fun call(typingUserIds: List<String>)
+}
+
 class Timeline {
 	suspend fun addListener(listener: TimelineListener): TaskHandle {
 		FakeMatrixSdkState.listenerAddCount++
 		FakeMatrixSdkState.timelineOperationOrder.add("listener")
-		val task = TaskHandle()
+		val task = TaskHandle {
+			FakeMatrixSdkState.activeTimelineListeners.remove(listener)
+		}
+		FakeMatrixSdkState.activeTimelineListeners.add(listener)
 		if (!FakeMatrixSdkState.listenerRegistrationSuspendAsynchronously) {
 			deliverTimelineUpdate(listener)
 			return task
@@ -159,6 +209,7 @@ class Timeline {
 
 	fun close() {
 		FakeMatrixSdkState.timelineCloseCount++
+		FakeMatrixSdkState.activeTimelineListeners.clear()
 	}
 
 	private fun deliverTimelineUpdate(listener: TimelineListener) {
@@ -180,13 +231,16 @@ class Timeline {
 	}
 }
 
-class TaskHandle {
+class TaskHandle(private val onCancel: (() -> Unit)? = null) {
 	fun cancel() {
 		FakeMatrixSdkState.taskCancelCount++
+		FakeMatrixSdkState.onTaskCancel?.invoke()
+		onCancel?.invoke()
 	}
 
 	fun close() {
 		FakeMatrixSdkState.taskCloseCount++
+		onCancel?.invoke()
 	}
 }
 
@@ -305,15 +359,43 @@ sealed class MessageType {
 	 * fixture usage compiling unchanged.
 	 */
 	class Text(val content: TextMessageContent = TextMessageContent("", null)) : MessageType()
-	object Image : MessageType()
+	open class Image(val content: ImageMessageContent? = null) : MessageType() {
+		companion object : Image(null)
+	}
 	object Video : MessageType()
 	object Audio : MessageType()
-	object File : MessageType()
+	open class File(val content: FileMessageContent? = null) : MessageType() {
+		companion object : File(null)
+	}
 	object Gallery : MessageType()
 	object Location : MessageType()
 	object Notice : MessageType()
 	object Emote : MessageType()
 	object Other : MessageType()
+}
+
+class FileMessageContent(
+	val filename: String,
+	val caption: String? = null,
+	val formattedCaption: FormattedBody? = null,
+	val source: MediaSource? = null,
+	val info: FileInfo? = null,
+) {
+	fun destroy() {
+		FakeMatrixSdkState.messageContentDestroyCount++
+	}
+}
+
+class ImageMessageContent(
+	val filename: String,
+	val caption: String? = null,
+	val formattedCaption: FormattedBody? = null,
+	val source: MediaSource? = null,
+	val info: ImageInfo? = null,
+) {
+	fun destroy() {
+		FakeMatrixSdkState.messageContentDestroyCount++
+	}
 }
 
 /** Mirrors the pinned AAR's real shape: `TextMessageContent(String body, FormattedBody formatted)`. */
@@ -547,13 +629,29 @@ class Client internal constructor(
 		if (fake.malformedRoomId) {
 			MalformedRoom(fake.roomId, fake.displayName, fake.isSpace, fake.membership)
 		} else {
-			Room(fake.roomId, fake.displayName, fake.isSpace, fake.membership)
+			Room(
+				fake.roomId,
+				fake.displayName,
+				fake.isSpace,
+				fake.membership,
+				fake.unreadMessagesCount,
+				fake.topic,
+			)
 		}
 	} as List<Room>
 
 	fun getRoom(roomId: String): Room? = FakeMatrixSdkState.roomsToReturn
 		.firstOrNull { it.roomId == roomId }
-		?.let { fake -> Room(fake.roomId, fake.displayName, fake.isSpace, fake.membership) }
+		?.let { fake ->
+			Room(
+				fake.roomId,
+				fake.displayName,
+				fake.isSpace,
+				fake.membership,
+				fake.unreadMessagesCount,
+				fake.topic,
+			)
+		}
 
 	suspend fun login(
 		username: String,
@@ -580,6 +678,8 @@ class Client internal constructor(
 		FakeMatrixSdkState.restoreSessionException?.let { throw it }
 		this.session = session
 	}
+
+	fun userId(): String = session?.userId ?: throw ClientException.Generic("no session", "no session")
 
 	suspend fun logout() {
 		FakeMatrixSdkState.onDispose?.invoke()
@@ -678,10 +778,12 @@ class ClientBuilder : AutoCloseable {
 		}
 	}
 
-	private fun newClient(): Client =
-		Client(FakeMatrixSdkState.homeserverUrlToReturn, FakeMatrixSdkState.lastSessionDelegate).also {
-			FakeMatrixSdkState.lastBuiltClient = it
-		}
+	private fun newClient(): Client = Client(
+		FakeMatrixSdkState.lastHomeserverUrl ?: FakeMatrixSdkState.homeserverUrlToReturn,
+		FakeMatrixSdkState.lastSessionDelegate,
+	).also {
+		FakeMatrixSdkState.lastBuiltClient = it
+	}
 }
 
 /** Mirrors the pinned SDK's `SqliteStoreBuilder`: also `AutoCloseable`, also wrapper-per-call. */
@@ -711,6 +813,8 @@ data class FakeRoomSpec(
 	val isSpace: Boolean = false,
 	val membership: Membership = Membership.JOINED,
 	val malformedRoomId: Boolean = false,
+	val unreadMessagesCount: ULong? = null,
+	val topic: String? = null,
 )
 
 /** Test-only malformed runtime handle returned through `Client.rooms()`'s erased list type. */
@@ -768,6 +872,8 @@ object FakeMatrixSdkState {
 	var lastBuiltClient: Client? = null
 	var roomsToReturn: List<FakeRoomSpec> = emptyList()
 	var roomCloseCount = 0
+	var leaveCalls = 0
+	var leaveFails = false
 	val closedRoomHandles = mutableListOf<String>()
 	var timelineCallCount = 0
 	var timelineSuspendAsynchronously = false
@@ -784,6 +890,23 @@ object FakeMatrixSdkState {
 	var paginationHitTimelineStart = false
 	var paginationFailureToThrow: Exception? = null
 	var timelineCloseCount = 0
+	val activeTimelineListeners = mutableListOf<TimelineListener>()
+	val activeTypingListeners = mutableListOf<TypingNotificationsListener>()
+	var typingListenerAddCount = 0
+
+	fun simulateTypingNotification(typingUserIds: List<String>) {
+		val listeners = synchronized(activeTypingListeners) { activeTypingListeners.toList() }
+		listeners.forEach { it.call(typingUserIds) }
+	}
+
+	/** Runs inside [TaskHandle.cancel], e.g. to emulate a native cancel awaiting callbacks. */
+	var onTaskCancel: (() -> Unit)? = null
+
+	fun simulateRemoteEvent(diffs: List<TimelineDiff>) {
+		val listeners = synchronized(activeTimelineListeners) { activeTimelineListeners.toList() }
+		listeners.forEach { it.onUpdate(diffs) }
+	}
+
 	var taskCancelCount = 0
 	var taskCloseCount = 0
 	var timelineDiffDestroyCount = 0
@@ -820,12 +943,21 @@ object FakeMatrixSdkState {
 	var joinDelayMs = 0L
 	var sendAttachmentJoinHandleCloseCount = 0
 	var markAsReadCallCount = 0
+	val typingCalls = mutableListOf<Boolean>()
+	var typingOperation: suspend (Boolean) -> Unit = {}
+	val markedUnreadRooms = mutableMapOf<String, Boolean>()
 	var lastMarkAsReadRoomId: String? = null
 	var lastMarkAsReadReceiptType: ReceiptType? = null
 	var markAsReadFailureToThrow: ClientException? = null
+	var roomInfoCallCount = 0
+	var roomInfoDestroyCount = 0
+	var roomInfoFailureToThrow: Exception? = null
 
 	fun reset() {
 		awaitBuilds()
+		roomInfoCallCount = 0
+		roomInfoDestroyCount = 0
+		roomInfoFailureToThrow = null
 		onSessionConstruct = null
 		onSessionRead = null
 		onLogin = null
@@ -855,6 +987,8 @@ object FakeMatrixSdkState {
 		lastBuiltClient = null
 		roomsToReturn = emptyList()
 		roomCloseCount = 0
+		leaveCalls = 0
+		leaveFails = false
 		closedRoomHandles.clear()
 		timelineCallCount = 0
 		timelineSuspendAsynchronously = false
@@ -871,6 +1005,10 @@ object FakeMatrixSdkState {
 		paginationHitTimelineStart = false
 		paginationFailureToThrow = null
 		timelineCloseCount = 0
+		activeTimelineListeners.clear()
+		activeTypingListeners.clear()
+		typingListenerAddCount = 0
+		onTaskCancel = null
 		taskCancelCount = 0
 		taskCloseCount = 0
 		timelineDiffDestroyCount = 0
@@ -907,6 +1045,9 @@ object FakeMatrixSdkState {
 		joinDelayMs = 0L
 		sendAttachmentJoinHandleCloseCount = 0
 		markAsReadCallCount = 0
+		typingCalls.clear()
+		typingOperation = {}
+		markedUnreadRooms.clear()
 		lastMarkAsReadRoomId = null
 		lastMarkAsReadReceiptType = null
 		markAsReadFailureToThrow = null

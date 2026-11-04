@@ -1,5 +1,6 @@
 package org.briarproject.briar.android.connector
 
+import org.briarproject.briar.api.connector.ConnectorAttachmentMetadata
 import org.briarproject.briar.api.connector.ConnectorMessage
 import org.briarproject.briar.api.connector.ConnectorMessageType
 import org.briarproject.briar.api.connector.ConnectorReactionSummary
@@ -19,6 +20,7 @@ data class ConnectorConversationMessageItem(
 	val isReply: Boolean = false,
 	val reactions: List<ConnectorReactionSummary> = emptyList(),
 	val localEchoStatus: ConnectorLocalEchoStatus? = null,
+	val attachment: ConnectorAttachmentMetadata? = null,
 ) {
 	val stableId: String
 		get() = "${connectorSource.id}:$connectorThreadId:$connectorMessageId" +
@@ -64,6 +66,7 @@ data class ConnectorConversationMessageItem(
 				message.isEdited,
 				message.isReply,
 				message.reactions,
+				attachment = message.attachment,
 			)
 	}
 }

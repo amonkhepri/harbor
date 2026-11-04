@@ -1,5 +1,8 @@
 package org.briarproject.briar.android.contact
 
+import android.view.MenuInflater
+import android.widget.FrameLayout
+import android.widget.PopupMenu
 import org.briarproject.briar.R
 import org.briarproject.briar.android.connector.ConnectorConversationActivity
 import org.briarproject.briar.android.contact.ConnectorInboxAvailabilityState.ACCOUNT_UNAVAILABLE
@@ -9,6 +12,8 @@ import org.briarproject.briar.android.contact.ConnectorInboxAvailabilityState.LO
 import org.briarproject.briar.android.contact.ConnectorInboxAvailabilityState.NONE
 import org.briarproject.briar.api.connector.ConnectorSources
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -169,5 +174,119 @@ class ContactListFragmentTest {
 		assertEquals("telegram", intent.getStringExtra(ConnectorConversationActivity.SOURCE_ID))
 		assertEquals("555", intent.getStringExtra(ConnectorConversationActivity.THREAD_ID))
 		assertEquals("Chat title", intent.getStringExtra(ConnectorConversationActivity.THREAD_TITLE))
+	}
+
+	@Test
+	fun testFilterActionRecognizedAndMapped() {
+		assertEquals(InboxSourceFilter.All, ContactListFragment.filterForAction(R.id.action_filter_all))
+		assertEquals(
+			InboxSourceFilter.Matrix,
+			ContactListFragment.filterForAction(R.id.action_filter_matrix),
+		)
+		assertEquals(
+			InboxSourceFilter.Briar,
+			ContactListFragment.filterForAction(R.id.action_filter_briar),
+		)
+		assertEquals(null, ContactListFragment.filterForAction(android.R.id.home))
+		assertEquals(null, ContactListFragment.filterForAction(R.id.action_refresh_connector_threads))
+	}
+
+	@Test
+	fun testFilterVisibilityRequiresEnabledConnector() {
+		assertEquals(false, ContactListFragment.shouldShowFilterAction(false))
+		assertEquals(true, ContactListFragment.shouldShowFilterAction(true))
+	}
+
+	@Test
+	fun testOptionsMenuContainsFilterAndRefreshWithoutFabActions() {
+		val context = RuntimeEnvironment.getApplication()
+		val menu = PopupMenu(context, FrameLayout(context)).menu
+		MenuInflater(context).inflate(R.menu.telegram_inbox_actions, menu)
+
+		assertNotNull(menu.findItem(R.id.action_filter_inbox))
+		assertNotNull(menu.findItem(R.id.action_refresh_connector_threads))
+		assertNull(menu.findItem(R.id.action_add_contact_nearby))
+		assertNull(menu.findItem(R.id.action_add_contact_remotely))
+
+		val filterItem = menu.findItem(R.id.action_filter_inbox)
+		val subMenu = filterItem.subMenu
+		assertNotNull(subMenu)
+		assertNotNull(subMenu!!.findItem(R.id.action_filter_all))
+		assertNotNull(subMenu.findItem(R.id.action_filter_matrix))
+		assertNotNull(subMenu.findItem(R.id.action_filter_briar))
+	}
+
+	@Test
+	fun testFabSpeedDialMenuContainsOnlyAddContactActions() {
+		val context = RuntimeEnvironment.getApplication()
+		val menu = PopupMenu(context, FrameLayout(context)).menu
+		MenuInflater(context).inflate(R.menu.contact_list_actions, menu)
+
+		assertNull(menu.findItem(R.id.action_filter_inbox))
+		assertNull(menu.findItem(R.id.action_refresh_connector_threads))
+		assertNotNull(menu.findItem(R.id.action_add_contact_nearby))
+		assertNotNull(menu.findItem(R.id.action_add_contact_remotely))
+		assertEquals(2, menu.size())
+	}
+
+	@Test
+	fun testFragmentOnCreateOptionsMenuInflatesOnlyFilterAndRefresh() {
+		val context = RuntimeEnvironment.getApplication()
+		val fragment = ContactListFragment()
+		val menu = PopupMenu(context, FrameLayout(context)).menu
+		fragment.onCreateOptionsMenu(menu, MenuInflater(context))
+
+		assertNotNull(menu.findItem(R.id.action_filter_inbox))
+		assertNotNull(menu.findItem(R.id.action_refresh_connector_threads))
+		assertNull(menu.findItem(R.id.action_add_contact_nearby))
+		assertNull(menu.findItem(R.id.action_add_contact_remotely))
+	}
+
+	@Test
+	fun testCheckedIdForFilter() {
+		assertEquals(
+			R.id.action_filter_all,
+			ContactListFragment.checkedIdForFilter(InboxSourceFilter.All),
+		)
+		assertEquals(
+			R.id.action_filter_matrix,
+			ContactListFragment.checkedIdForFilter(InboxSourceFilter.Matrix),
+		)
+		assertEquals(
+			R.id.action_filter_briar,
+			ContactListFragment.checkedIdForFilter(InboxSourceFilter.Briar),
+		)
+		assertEquals(
+			R.id.action_filter_all,
+			ContactListFragment.checkedIdForFilter(InboxSourceFilter.Telegram),
+		)
+	}
+
+	@Test
+	fun testEffectiveFilterResetsToAllWhenConnectorsDisabled() {
+		assertEquals(
+			InboxSourceFilter.All,
+			ContactListFragment.effectiveFilter(false, InboxSourceFilter.Matrix),
+		)
+		assertEquals(
+			InboxSourceFilter.All,
+			ContactListFragment.effectiveFilter(false, InboxSourceFilter.Briar),
+		)
+		assertEquals(
+			InboxSourceFilter.All,
+			ContactListFragment.effectiveFilter(false, InboxSourceFilter.All),
+		)
+		assertEquals(
+			InboxSourceFilter.Matrix,
+			ContactListFragment.effectiveFilter(true, InboxSourceFilter.Matrix),
+		)
+		assertEquals(
+			InboxSourceFilter.Briar,
+			ContactListFragment.effectiveFilter(true, InboxSourceFilter.Briar),
+		)
+		assertEquals(
+			InboxSourceFilter.All,
+			ContactListFragment.effectiveFilter(true, InboxSourceFilter.All),
+		)
 	}
 }
