@@ -34,7 +34,6 @@ class InboxThreadAdapterTest {
 		assertContentsChanged(item.copy(previewText = "new"))
 		assertContentsChanged(item.copy(previewType = ConnectorMessageType.PHOTO))
 		assertContentsChanged(item.copy(isLastMessageOutgoing = true))
-		assertContentsChanged(item.copy(isPreviewLoading = true))
 		assertContentsChanged(item.copy(latestActivityMillis = 2L))
 		assertContentsChanged(item.copy(unreadCount = 2))
 		assertContentsChanged(item.copy(isMarkedUnread = true))

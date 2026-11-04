@@ -56,8 +56,6 @@ class ConnectorInboxThreadViewHolder(view: View) : RecyclerView.ViewHolder(view)
 			unreadBadge.contentDescription = null
 		}
 		preview.text = when {
-			item.isPreviewLoading ->
-				preview.resources.getString(R.string.connector_thread_preview_loading)
 			item.previewType == ConnectorMessageType.PHOTO ->
 				previewText(preview.resources, item, R.string.connector_message_photo)
 			item.previewType == ConnectorMessageType.FILE ->

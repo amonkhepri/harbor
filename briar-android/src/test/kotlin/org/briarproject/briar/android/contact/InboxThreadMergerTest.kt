@@ -54,22 +54,6 @@ class InboxThreadMergerTest {
 	}
 
 	@Test
-	fun testTelegramRowsExposeLoadingState() {
-		val item = GenericConnectorInboxThreadItem(
-			connectorSource = ConnectorSources.TELEGRAM,
-			connectorThreadId = "7",
-			title = "chat",
-			latestActivityMillis = 42000L,
-			previewText = "",
-			isLastMessageOutgoing = false,
-			isPreviewLoading = true,
-			previewType = ConnectorMessageType.TEXT,
-		)
-
-		assertPreviewState(item, isPreviewLoading = true)
-	}
-
-	@Test
 	fun testMergeSortsTelegramAndMatrixRowsBySourceQualifiedStableId() {
 		val telegram = GenericConnectorInboxThreadItem(
 			ConnectorThread(
@@ -209,13 +193,11 @@ class InboxThreadMergerTest {
 	private fun assertPreviewState(
 		item: ConnectorInboxThreadItem,
 		previewText: String = "",
-		isPreviewLoading: Boolean = false,
 		isLastMessageOutgoing: Boolean = false,
 	) {
 		assertEquals(
-			listOf(isPreviewLoading, isLastMessageOutgoing, previewText.isNotEmpty(), previewText),
+			listOf(isLastMessageOutgoing, previewText.isNotEmpty(), previewText),
 			listOf(
-				item.isPreviewLoading,
 				item.isLastMessageOutgoing,
 				item.hasPreviewText(),
 				item.previewText,
