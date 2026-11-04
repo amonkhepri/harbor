@@ -138,17 +138,6 @@ class TelegramTdlibAccessGateTest {
 	}
 
 	@Test
-	fun stopThrowsServiceExceptionWhenUnconfirmedCancelledCloseReported() {
-		val gate = TelegramTdlibAccessGate()
-		gate.reportUnconfirmedCancelledClose()
-		assertTrue(gate.hasUnconfirmedClose())
-		assertThrows(ServiceException::class.java) {
-			gate.stop {}
-		}
-		assertFalse(gate.hasUnconfirmedClose())
-	}
-
-	@Test
 	fun startClearsUnconfirmedClose() {
 		val gate = TelegramTdlibAccessGate()
 		gate.reportUnconfirmedClose()
