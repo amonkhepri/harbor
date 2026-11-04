@@ -243,7 +243,6 @@ class ConnectorConversationActivity : BriarActivity() {
 	private val unreadOwner = ConnectorConversationLoadOwner()
 	private val leaveOwner = ConnectorConversationLoadOwner()
 	private var leavePending = false
-	private var leaveDialog: AlertDialog? = null
 
 	@Volatile private var unreadPending = false
 	private lateinit var fileButton: ImageButton
@@ -581,7 +580,6 @@ class ConnectorConversationActivity : BriarActivity() {
 		lastLoadFailed = false
 		typing?.stop()
 		leaveOwner.invalidate()
-		leaveDialog?.dismiss()
 		unreadOwner.invalidate()
 		loadOwner.invalidate()
 		retryOwner.invalidate()
@@ -687,9 +685,30 @@ class ConnectorConversationActivity : BriarActivity() {
 		hasValidThreadId(threadId)
 
 	private fun confirmLeaveRoom() {
-		if (leavePending || leaveDialog != null || !canLeaveRoom() || isFinishing || isDestroyed) return
+		if (leavePending ||
+			!canLeaveRoom() ||
+			isFinishing ||
+			isDestroyed ||
+			supportFragmentManager.isStateSaved ||
+			supportFragmentManager.findFragmentByTag(ConnectorLeaveRoomDialogFragment.TAG) != null
+		) {
+			return
+		}
+		ConnectorLeaveRoomDialogFragment.newInstance(threadId)
+			.showNow(supportFragmentManager, ConnectorLeaveRoomDialogFragment.TAG)
+	}
+
+	internal fun confirmLeaveRoom(confirmedThreadId: String) {
+		if (leavePending ||
+			confirmedThreadId != threadId ||
+			!canLeaveRoom() ||
+			isFinishing ||
+			isDestroyed
+		) {
+			return
+		}
 		val active = connector ?: return
-		val room = threadId
+		val room = confirmedThreadId
 		val prepared = (active as ConnectorRoomLeaver).prepareLeave(room)
 		val generation = leaveOwner.begin()
 		fun current() = leaveOwner.owns(generation) &&
@@ -699,46 +718,39 @@ class ConnectorConversationActivity : BriarActivity() {
 			!isDestroyed &&
 			active.isAuthorized() &&
 			prepared?.isCurrent() != false
-		leaveDialog = AlertDialog.Builder(this)
-			.setMessage(R.string.connector_leave_room_confirm)
-			.setNegativeButton(R.string.cancel, null)
-			.setPositiveButton(R.string.connector_leave_room_action) { _, _ ->
-				if (!leavePending && current()) {
-					leavePending = true
+		if (!leavePending && current()) {
+			leavePending = true
+			invalidateOptionsMenu()
+			ioExecutor.execute {
+				if (!current()) return@execute
+				val success = try {
+					prepared?.leave() == true
+				} catch (e: RuntimeException) {
+					false
+				}
+				runOnUiThread {
+					if (!current()) return@runOnUiThread
+					leavePending = false
 					invalidateOptionsMenu()
-					ioExecutor.execute {
-						if (!current()) return@execute
-						val success = try {
-							prepared?.leave() == true
-						} catch (e: RuntimeException) {
-							false
-						}
-						runOnUiThread {
-							if (!current()) return@runOnUiThread
-							leavePending = false
-							invalidateOptionsMenu()
-							if (success) {
-								ConnectorDraftStore.clearDraft(
-									intent?.getStringExtra(SOURCE_ID) ?: connector?.source?.id,
-									room,
-								)
-								// finish() triggers onPause(), whose saveDraft() would otherwise
-								// resurrect the just-cleared draft from the still-populated field.
-								if (::composeText.isInitialized) composeText.setText("")
-								// ContactListFragment.onStart reloads the unified inbox on return.
-								finish()
-							} else {
-								BriarSnackbarBuilder()
-									.setAction(R.string.connector_leave_room_retry) { confirmLeaveRoom() }
-									.make(list, R.string.connector_leave_room_failed, Snackbar.LENGTH_LONG)
-									.show()
-							}
-						}
+					if (success) {
+						ConnectorDraftStore.clearDraft(
+							intent?.getStringExtra(SOURCE_ID) ?: connector?.source?.id,
+							room,
+						)
+						// finish() triggers onPause(), whose saveDraft() would otherwise
+						// resurrect the just-cleared draft from the still-populated field.
+						if (::composeText.isInitialized) composeText.setText("")
+						// ContactListFragment.onStart reloads the unified inbox on return.
+						finish()
+					} else {
+						BriarSnackbarBuilder()
+							.setAction(R.string.connector_leave_room_retry) { confirmLeaveRoom() }
+							.make(list, R.string.connector_leave_room_failed, Snackbar.LENGTH_LONG)
+							.show()
 					}
 				}
 			}
-			.setOnDismissListener { leaveDialog = null }
-			.show()
+		}
 	}
 
 	private fun canMarkUnread(): Boolean = connector is ConnectorUnreadMarker &&
@@ -1280,6 +1292,29 @@ class ConnectorConversationActivity : BriarActivity() {
 				}
 			}
 		}
+	}
+}
+
+class ConnectorLeaveRoomDialogFragment : DialogFragment() {
+	companion object {
+		const val TAG = "ConnectorLeaveRoomDialogFragment"
+		private const val ARG_THREAD_ID = "threadId"
+
+		fun newInstance(threadId: String) = ConnectorLeaveRoomDialogFragment().apply {
+			arguments = Bundle().apply { putString(ARG_THREAD_ID, threadId) }
+		}
+	}
+
+	override fun onCreateDialog(savedInstanceState: Bundle?): Dialog {
+		val activity = requireActivity() as ConnectorConversationActivity
+		val threadId = requireArguments().getString(ARG_THREAD_ID)!!
+		return AlertDialog.Builder(activity)
+			.setMessage(R.string.connector_leave_room_confirm)
+			.setNegativeButton(R.string.cancel, null)
+			.setPositiveButton(R.string.connector_leave_room_action) { _, _ ->
+				activity.confirmLeaveRoom(threadId)
+			}
+			.create()
 	}
 }
 
