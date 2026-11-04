@@ -193,6 +193,176 @@ class ConnectorConversationMessageItemTest {
 	}
 
 	@Test
+	fun testFromMessagesClearsReactionsWhenLaterDuplicateHasEmptyReactions() {
+		val items = ConnectorConversationMessageItem.fromMessages(
+			listOf(
+				connectorMessage(
+					"1",
+					10,
+					false,
+					"hello",
+					1L,
+					reactions = listOf(ConnectorReactionSummary("👍", 1)),
+				),
+				connectorMessage(
+					"1",
+					10,
+					false,
+					"hello",
+					1L,
+					reactions = emptyList(),
+				),
+			),
+		)
+
+		assertEquals(1, items.size)
+		val item = items.single()
+		assertEquals(emptyList<ConnectorReactionSummary>(), item.reactions)
+	}
+
+	@Test
+	fun testFromMessagesUpdatesReactionsWhenLaterDuplicateHasUpdatedReactions() {
+		val items = ConnectorConversationMessageItem.fromMessages(
+			listOf(
+				connectorMessage(
+					"1",
+					10,
+					false,
+					"hello",
+					1L,
+					reactions = listOf(ConnectorReactionSummary("👍", 1)),
+				),
+				connectorMessage(
+					"1",
+					10,
+					false,
+					"hello",
+					1L,
+					reactions = listOf(ConnectorReactionSummary("❤️", 2)),
+				),
+			),
+		)
+
+		assertEquals(1, items.size)
+		val item = items.single()
+		assertEquals(listOf(ConnectorReactionSummary("❤️", 2)), item.reactions)
+	}
+
+	@Test
+	fun testFromMessagesPreservesEditedEmptyReactionsAgainstStaleDuplicateWithReactions() {
+		// Edited with empty reactions followed by stale unedited with reactions
+		val items1 = ConnectorConversationMessageItem.fromMessages(
+			listOf(
+				connectorMessage(
+					"1",
+					10,
+					false,
+					"edited text",
+					1L,
+					isEdited = true,
+					reactions = emptyList(),
+				),
+				connectorMessage(
+					"1",
+					10,
+					false,
+					"stale original",
+					1L,
+					isEdited = false,
+					reactions = listOf(ConnectorReactionSummary("👍", 1)),
+				),
+			),
+		)
+
+		assertEquals(1, items1.size)
+		assertEquals(emptyList<ConnectorReactionSummary>(), items1.single().reactions)
+		assertEquals("edited text", items1.single().text)
+
+		// Stale unedited with reactions followed by edited with empty reactions
+		val items2 = ConnectorConversationMessageItem.fromMessages(
+			listOf(
+				connectorMessage(
+					"1",
+					10,
+					false,
+					"stale original",
+					1L,
+					isEdited = false,
+					reactions = listOf(ConnectorReactionSummary("👍", 1)),
+				),
+				connectorMessage(
+					"1",
+					10,
+					false,
+					"edited text",
+					1L,
+					isEdited = true,
+					reactions = emptyList(),
+				),
+			),
+		)
+
+		assertEquals(1, items2.size)
+		assertEquals(emptyList<ConnectorReactionSummary>(), items2.single().reactions)
+		assertEquals("edited text", items2.single().text)
+	}
+
+	@Test
+	fun testFromMessagesClearsReactionsWhenMessageIsDeletedInEitherOrder() {
+		// Reacted then deleted
+		val items1 = ConnectorConversationMessageItem.fromMessages(
+			listOf(
+				connectorMessage(
+					"1",
+					10,
+					false,
+					"msg",
+					1L,
+					reactions = listOf(ConnectorReactionSummary("👍", 1)),
+				),
+				connectorMessage(
+					"1",
+					10,
+					false,
+					"",
+					1L,
+					type = ConnectorMessageType.DELETED,
+				),
+			),
+		)
+
+		assertEquals(1, items1.size)
+		assertEquals(emptyList<ConnectorReactionSummary>(), items1.single().reactions)
+		assertEquals(ConnectorMessageType.DELETED, items1.single().type)
+
+		// Deleted then reacted
+		val items2 = ConnectorConversationMessageItem.fromMessages(
+			listOf(
+				connectorMessage(
+					"1",
+					10,
+					false,
+					"",
+					1L,
+					type = ConnectorMessageType.DELETED,
+				),
+				connectorMessage(
+					"1",
+					10,
+					false,
+					"msg",
+					1L,
+					reactions = listOf(ConnectorReactionSummary("👍", 1)),
+				),
+			),
+		)
+
+		assertEquals(1, items2.size)
+		assertEquals(emptyList<ConnectorReactionSummary>(), items2.single().reactions)
+		assertEquals(ConnectorMessageType.DELETED, items2.single().type)
+	}
+
+	@Test
 	fun testFromMessagesPreservesAttachmentMetadata() {
 		val attachment = ConnectorAttachmentMetadata(
 			fileName = "sample.pdf",

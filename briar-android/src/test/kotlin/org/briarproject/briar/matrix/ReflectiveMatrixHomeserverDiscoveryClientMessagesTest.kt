@@ -525,21 +525,38 @@ class ReflectiveMatrixHomeserverDiscoveryClientMessagesTest {
 		assertEquals(
 			listOf(
 				MatrixMessageSnapshot("\$event1:example.org", "@alice:example.org", "message 1", 1L, false),
-				MatrixMessageSnapshot("\$event2:example.org", "@alice:example.org", "message 2 (updated)", 2L, false),
-				MatrixMessageSnapshot("\$event3:example.org", "@alice:example.org", "message 3", 3L, false),
+				MatrixMessageSnapshot(
+					"\$event2:example.org",
+					"@alice:example.org",
+					"message 2 (updated)",
+					2L,
+					false,
+				),
+				MatrixMessageSnapshot(
+					"\$event3:example.org",
+					"@alice:example.org",
+					"message 3",
+					3L,
+					false,
+				),
 			),
 			result,
 		)
 	}
 
 	@Test
-	fun `getRecentMessages preserves edited state when duplicate events conflict across pagination`() {
+	fun `getRecentMessages preserves edited state across pagination duplicates`() {
 		val client = loggedInClient()
 		FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec("!room:example.org"))
 		FakeMatrixSdkState.timelineDiffsToReturn = listOf(
 			TimelineDiff.Reset(
 				listOf(
-					remoteEvent("\$event2:example.org", "message 2 (edited)", 2_000uL, edited = true),
+					remoteEvent(
+						"\$event2:example.org",
+						"message 2 (edited)",
+						2_000uL,
+						edited = true,
+					),
 					remoteEvent("\$event3:example.org", "message 3", 3_000uL),
 				),
 			),
@@ -548,11 +565,31 @@ class ReflectiveMatrixHomeserverDiscoveryClientMessagesTest {
 			TimelineDiff.Reset(
 				listOf(
 					// Unedited followed by edited
-					remoteEvent("\$event1:example.org", "message 1 (original)", 1_000uL, edited = false),
-					remoteEvent("\$event1:example.org", "message 1 (edited)", 1_000uL, edited = true),
+					remoteEvent(
+						"\$event1:example.org",
+						"message 1 (original)",
+						1_000uL,
+						edited = false,
+					),
+					remoteEvent(
+						"\$event1:example.org",
+						"message 1 (edited)",
+						1_000uL,
+						edited = true,
+					),
 					// Edited followed by unedited stale original
-					remoteEvent("\$event2:example.org", "message 2 (edited)", 2_000uL, edited = true),
-					remoteEvent("\$event2:example.org", "message 2 (original)", 2_000uL, edited = false),
+					remoteEvent(
+						"\$event2:example.org",
+						"message 2 (edited)",
+						2_000uL,
+						edited = true,
+					),
+					remoteEvent(
+						"\$event2:example.org",
+						"message 2 (original)",
+						2_000uL,
+						edited = false,
+					),
 					remoteEvent("\$event3:example.org", "message 3", 3_000uL),
 				),
 			),
@@ -578,23 +615,49 @@ class ReflectiveMatrixHomeserverDiscoveryClientMessagesTest {
 					false,
 					isEdited = true,
 				),
-				MatrixMessageSnapshot("\$event3:example.org", "@alice:example.org", "message 3", 3L, false),
+				MatrixMessageSnapshot(
+					"\$event3:example.org",
+					"@alice:example.org",
+					"message 3",
+					3L,
+					false,
+				),
 			),
 			result,
 		)
 	}
 
 	@Test
-	fun `getRecentMessages preserves edited state when duplicate events conflict in initial snapshot`() {
+	fun `getRecentMessages preserves edited state across initial snapshot duplicates`() {
 		val client = loggedInClient()
 		FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec("!room:example.org"))
 		FakeMatrixSdkState.timelineDiffsToReturn = listOf(
 			TimelineDiff.Reset(
 				listOf(
-					remoteEvent("\$event1:example.org", "message 1 (original)", 1_000uL, edited = false),
-					remoteEvent("\$event1:example.org", "message 1 (edited)", 1_000uL, edited = true),
-					remoteEvent("\$event2:example.org", "message 2 (edited)", 2_000uL, edited = true),
-					remoteEvent("\$event2:example.org", "message 2 (original)", 2_000uL, edited = false),
+					remoteEvent(
+						"\$event1:example.org",
+						"message 1 (original)",
+						1_000uL,
+						edited = false,
+					),
+					remoteEvent(
+						"\$event1:example.org",
+						"message 1 (edited)",
+						1_000uL,
+						edited = true,
+					),
+					remoteEvent(
+						"\$event2:example.org",
+						"message 2 (edited)",
+						2_000uL,
+						edited = true,
+					),
+					remoteEvent(
+						"\$event2:example.org",
+						"message 2 (original)",
+						2_000uL,
+						edited = false,
+					),
 				),
 			),
 		)
@@ -625,7 +688,7 @@ class ReflectiveMatrixHomeserverDiscoveryClientMessagesTest {
 	}
 
 	@Test
-	fun `getRecentMessages preserves deleted state when duplicate events conflict in initial snapshot`() {
+	fun `getRecentMessages preserves deleted state across initial snapshot duplicates`() {
 		val client = loggedInClient()
 		FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec("!room:example.org"))
 		val deleted1 = TimelineItem(
@@ -687,7 +750,7 @@ class ReflectiveMatrixHomeserverDiscoveryClientMessagesTest {
 	}
 
 	@Test
-	fun `getRecentMessages preserves deleted state when duplicate events conflict across pagination`() {
+	fun `getRecentMessages preserves deleted state across pagination duplicates`() {
 		val client = loggedInClient()
 		FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec("!room:example.org"))
 		FakeMatrixSdkState.timelineDiffsToReturn = listOf(
@@ -749,6 +812,156 @@ class ReflectiveMatrixHomeserverDiscoveryClientMessagesTest {
 					2L,
 					false,
 					type = ConnectorMessageType.DELETED,
+				),
+			),
+			result,
+		)
+	}
+
+	@Test
+	fun `getRecentMessages clears reactions when duplicate later state is empty in initial`() {
+		val client = loggedInClient()
+		FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec("!room:example.org"))
+		FakeMatrixSdkState.timelineDiffsToReturn = listOf(
+			TimelineDiff.Reset(
+				listOf(
+					remoteEvent(
+						"\$event1:example.org",
+						"message 1",
+						1_000uL,
+						reactions = listOf(Reaction("👍", listOf(ReactionSenderData()))),
+					),
+					remoteEvent(
+						"\$event1:example.org",
+						"message 1",
+						1_000uL,
+						reactions = emptyList(),
+					),
+				),
+			),
+		)
+
+		val result = client.getRecentMessages("!room:example.org", 1)
+
+		assertEquals(
+			listOf(
+				MatrixMessageSnapshot(
+					"\$event1:example.org",
+					"@alice:example.org",
+					"message 1",
+					1L,
+					false,
+					reactions = emptyList(),
+				),
+			),
+			result,
+		)
+	}
+
+	@Test
+	fun `getRecentMessages clears reactions when duplicate later state is empty in page`() {
+		val client = loggedInClient()
+		FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec("!room:example.org"))
+		FakeMatrixSdkState.timelineDiffsToReturn = listOf(
+			TimelineDiff.Reset(
+				listOf(
+					remoteEvent(
+						"\$event1:example.org",
+						"message 1",
+						1_000uL,
+						reactions = listOf(Reaction("👍", listOf(ReactionSenderData()))),
+					),
+				),
+			),
+		)
+		FakeMatrixSdkState.timelineDiffsAfterPagination = listOf(
+			TimelineDiff.Reset(
+				listOf(
+					remoteEvent(
+						"\$event1:example.org",
+						"message 1",
+						1_000uL,
+						reactions = emptyList(),
+					),
+					remoteEvent("\$event2:example.org", "message 2", 2_000uL),
+				),
+			),
+		)
+
+		val result = client.getRecentMessages("!room:example.org", 2)
+
+		assertEquals(
+			listOf(
+				MatrixMessageSnapshot(
+					"\$event1:example.org",
+					"@alice:example.org",
+					"message 1",
+					1L,
+					false,
+					reactions = emptyList(),
+				),
+				MatrixMessageSnapshot(
+					"\$event2:example.org",
+					"@alice:example.org",
+					"message 2",
+					2L,
+					false,
+				),
+			),
+			result,
+		)
+	}
+
+	@Test
+	fun `getRecentMessages preserves edited empty reactions against stale duplicate`() {
+		val client = loggedInClient()
+		FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec("!room:example.org"))
+		FakeMatrixSdkState.timelineDiffsToReturn = listOf(
+			TimelineDiff.Reset(
+				listOf(
+					remoteEvent(
+						"\$event1:example.org",
+						"message 1 (edited)",
+						1_000uL,
+						edited = true,
+						reactions = emptyList(),
+					),
+				),
+			),
+		)
+		FakeMatrixSdkState.timelineDiffsAfterPagination = listOf(
+			TimelineDiff.Reset(
+				listOf(
+					remoteEvent(
+						"\$event1:example.org",
+						"message 1 (stale original)",
+						1_000uL,
+						edited = false,
+						reactions = listOf(Reaction("👍", listOf(ReactionSenderData()))),
+					),
+					remoteEvent(
+						"\$event1:example.org",
+						"message 1 (edited)",
+						1_000uL,
+						edited = true,
+						reactions = emptyList(),
+					),
+				),
+			),
+		)
+
+		val result = client.getRecentMessages("!room:example.org", 1)
+
+		assertEquals(
+			listOf(
+				MatrixMessageSnapshot(
+					"\$event1:example.org",
+					"@alice:example.org",
+					"message 1 (edited)",
+					1L,
+					false,
+					isEdited = true,
+					reactions = emptyList(),
 				),
 			),
 			result,

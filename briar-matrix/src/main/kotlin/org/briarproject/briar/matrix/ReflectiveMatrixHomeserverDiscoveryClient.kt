@@ -1225,6 +1225,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 				type = ConnectorMessageType.DELETED,
 				isEdited = false,
 				attachment = null,
+				reactions = emptyList(),
 			)
 		}
 		val base = when {
@@ -1232,15 +1233,14 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			!first.isEdited && second.isEdited -> second
 			else -> second
 		}
-		val reactions = if (second.reactions.isNotEmpty()) {
-			second.reactions
+		val attachment = if (base == first) {
+			first.attachment ?: second.attachment
 		} else {
-			first.reactions
+			second.attachment ?: first.attachment
 		}
-		val attachment = second.attachment ?: first.attachment
 		val isReply = second.isReply || first.isReply
 		return base.copy(
-			reactions = reactions,
+			reactions = base.reactions,
 			attachment = attachment,
 			isReply = isReply,
 		)
