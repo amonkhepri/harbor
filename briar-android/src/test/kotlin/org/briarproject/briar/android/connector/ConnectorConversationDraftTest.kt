@@ -97,6 +97,18 @@ class ConnectorConversationDraftTest {
 		}
 		val activity = Robolectric.buildActivity(ConnectorConversationActivity::class.java, intent).get()
 		activity.setTheme(R.style.BriarTheme)
+		val savedState = androidx.activity.ComponentActivity::class.java
+			.getDeclaredField("mSavedStateRegistryController").apply { isAccessible = true }
+			.get(activity) as androidx.savedstate.SavedStateRegistryController
+		savedState.performRestore(null)
+		val fragments = androidx.fragment.app.FragmentActivity::class.java
+			.getDeclaredField("mFragments").apply { isAccessible = true }
+			.get(activity) as androidx.fragment.app.FragmentController
+		fragments.attachHost(null)
+		fragments.dispatchCreate()
+		fragments.dispatchActivityCreated()
+		fragments.dispatchStart()
+		fragments.dispatchResume()
 
 		val root = FrameLayout(activity).apply { id = android.R.id.content }
 		val list = BriarRecyclerView(activity)
@@ -319,10 +331,9 @@ class ConnectorConversationDraftTest {
 			ConnectorConversationActivity::class.java.getDeclaredMethod("confirmLeaveRoom")
 		confirmLeaveRoom.isAccessible = true
 		confirmLeaveRoom.invoke(activity)
-		val leaveDialogField =
-			ConnectorConversationActivity::class.java.getDeclaredField("leaveDialog")
-		leaveDialogField.isAccessible = true
-		(leaveDialogField.get(activity) as AlertDialog)
+		val fragment = activity.supportFragmentManager
+			.findFragmentByTag(ConnectorLeaveRoomDialogFragment.TAG) as ConnectorLeaveRoomDialogFragment
+		(fragment.requireDialog() as AlertDialog)
 			.getButton(AlertDialog.BUTTON_POSITIVE)
 			.performClick()
 		org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()

@@ -108,6 +108,19 @@ class ConnectorReadMarkerTest {
 		Localizer.initialize(RuntimeEnvironment.getApplication().getSharedPreferences("test", 0))
 		val activity = Robolectric.buildActivity(ConnectorConversationActivity::class.java).get()
 		activity.setTheme(R.style.BriarTheme)
+		val savedState = androidx.activity.ComponentActivity::class.java
+			.getDeclaredField("mSavedStateRegistryController").apply { isAccessible = true }
+			.get(activity) as androidx.savedstate.SavedStateRegistryController
+		savedState.performRestore(null)
+		val fragments = androidx.fragment.app.FragmentActivity::class.java
+			.getDeclaredField("mFragments").apply { isAccessible = true }
+			.get(activity) as androidx.fragment.app.FragmentController
+		fragments.attachHost(null)
+		fragments.dispatchCreate()
+		fragments.dispatchActivityCreated()
+		fragments.dispatchStart()
+		fragments.dispatchResume()
+
 		fun set(name: String, value: Any?) {
 			ConnectorConversationActivity::class.java.getDeclaredField(name).apply {
 				isAccessible = true
@@ -155,12 +168,45 @@ class ConnectorReadMarkerTest {
 	private fun leaveDialog(activity: ConnectorConversationActivity): AlertDialog {
 		ConnectorConversationActivity::class.java.getDeclaredMethod("confirmLeaveRoom")
 			.apply { isAccessible = true }.invoke(activity)
-		return field(activity, "leaveDialog") as AlertDialog
+		return shownLeaveDialog(activity)!!
 	}
+
+	private fun shownLeaveDialog(activity: ConnectorConversationActivity): AlertDialog? = (
+		activity.supportFragmentManager.findFragmentByTag(ConnectorLeaveRoomDialogFragment.TAG)
+			as? ConnectorLeaveRoomDialogFragment
+		)?.dialog as? AlertDialog
 
 	private fun field(activity: ConnectorConversationActivity, name: String): Any? =
 		ConnectorConversationActivity::class.java.getDeclaredField(name)
 			.apply { isAccessible = true }.get(activity)
+
+	@Test fun restoredLeaveTargetUsesCurrentActivityAndRejectsDifferentRoom() {
+		val original = ConnectorLeaveRoomDialogFragment.newInstance("room")
+		val parcel = android.os.Parcel.obtain()
+		val arguments = try {
+			parcel.writeBundle(original.requireArguments())
+			parcel.setDataPosition(0)
+			parcel.readBundle(javaClass.classLoader)!!
+		} finally {
+			parcel.recycle()
+		}
+		val restored = androidx.fragment.app.FragmentFactory().instantiate(
+			javaClass.classLoader,
+			ConnectorLeaveRoomDialogFragment::class.java.name,
+		) as ConnectorLeaveRoomDialogFragment
+		restored.arguments = arguments
+		assertEquals("room", restored.requireArguments().getString("threadId"))
+		val connector = MarkingConnector()
+		val recreated = activity(connector)
+		recreated.confirmLeaveRoom("other")
+		assertEquals(0, work.size)
+		restored.showNow(recreated.supportFragmentManager, ConnectorLeaveRoomDialogFragment.TAG)
+		(restored.requireDialog() as AlertDialog).getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+		org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+		work.removeAt(0).run()
+		assertEquals(1, connector.leaves)
+		assertEquals(true, recreated.isFinishing)
+	}
 
 	@Test fun leaveRequiresConfirmationAndSuppressesDuplicates() {
 		val connector = MarkingConnector()
@@ -187,7 +233,7 @@ class ConnectorReadMarkerTest {
 		org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
 		work.removeAt(0).run()
 		assertEquals(false, activity.isFinishing)
-		assertEquals(null, field(activity, "leaveDialog"))
+		assertEquals(null, shownLeaveDialog(activity))
 		org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
 		val root = (field(activity, "list") as BriarRecyclerView).parent as FrameLayout
 		assertEquals(
@@ -196,8 +242,7 @@ class ConnectorReadMarkerTest {
 		)
 		connector.leaveResult = true
 		root.findViewById<TextView>(com.google.android.material.R.id.snackbar_action).performClick()
-		(field(activity, "leaveDialog") as AlertDialog)
-			.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+		shownLeaveDialog(activity)!!.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
 		org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
 		work.removeAt(0).run()
 		assertEquals(true, activity.isFinishing)
