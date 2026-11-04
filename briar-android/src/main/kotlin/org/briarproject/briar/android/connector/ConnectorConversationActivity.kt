@@ -1,5 +1,6 @@
 package org.briarproject.briar.android.connector
 
+import android.app.Dialog
 import android.net.Uri
 import android.os.Bundle
 import android.os.Parcelable
@@ -16,6 +17,7 @@ import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.ActionBar
+import androidx.fragment.app.DialogFragment
 import androidx.lifecycle.ViewModelProvider
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.google.android.material.snackbar.Snackbar
@@ -1202,30 +1204,36 @@ class ConnectorConversationActivity : BriarActivity() {
 
 	private fun onDeleteMessageClicked(item: ConnectorConversationMessageItem) {
 		// MX-020: Prompt to delete an outgoing message
-		val deleter = connector as? ConnectorMessageDeleter ?: return
-		val currentThreadId = threadId
-		if (currentThreadId.isEmpty()) return
+		if (connector !is ConnectorMessageDeleter) return
+		if (threadId.isEmpty()) return
 
-		AlertDialog.Builder(this, R.style.BriarDialogTheme)
-			.setTitle(R.string.delete)
-			.setMessage(R.string.dialog_message_delete)
-			.setPositiveButton(R.string.delete) { _, _ ->
-				executeDeleteMessage(deleter, currentThreadId, item)
-			}
-			.setNegativeButton(R.string.cancel, null)
-			.show()
+		ConnectorDeleteMessageDialogFragment.newInstance(item.connectorThreadId, item.connectorMessageId)
+			.show(supportFragmentManager, ConnectorDeleteMessageDialogFragment.TAG)
+	}
+
+	// Persisted ids let confirmation proceed before the post-rotation message reload finishes.
+	internal fun confirmDeleteMessage(targetThreadId: String, connectorMessageId: String) {
+		val deleter = connector as? ConnectorMessageDeleter ?: return
+		executeDeleteMessage(deleter, targetThreadId, connectorMessageId)
 	}
 
 	private fun executeDeleteMessage(
 		deleter: ConnectorMessageDeleter,
 		targetThreadId: String,
-		item: ConnectorConversationMessageItem,
+		connectorMessageId: String,
 	) {
 		ioExecutor.execute {
-			val success = deleter.deleteMessage(targetThreadId, item.connectorMessageId)
+			val success = deleter.deleteMessage(targetThreadId, connectorMessageId)
 			runOnUiThread {
 				if (isFinishing || isDestroyed) return@runOnUiThread
-				val outcome = resolveDeleteOutcome(messageState, item, success)
+				if (!success) {
+					Snackbar.make(list, R.string.connector_conversation_delete_failed, Snackbar.LENGTH_LONG).show()
+					return@runOnUiThread
+				}
+				val item = messageState.messages.firstOrNull {
+					it.connectorThreadId == targetThreadId && it.connectorMessageId == connectorMessageId
+				} ?: return@runOnUiThread
+				val outcome = resolveDeleteOutcome(messageState, item, true)
 				outcome.feedbackStringRes?.let { Snackbar.make(list, it, Snackbar.LENGTH_LONG).show() }
 					?: submitMessageState(outcome.nextState)
 			}
@@ -1274,6 +1282,37 @@ class ConnectorConversationActivity : BriarActivity() {
 				}
 			}
 		}
+	}
+}
+
+class ConnectorDeleteMessageDialogFragment : DialogFragment() {
+	companion object {
+		const val TAG = "ConnectorDeleteMessageDialogFragment"
+		private const val ARG_THREAD_ID = "threadId"
+		private const val ARG_MESSAGE_ID = "messageId"
+
+		fun newInstance(threadId: String, messageId: String): ConnectorDeleteMessageDialogFragment {
+			val fragment = ConnectorDeleteMessageDialogFragment()
+			fragment.arguments = Bundle().apply {
+				putString(ARG_THREAD_ID, threadId)
+				putString(ARG_MESSAGE_ID, messageId)
+			}
+			return fragment
+		}
+	}
+
+	override fun onCreateDialog(savedInstanceState: Bundle?): Dialog {
+		val activity = requireActivity() as ConnectorConversationActivity
+		val threadId = requireArguments().getString(ARG_THREAD_ID)!!
+		val messageId = requireArguments().getString(ARG_MESSAGE_ID)!!
+		return AlertDialog.Builder(activity, R.style.BriarDialogTheme)
+			.setTitle(R.string.delete)
+			.setMessage(R.string.dialog_message_delete)
+			.setPositiveButton(R.string.delete) { _, _ ->
+				activity.confirmDeleteMessage(threadId, messageId)
+			}
+			.setNegativeButton(R.string.cancel, null)
+			.create()
 	}
 }
 

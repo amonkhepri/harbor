@@ -1,5 +1,6 @@
 package org.briarproject.briar.android.matrix
 
+import android.app.Dialog
 import android.os.Bundle
 import android.view.View
 import android.view.inputmethod.InputMethodManager
@@ -7,6 +8,7 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
+import androidx.fragment.app.DialogFragment
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import org.briarproject.bramble.PoliteExecutor
@@ -77,14 +79,13 @@ class MatrixSetupActivity : BriarActivity() {
 		}
 		signOut.setOnClickListener {
 			if (model.state.value?.busy == true) return@setOnClickListener
-			AlertDialog.Builder(this)
-				.setTitle(R.string.matrix_sign_out)
-				.setMessage(R.string.matrix_sign_out_confirmation)
-				.setNegativeButton(R.string.cancel) { _, _ -> model.logout(false) }
-				.setPositiveButton(R.string.matrix_sign_out) { _, _ -> model.logout(true) }
-				.show()
+			MatrixSignOutDialogFragment().show(supportFragmentManager, MatrixSignOutDialogFragment.TAG)
 		}
 		model.start()
+	}
+
+	internal fun confirmSignOut(confirmed: Boolean) {
+		model.logout(confirmed)
 	}
 
 	private fun render(state: MatrixSetupState) {
@@ -131,5 +132,21 @@ class MatrixSetupActivity : BriarActivity() {
 	override fun onStop() {
 		if (::password.isInitialized) password.text.clear()
 		super.onStop()
+	}
+}
+
+class MatrixSignOutDialogFragment : DialogFragment() {
+	companion object {
+		const val TAG = "MatrixSignOutDialogFragment"
+	}
+
+	override fun onCreateDialog(savedInstanceState: Bundle?): Dialog {
+		val activity = requireActivity() as MatrixSetupActivity
+		return AlertDialog.Builder(activity)
+			.setTitle(R.string.matrix_sign_out)
+			.setMessage(R.string.matrix_sign_out_confirmation)
+			.setNegativeButton(R.string.cancel) { _, _ -> activity.confirmSignOut(false) }
+			.setPositiveButton(R.string.matrix_sign_out) { _, _ -> activity.confirmSignOut(true) }
+			.create()
 	}
 }
