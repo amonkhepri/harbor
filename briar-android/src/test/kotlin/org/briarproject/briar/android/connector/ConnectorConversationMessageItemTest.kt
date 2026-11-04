@@ -6,6 +6,8 @@ import org.briarproject.briar.api.connector.ConnectorMessageType
 import org.briarproject.briar.api.connector.ConnectorReactionSummary
 import org.briarproject.briar.api.connector.ConnectorSource
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 class ConnectorConversationMessageItemTest {
@@ -92,6 +94,74 @@ class ConnectorConversationMessageItemTest {
 			),
 			items,
 		)
+	}
+
+	@Test
+	fun testFromMessagesPrefersDeletedStateOverEditedTextWhenDeletedIsSecond() {
+		val attachment = ConnectorAttachmentMetadata("file.txt", "text/plain", 123L)
+		val items = ConnectorConversationMessageItem.fromMessages(
+			listOf(
+				connectorMessage(
+					"1",
+					10,
+					false,
+					"edited text",
+					1L,
+					isEdited = true,
+					attachment = attachment,
+				),
+				connectorMessage(
+					"1",
+					10,
+					false,
+					"",
+					1L,
+					type = ConnectorMessageType.DELETED,
+					isEdited = false,
+				),
+			),
+		)
+
+		assertEquals(1, items.size)
+		val item = items.single()
+		assertEquals(ConnectorMessageType.DELETED, item.type)
+		assertEquals("", item.text)
+		assertFalse(item.isEdited)
+		assertNull(item.attachment)
+	}
+
+	@Test
+	fun testFromMessagesPrefersDeletedStateOverEditedTextWhenDeletedIsFirst() {
+		val attachment = ConnectorAttachmentMetadata("file.txt", "text/plain", 123L)
+		val items = ConnectorConversationMessageItem.fromMessages(
+			listOf(
+				connectorMessage(
+					"1",
+					10,
+					false,
+					"",
+					1L,
+					type = ConnectorMessageType.DELETED,
+					isEdited = false,
+				),
+				connectorMessage(
+					"1",
+					10,
+					false,
+					"edited text",
+					1L,
+					isEdited = true,
+					attachment = attachment,
+				),
+			),
+		)
+
+		assertEquals(1, items.size)
+		val item = items.single()
+		assertEquals(ConnectorMessageType.DELETED, item.type)
+		assertEquals("", item.text)
+		assertFalse(item.isEdited)
+		assertNull(item.attachment)
 	}
 
 	@Test

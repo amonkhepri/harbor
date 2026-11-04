@@ -71,6 +71,17 @@ data class ConnectorConversationMessageItem(
 			first: ConnectorConversationMessageItem,
 			second: ConnectorConversationMessageItem,
 		): ConnectorConversationMessageItem {
+			if (first.type == ConnectorMessageType.DELETED ||
+				second.type == ConnectorMessageType.DELETED
+			) {
+				val deletedBase = if (second.type == ConnectorMessageType.DELETED) second else first
+				return deletedBase.copy(
+					text = "",
+					type = ConnectorMessageType.DELETED,
+					isEdited = false,
+					attachment = null,
+				)
+			}
 			val base = when {
 				first.isEdited && !second.isEdited -> first
 				!first.isEdited && second.isEdited -> second

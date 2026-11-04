@@ -2,11 +2,13 @@ package org.briarproject.briar.android.connector
 
 import android.app.Application
 import android.content.Intent
+import android.view.View
 import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.ImageButton
 import androidx.arch.core.executor.testing.InstantTaskExecutorRule
 import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
 import org.briarproject.briar.R
 import org.briarproject.briar.android.Localizer
 import org.briarproject.briar.android.view.BriarRecyclerView
@@ -74,11 +76,11 @@ class ConnectorConversationRemoteRefreshTest {
 	private val work = ArrayDeque<Runnable>()
 
 	private fun drainWork() {
+		ShadowLooper.idleMainLooper()
 		while (work.isNotEmpty()) {
 			work.removeFirst().run()
 			ShadowLooper.idleMainLooper()
 		}
-		ShadowLooper.idleMainLooper()
 	}
 
 	private fun createActivity(
@@ -94,8 +96,14 @@ class ConnectorConversationRemoteRefreshTest {
 
 		val root = FrameLayout(activity).apply { id = android.R.id.content }
 		val list = BriarRecyclerView(activity)
-		root.addView(list)
-		val manager = LinearLayoutManager(activity)
+		root.addView(
+			list,
+			FrameLayout.LayoutParams(
+				FrameLayout.LayoutParams.MATCH_PARENT,
+				FrameLayout.LayoutParams.MATCH_PARENT,
+			),
+		)
+		val manager = LinearLayoutManager(activity).apply { stackFromEnd = true }
 		list.setLayoutManager(manager)
 
 		val adapter = ConnectorConversationActivity::class.java.getDeclaredField("adapter").apply {
@@ -153,6 +161,61 @@ class ConnectorConversationRemoteRefreshTest {
 		ConnectorConversationActivity::class.java.getDeclaredField("messageState").apply {
 			isAccessible = true
 		}.get(activity) as ConnectorConversationMessageListState
+
+	private fun layoutRecyclerView(
+		activity: ConnectorConversationActivity,
+		width: Int = 1080,
+		height: Int = 800,
+	) {
+		val listField = ConnectorConversationActivity::class.java.getDeclaredField("list").apply {
+			isAccessible = true
+		}
+		val list = listField.get(activity) as BriarRecyclerView
+		list.measure(
+			View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+			View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY),
+		)
+		list.layout(0, 0, width, height)
+	}
+
+	private fun getRecyclerView(activity: ConnectorConversationActivity): RecyclerView {
+		val listField = ConnectorConversationActivity::class.java.getDeclaredField("list").apply {
+			isAccessible = true
+		}
+		val list = listField.get(activity) as BriarRecyclerView
+		return list.recyclerView
+	}
+
+	private fun getLayoutManager(activity: ConnectorConversationActivity): LinearLayoutManager {
+		val managerField = ConnectorConversationActivity::class.java.getDeclaredField("layoutManager").apply {
+			isAccessible = true
+		}
+		return managerField.get(activity) as LinearLayoutManager
+	}
+
+	private fun getAdapter(activity: ConnectorConversationActivity): ConnectorConversationAdapter {
+		val adapterField = ConnectorConversationActivity::class.java.getDeclaredField("adapter").apply {
+			isAccessible = true
+		}
+		return adapterField.get(activity) as ConnectorConversationAdapter
+	}
+
+	private fun connectorMessage(
+		id: String,
+		seconds: Int,
+		text: String,
+		isEdited: Boolean = false,
+	): ConnectorMessage = ConnectorMessage(
+		source = ConnectorSources.MATRIX,
+		threadId = "!room1:matrix.org",
+		messageId = id,
+		dateSeconds = seconds,
+		isOutgoing = false,
+		text = text,
+		sourceMessageOrder = seconds.toLong(),
+		type = ConnectorMessageType.TEXT,
+		isEdited = isEdited,
+	)
 
 	@Test
 	fun remoteSendAppearsOnceWhileRoomIsOpen() {
@@ -245,6 +308,19 @@ class ConnectorConversationRemoteRefreshTest {
 		assertEquals(0, messageState(activity).messages.size)
 	}
 
+	private fun awaitAdapterUpdate(
+		adapter: ConnectorConversationAdapter,
+		expectedCount: Int,
+		timeoutMs: Long = 2000,
+	) {
+		val deadline = System.currentTimeMillis() + timeoutMs
+		while (adapter.itemCount != expectedCount && System.currentTimeMillis() < deadline) {
+			Thread.sleep(10)
+			ShadowLooper.idleMainLooper()
+		}
+		assertEquals(expectedCount, adapter.itemCount)
+	}
+
 	@Test
 	fun loadMultiplePagesWithOverlappingEventsAndRemoteArrivalsPreservesAnchor() {
 		val activity = createActivity()
@@ -254,155 +330,117 @@ class ConnectorConversationRemoteRefreshTest {
 		val sub = fakeConnector.activeSubscription
 		assertNotNull(sub)
 
-		fakeConnector.messages.addAll(
-			listOf(
-				ConnectorMessage(
-					source = ConnectorSources.MATRIX,
-					threadId = "!room1:matrix.org",
-					messageId = "\$event10",
-					dateSeconds = 1000,
-					isOutgoing = false,
-					text = "Message 10",
-					sourceMessageOrder = 1000L,
-					type = ConnectorMessageType.TEXT,
-				),
-				ConnectorMessage(
-					source = ConnectorSources.MATRIX,
-					threadId = "!room1:matrix.org",
-					messageId = "\$event11",
-					dateSeconds = 1001,
-					isOutgoing = false,
-					text = "Message 11",
-					sourceMessageOrder = 1001L,
-					type = ConnectorMessageType.TEXT,
-				),
-				ConnectorMessage(
-					source = ConnectorSources.MATRIX,
-					threadId = "!room1:matrix.org",
-					messageId = "\$event12",
-					dateSeconds = 1002,
-					isOutgoing = false,
-					text = "Message 12",
-					sourceMessageOrder = 1002L,
-					type = ConnectorMessageType.TEXT,
-				),
-			),
-		)
+		// 1. Initial snapshot: 15 messages (event10 to event24)
+		for (i in 10..24) {
+			fakeConnector.messages.add(
+				connectorMessage("\$event$i", 1000 + i, "Message $i"),
+			)
+		}
 		sub!!.onUpdate()
 		drainWork()
 
-		assertEquals(3, messageState(activity).messages.size)
-		val anchorItem = messageState(activity).messages[1]
+		val manager = getLayoutManager(activity)
+		val rv = getRecyclerView(activity)
+		val adapter = getAdapter(activity)
+		awaitAdapterUpdate(adapter, 15)
+		layoutRecyclerView(activity)
+
+		// Scroll to event11 with a specific pixel offset
+		val initialAnchorIndex = adapter.currentList.indexOfFirst { it.connectorMessageId == "\$event11" }
+		assertEquals(1, initialAnchorIndex)
+		val expectedOffset = 0
+		manager.scrollToPositionWithOffset(initialAnchorIndex, expectedOffset)
+		layoutRecyclerView(activity)
+
+		val initialVisiblePos = manager.findFirstVisibleItemPosition()
+		assertEquals(initialAnchorIndex, initialVisiblePos)
+		val initialView = manager.findViewByPosition(initialVisiblePos)
+		assertNotNull(initialView)
+		assertEquals(expectedOffset, initialView!!.top)
+		assertTrue(rv.canScrollVertically(1))
+
+		val anchorItem = adapter.currentList[initialVisiblePos]
+		val anchorStableId = anchorItem.stableId
 		assertEquals("\$event11", anchorItem.connectorMessageId)
 
+		// 2. First pagination pass: load older messages (event5..event9) with overlapping events
+		// (event10..event14, duplicate event10, and edited event11)
 		fakeConnector.messages.clear()
+		val page1 = mutableListOf<ConnectorMessage>()
+		for (i in 5..9) {
+			page1.add(connectorMessage("\$event$i", 1000 + i, "Message $i"))
+		}
+		for (i in 10..14) {
+			if (i == 11) {
+				page1.add(connectorMessage("\$event11", 1011, "Message 11 (updated)", isEdited = true))
+			} else {
+				page1.add(connectorMessage("\$event$i", 1000 + i, "Message $i"))
+			}
+		}
+		// Duplicate overlapping event10 and event11
+		page1.add(connectorMessage("\$event10", 1010, "Message 10"))
+		page1.add(connectorMessage("\$event11", 1011, "Message 11"))
+		for (i in 15..24) {
+			page1.add(connectorMessage("\$event$i", 1000 + i, "Message $i"))
+		}
+		fakeConnector.messages.addAll(page1)
+		sub.onUpdate()
+		drainWork()
+		awaitAdapterUpdate(adapter, 20)
+		layoutRecyclerView(activity)
+
+		val visiblePos1 = manager.findFirstVisibleItemPosition()
+		val visibleItem1 = adapter.currentList[visiblePos1]
+		assertEquals("\$event11", visibleItem1.connectorMessageId)
+		assertEquals(anchorStableId, visibleItem1.stableId)
+		assertEquals("Message 11 (updated)", visibleItem1.text)
+		assertTrue(visibleItem1.isEdited)
+		val visibleView1 = manager.findViewByPosition(visiblePos1)
+		assertNotNull(visibleView1)
+		assertEquals(expectedOffset, visibleView1!!.top)
+
+		// 3. Second pagination pass: load even older messages (event1..event4) with overlapping (event5..event7)
+		fakeConnector.messages.clear()
+		val page2 = mutableListOf<ConnectorMessage>()
+		for (i in 1..4) {
+			page2.add(connectorMessage("\$event$i", 1000 + i, "Message $i"))
+		}
+		for (i in 5..7) {
+			page2.add(connectorMessage("\$event$i", 1000 + i, "Message $i"))
+		}
+		page2.addAll(page1)
+		fakeConnector.messages.addAll(page2)
+		sub.onUpdate()
+		drainWork()
+		awaitAdapterUpdate(adapter, 24)
+		layoutRecyclerView(activity)
+
+		val visiblePos2 = manager.findFirstVisibleItemPosition()
+		val visibleItem2 = adapter.currentList[visiblePos2]
+		assertEquals("\$event11", visibleItem2.connectorMessageId)
+		assertEquals(anchorStableId, visibleItem2.stableId)
+		val visibleView2 = manager.findViewByPosition(visiblePos2)
+		assertNotNull(visibleView2)
+		assertEquals(expectedOffset, visibleView2!!.top)
+
+		// 4. Remote arrivals: new messages arrive at the bottom
 		fakeConnector.messages.addAll(
 			listOf(
-				ConnectorMessage(
-					source = ConnectorSources.MATRIX,
-					threadId = "!room1:matrix.org",
-					messageId = "\$event8",
-					dateSeconds = 998,
-					isOutgoing = false,
-					text = "Message 8",
-					sourceMessageOrder = 998L,
-					type = ConnectorMessageType.TEXT,
-				),
-				ConnectorMessage(
-					source = ConnectorSources.MATRIX,
-					threadId = "!room1:matrix.org",
-					messageId = "\$event9",
-					dateSeconds = 999,
-					isOutgoing = false,
-					text = "Message 9",
-					sourceMessageOrder = 999L,
-					type = ConnectorMessageType.TEXT,
-				),
-				ConnectorMessage(
-					source = ConnectorSources.MATRIX,
-					threadId = "!room1:matrix.org",
-					messageId = "\$event10",
-					dateSeconds = 1000,
-					isOutgoing = false,
-					text = "Message 10",
-					sourceMessageOrder = 1000L,
-					type = ConnectorMessageType.TEXT,
-				),
-				ConnectorMessage(
-					source = ConnectorSources.MATRIX,
-					threadId = "!room1:matrix.org",
-					messageId = "\$event11",
-					dateSeconds = 1001,
-					isOutgoing = false,
-					text = "Message 11 (updated)",
-					sourceMessageOrder = 1001L,
-					type = ConnectorMessageType.TEXT,
-					isEdited = true,
-				),
-				ConnectorMessage(
-					source = ConnectorSources.MATRIX,
-					threadId = "!room1:matrix.org",
-					messageId = "\$event10",
-					dateSeconds = 1000,
-					isOutgoing = false,
-					text = "Message 10",
-					sourceMessageOrder = 1000L,
-					type = ConnectorMessageType.TEXT,
-				),
-				ConnectorMessage(
-					source = ConnectorSources.MATRIX,
-					threadId = "!room1:matrix.org",
-					messageId = "\$event11",
-					dateSeconds = 1001,
-					isOutgoing = false,
-					text = "Message 11",
-					sourceMessageOrder = 1001L,
-					type = ConnectorMessageType.TEXT,
-				),
-				ConnectorMessage(
-					source = ConnectorSources.MATRIX,
-					threadId = "!room1:matrix.org",
-					messageId = "\$event12",
-					dateSeconds = 1002,
-					isOutgoing = false,
-					text = "Message 12",
-					sourceMessageOrder = 1002L,
-					type = ConnectorMessageType.TEXT,
-				),
-				ConnectorMessage(
-					source = ConnectorSources.MATRIX,
-					threadId = "!room1:matrix.org",
-					messageId = "\$event13",
-					dateSeconds = 1003,
-					isOutgoing = false,
-					text = "Message 13",
-					sourceMessageOrder = 1003L,
-					type = ConnectorMessageType.TEXT,
-				),
-				ConnectorMessage(
-					source = ConnectorSources.MATRIX,
-					threadId = "!room1:matrix.org",
-					messageId = "\$event14",
-					dateSeconds = 1004,
-					isOutgoing = false,
-					text = "Message 14",
-					sourceMessageOrder = 1004L,
-					type = ConnectorMessageType.TEXT,
-				),
+				connectorMessage("\$event25", 1025, "Message 25"),
+				connectorMessage("\$event26", 1026, "Message 26"),
 			),
 		)
 		sub.onUpdate()
 		drainWork()
+		awaitAdapterUpdate(adapter, 26)
+		layoutRecyclerView(activity)
 
-		val updatedMessages = messageState(activity).messages
-		assertEquals(7, updatedMessages.size)
-		assertEquals(
-			listOf("\$event8", "\$event9", "\$event10", "\$event11", "\$event12", "\$event13", "\$event14"),
-			updatedMessages.map { it.connectorMessageId },
-		)
-		val updatedAnchor = updatedMessages.first { it.connectorMessageId == "\$event11" }
-		assertEquals("Message 11 (updated)", updatedAnchor.text)
-		assertTrue(updatedAnchor.isEdited)
-		assertEquals(anchorItem.stableId, updatedAnchor.stableId)
+		val visiblePos3 = manager.findFirstVisibleItemPosition()
+		val visibleItem3 = adapter.currentList[visiblePos3]
+		assertEquals("\$event11", visibleItem3.connectorMessageId)
+		assertEquals(anchorStableId, visibleItem3.stableId)
+		val visibleView3 = manager.findViewByPosition(visiblePos3)
+		assertNotNull(visibleView3)
+		assertEquals(expectedOffset, visibleView3!!.top)
 	}
 }
