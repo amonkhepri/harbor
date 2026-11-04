@@ -776,10 +776,9 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 				invokeCloseableValue(room, "timeline", emptyArray(), emptyArray(), ::closeQuietly)
 			timeline = loadedTimeline
 			val listenerClass = Class.forName(TIMELINE_LISTENER_CLASS_NAME)
-			val initialEvents = readTimelineSnapshot(loadedTimeline, listenerClass)
-				.associateBy { it.eventId }
-				.values
-				.toList()
+			val initialEvents = deduplicateSnapshots(
+				readTimelineSnapshot(loadedTimeline, listenerClass),
+			)
 			initialSnapshot = initialEvents
 			if (initialEvents.size >= limit) return initialEvents.takeLast(limit)
 			val remaining = (limit - initialEvents.size).coerceAtMost(MAX_UNSIGNED_SHORT)
@@ -789,11 +788,9 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 				arrayOf(Short::class.javaPrimitiveType ?: throw SnapshotAdapterFailure()),
 				arrayOf(remaining.toShort()),
 			)
-			readTimelineSnapshot(loadedTimeline, listenerClass)
-				.associateBy { it.eventId }
-				.values
-				.toList()
-				.takeLast(limit)
+			deduplicateSnapshots(
+				readTimelineSnapshot(loadedTimeline, listenerClass),
+			).takeLast(limit)
 		} catch (e: InterruptedException) {
 			Thread.currentThread().interrupt()
 			initialSnapshot
@@ -1197,6 +1194,56 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			}
 			return (outcome.get() ?: throw SnapshotAdapterFailure()).getOrThrow()
 		}
+	}
+
+	private fun deduplicateSnapshots(
+		snapshots: List<MatrixMessageSnapshot>,
+	): List<MatrixMessageSnapshot> {
+		if (snapshots.isEmpty()) return emptyList()
+		val deduplicated = LinkedHashMap<String, MatrixMessageSnapshot>()
+		for (snapshot in snapshots) {
+			val existing = deduplicated[snapshot.eventId]
+			deduplicated[snapshot.eventId] = if (existing == null) {
+				snapshot
+			} else {
+				mergeSnapshots(existing, snapshot)
+			}
+		}
+		return deduplicated.values.toList()
+	}
+
+	private fun mergeSnapshots(
+		first: MatrixMessageSnapshot,
+		second: MatrixMessageSnapshot,
+	): MatrixMessageSnapshot {
+		if (first.type == ConnectorMessageType.DELETED ||
+			second.type == ConnectorMessageType.DELETED
+		) {
+			val deletedBase = if (second.type == ConnectorMessageType.DELETED) second else first
+			return deletedBase.copy(
+				bodyText = "",
+				type = ConnectorMessageType.DELETED,
+				isEdited = false,
+				attachment = null,
+			)
+		}
+		val base = when {
+			first.isEdited && !second.isEdited -> first
+			!first.isEdited && second.isEdited -> second
+			else -> second
+		}
+		val reactions = if (second.reactions.isNotEmpty()) {
+			second.reactions
+		} else {
+			first.reactions
+		}
+		val attachment = second.attachment ?: first.attachment
+		val isReply = second.isReply || first.isReply
+		return base.copy(
+			reactions = reactions,
+			attachment = attachment,
+			isReply = isReply,
+		)
 	}
 
 	@Synchronized

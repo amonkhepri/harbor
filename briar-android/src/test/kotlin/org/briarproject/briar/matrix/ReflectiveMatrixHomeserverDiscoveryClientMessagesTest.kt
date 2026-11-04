@@ -533,6 +533,229 @@ class ReflectiveMatrixHomeserverDiscoveryClientMessagesTest {
 	}
 
 	@Test
+	fun `getRecentMessages preserves edited state when duplicate events conflict across pagination`() {
+		val client = loggedInClient()
+		FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec("!room:example.org"))
+		FakeMatrixSdkState.timelineDiffsToReturn = listOf(
+			TimelineDiff.Reset(
+				listOf(
+					remoteEvent("\$event2:example.org", "message 2 (edited)", 2_000uL, edited = true),
+					remoteEvent("\$event3:example.org", "message 3", 3_000uL),
+				),
+			),
+		)
+		FakeMatrixSdkState.timelineDiffsAfterPagination = listOf(
+			TimelineDiff.Reset(
+				listOf(
+					// Unedited followed by edited
+					remoteEvent("\$event1:example.org", "message 1 (original)", 1_000uL, edited = false),
+					remoteEvent("\$event1:example.org", "message 1 (edited)", 1_000uL, edited = true),
+					// Edited followed by unedited stale original
+					remoteEvent("\$event2:example.org", "message 2 (edited)", 2_000uL, edited = true),
+					remoteEvent("\$event2:example.org", "message 2 (original)", 2_000uL, edited = false),
+					remoteEvent("\$event3:example.org", "message 3", 3_000uL),
+				),
+			),
+		)
+
+		val result = client.getRecentMessages("!room:example.org", 3)
+
+		assertEquals(
+			listOf(
+				MatrixMessageSnapshot(
+					"\$event1:example.org",
+					"@alice:example.org",
+					"message 1 (edited)",
+					1L,
+					false,
+					isEdited = true,
+				),
+				MatrixMessageSnapshot(
+					"\$event2:example.org",
+					"@alice:example.org",
+					"message 2 (edited)",
+					2L,
+					false,
+					isEdited = true,
+				),
+				MatrixMessageSnapshot("\$event3:example.org", "@alice:example.org", "message 3", 3L, false),
+			),
+			result,
+		)
+	}
+
+	@Test
+	fun `getRecentMessages preserves edited state when duplicate events conflict in initial snapshot`() {
+		val client = loggedInClient()
+		FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec("!room:example.org"))
+		FakeMatrixSdkState.timelineDiffsToReturn = listOf(
+			TimelineDiff.Reset(
+				listOf(
+					remoteEvent("\$event1:example.org", "message 1 (original)", 1_000uL, edited = false),
+					remoteEvent("\$event1:example.org", "message 1 (edited)", 1_000uL, edited = true),
+					remoteEvent("\$event2:example.org", "message 2 (edited)", 2_000uL, edited = true),
+					remoteEvent("\$event2:example.org", "message 2 (original)", 2_000uL, edited = false),
+				),
+			),
+		)
+
+		val result = client.getRecentMessages("!room:example.org", 2)
+
+		assertEquals(
+			listOf(
+				MatrixMessageSnapshot(
+					"\$event1:example.org",
+					"@alice:example.org",
+					"message 1 (edited)",
+					1L,
+					false,
+					isEdited = true,
+				),
+				MatrixMessageSnapshot(
+					"\$event2:example.org",
+					"@alice:example.org",
+					"message 2 (edited)",
+					2L,
+					false,
+					isEdited = true,
+				),
+			),
+			result,
+		)
+	}
+
+	@Test
+	fun `getRecentMessages preserves deleted state when duplicate events conflict in initial snapshot`() {
+		val client = loggedInClient()
+		FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec("!room:example.org"))
+		val deleted1 = TimelineItem(
+			FakeTimelineEventSpec(
+				EventOrTransactionId.EventId("\$event1:example.org"),
+				"@alice:example.org",
+				null,
+				1_000uL,
+				own = false,
+				redacted = true,
+			),
+		)
+		val deleted2 = TimelineItem(
+			FakeTimelineEventSpec(
+				EventOrTransactionId.EventId("\$event2:example.org"),
+				"@alice:example.org",
+				null,
+				2_000uL,
+				own = false,
+				redacted = true,
+			),
+		)
+		FakeMatrixSdkState.timelineDiffsToReturn = listOf(
+			TimelineDiff.Reset(
+				listOf(
+					// Deleted followed by text
+					deleted1,
+					remoteEvent("\$event1:example.org", "text 1", 1_000uL),
+					// Text followed by deleted
+					remoteEvent("\$event2:example.org", "text 2", 2_000uL),
+					deleted2,
+				),
+			),
+		)
+
+		val result = client.getRecentMessages("!room:example.org", 2)
+
+		assertEquals(
+			listOf(
+				MatrixMessageSnapshot(
+					"\$event1:example.org",
+					"@alice:example.org",
+					"",
+					1L,
+					false,
+					type = ConnectorMessageType.DELETED,
+				),
+				MatrixMessageSnapshot(
+					"\$event2:example.org",
+					"@alice:example.org",
+					"",
+					2L,
+					false,
+					type = ConnectorMessageType.DELETED,
+				),
+			),
+			result,
+		)
+	}
+
+	@Test
+	fun `getRecentMessages preserves deleted state when duplicate events conflict across pagination`() {
+		val client = loggedInClient()
+		FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec("!room:example.org"))
+		FakeMatrixSdkState.timelineDiffsToReturn = listOf(
+			TimelineDiff.Reset(
+				listOf(
+					remoteEvent("\$event2:example.org", "text 2", 2_000uL),
+				),
+			),
+		)
+		val deleted1 = TimelineItem(
+			FakeTimelineEventSpec(
+				EventOrTransactionId.EventId("\$event1:example.org"),
+				"@alice:example.org",
+				null,
+				1_000uL,
+				own = false,
+				redacted = true,
+			),
+		)
+		val deleted2 = TimelineItem(
+			FakeTimelineEventSpec(
+				EventOrTransactionId.EventId("\$event2:example.org"),
+				"@alice:example.org",
+				null,
+				2_000uL,
+				own = false,
+				redacted = true,
+			),
+		)
+		FakeMatrixSdkState.timelineDiffsAfterPagination = listOf(
+			TimelineDiff.Reset(
+				listOf(
+					// Deleted followed by text
+					deleted1,
+					remoteEvent("\$event1:example.org", "text 1", 1_000uL),
+					// Text followed by deleted
+					remoteEvent("\$event2:example.org", "text 2", 2_000uL),
+					deleted2,
+				),
+			),
+		)
+
+		val result = client.getRecentMessages("!room:example.org", 2)
+
+		assertEquals(
+			listOf(
+				MatrixMessageSnapshot(
+					"\$event1:example.org",
+					"@alice:example.org",
+					"",
+					1L,
+					false,
+					type = ConnectorMessageType.DELETED,
+				),
+				MatrixMessageSnapshot(
+					"\$event2:example.org",
+					"@alice:example.org",
+					"",
+					2L,
+					false,
+					type = ConnectorMessageType.DELETED,
+				),
+			),
+			result,
+		)
+	}
+
+	@Test
 	fun `getRecentMessages clamps one pagination request to unsigned short range`() {
 		val client = loggedInClient()
 		FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec("!room:example.org"))
