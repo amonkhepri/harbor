@@ -894,7 +894,7 @@ class ConnectorConversationRemoteRefreshTest {
 		assertTrue(apkFile.exists())
 
 		activity.openDownloadedFile(apkFile, "application/vnd.android.package-archive")
-		ShadowLooper.idleMainLooper()
+		drainWork()
 		assertNull(shadowOf(activity).nextStartedActivity)
 
 		val listField = ConnectorConversationActivity::class.java.getDeclaredField("list").apply {
@@ -920,7 +920,7 @@ class ConnectorConversationRemoteRefreshTest {
 		assertTrue(apkNoExt.exists())
 		assertTrue(ConnectorConversationActivity.isExecutable(apkNoExt, null, ""))
 		activity.openDownloadedFile(apkNoExt, null)
-		ShadowLooper.idleMainLooper()
+		drainWork()
 		assertNull(shadowOf(activity).nextStartedActivity)
 
 		// Extensionless ELF binary must also be rejected
@@ -928,7 +928,7 @@ class ConnectorConversationRemoteRefreshTest {
 		elfNoExt.writeBytes(byteArrayOf(0x7f, 'E'.code.toByte(), 'L'.code.toByte(), 'F'.code.toByte()))
 		assertTrue(ConnectorConversationActivity.isExecutable(elfNoExt, null, ""))
 		activity.openDownloadedFile(elfNoExt, null)
-		ShadowLooper.idleMainLooper()
+		drainWork()
 		assertNull(shadowOf(activity).nextStartedActivity)
 
 		// Extensionless script must also be rejected
@@ -936,8 +936,59 @@ class ConnectorConversationRemoteRefreshTest {
 		scriptNoExt.writeText("#!/bin/sh\nexit 0")
 		assertTrue(ConnectorConversationActivity.isExecutable(scriptNoExt, null, ""))
 		activity.openDownloadedFile(scriptNoExt, null)
-		ShadowLooper.idleMainLooper()
+		drainWork()
 		assertNull(shadowOf(activity).nextStartedActivity)
+
+		// Extensionless zip with > 100 padding entries followed by AndroidManifest.xml must be rejected
+		val zipWithPadding = File(apkDir, "padding_manifest_no_ext")
+		zipWithPadding.outputStream().use { fos ->
+			ZipOutputStream(fos).use { zos ->
+				for (i in 0 until 150) {
+					zos.putNextEntry(ZipEntry("padding_$i.txt"))
+					zos.write("padding".toByteArray())
+					zos.closeEntry()
+				}
+				zos.putNextEntry(ZipEntry("AndroidManifest.xml"))
+				zos.write("manifest".toByteArray())
+				zos.closeEntry()
+			}
+		}
+		assertTrue(ConnectorConversationActivity.isExecutable(zipWithPadding, null, ""))
+		activity.openDownloadedFile(zipWithPadding, null)
+		drainWork()
+		assertNull(shadowOf(activity).nextStartedActivity)
+
+		// Extensionless zip with > 100 padding entries followed by classes.dex must be rejected
+		val zipWithDexPadding = File(apkDir, "padding_dex_no_ext")
+		zipWithDexPadding.outputStream().use { fos ->
+			ZipOutputStream(fos).use { zos ->
+				for (i in 0 until 150) {
+					zos.putNextEntry(ZipEntry("padding_$i.txt"))
+					zos.write("padding".toByteArray())
+					zos.closeEntry()
+				}
+				zos.putNextEntry(ZipEntry("classes.dex"))
+				zos.write("dex".toByteArray())
+				zos.closeEntry()
+			}
+		}
+		assertTrue(ConnectorConversationActivity.isExecutable(zipWithDexPadding, null, ""))
+		activity.openDownloadedFile(zipWithDexPadding, null)
+		drainWork()
+		assertNull(shadowOf(activity).nextStartedActivity)
+
+		// Extensionless zip with > 100 padding safe entries must NOT be rejected as executable
+		val safeZipManyEntries = File(apkDir, "safe_many_entries_no_ext")
+		safeZipManyEntries.outputStream().use { fos ->
+			ZipOutputStream(fos).use { zos ->
+				for (i in 0 until 150) {
+					zos.putNextEntry(ZipEntry("notes_$i.txt"))
+					zos.write("hello".toByteArray())
+					zos.closeEntry()
+				}
+			}
+		}
+		assertFalse(ConnectorConversationActivity.isExecutable(safeZipManyEntries, null, ""))
 
 		// Non-executable zip file must NOT be detected as executable
 		val safeZip = File(apkDir, "safe_archive.zip")

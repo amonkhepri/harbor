@@ -50,7 +50,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executor
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
-import java.util.zip.ZipInputStream
+import java.util.zip.ZipFile
 import org.briarproject.briar.api.connector.ConnectorImageSender
 import org.briarproject.briar.api.connector.ConnectorMessageDeleter
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult
@@ -164,25 +164,36 @@ class ConnectorConversationActivity : BriarActivity() {
 		}
 
 		private fun isZipExecutable(file: File): Boolean {
-			try {
-				FileInputStream(file).use { fis ->
-					ZipInputStream(fis).use { zis ->
-						var entry = zis.nextEntry
-						var count = 0
-						while (entry != null && count < 100) {
-							val name = entry.name
-							if (name.equals("AndroidManifest.xml", ignoreCase = true) ||
-								name.equals("classes.dex", ignoreCase = true)
-							) {
-								return true
-							}
-							count++
-							entry = zis.nextEntry
+			return try {
+				ZipFile(file).use { zip ->
+					if (zip.getEntry("AndroidManifest.xml") != null ||
+						zip.getEntry("classes.dex") != null
+					) {
+						return true
+					}
+					val entries = zip.entries()
+					var count = 0
+					while (entries.hasMoreElements()) {
+						val entry = entries.nextElement()
+						val name = entry.name.lowercase(Locale.ROOT)
+						if (name == "androidmanifest.xml" ||
+							name.endsWith("/androidmanifest.xml") ||
+							name == "classes.dex" ||
+							name.endsWith("/classes.dex") ||
+							(name.startsWith("classes") && name.endsWith(".dex"))
+						) {
+							return true
+						}
+						count++
+						if (count >= 10_000) {
+							return true
 						}
 					}
+					false
 				}
-			} catch (ignored: Exception) {}
-			return false
+			} catch (ignored: Exception) {
+				false
+			}
 		}
 
 		private fun isExecutableFile(file: File): Boolean {
@@ -1558,55 +1569,69 @@ class ConnectorConversationActivity : BriarActivity() {
 
 	internal fun openDownloadedFile(file: File, mimeType: String?) {
 		if (!file.exists()) return
-		try {
-			val authority = "${applicationContext.packageName}.connector.fileprovider"
-			val uri = FileProvider.getUriForFile(this, authority, file)
-			val rawMime = ConnectorFileMetadataFormatter.sanitizeMimeType(mimeType)
-			val ext = file.extension.lowercase(Locale.ROOT)
-			val type = if (!rawMime.isNullOrEmpty() && rawMime != "*/*") {
-				rawMime
-			} else if (ext.isNotEmpty()) {
-				MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: DEFAULT_MIME_TYPE
-			} else {
-				DEFAULT_MIME_TYPE
-			}
+		val authority = "${applicationContext.packageName}.connector.fileprovider"
+		val rawMime = ConnectorFileMetadataFormatter.sanitizeMimeType(mimeType)
+		val ext = file.extension.lowercase(Locale.ROOT)
+		val type = if (!rawMime.isNullOrEmpty() && rawMime != "*/*") {
+			rawMime
+		} else if (ext.isNotEmpty()) {
+			MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: DEFAULT_MIME_TYPE
+		} else {
+			DEFAULT_MIME_TYPE
+		}
 
-			if (isExecutable(file, type, ext)) {
-				BriarSnackbarBuilder()
-					.make(list, R.string.error_start_activity, Snackbar.LENGTH_SHORT)
-					.show()
-				return
-			}
-
-			val intent = Intent(Intent.ACTION_VIEW).apply {
-				setDataAndType(uri, type)
-				addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-			}
-			if (intent.resolveActivity(packageManager) == null &&
-				packageManager.queryIntentActivities(intent, 0).isEmpty()
-			) {
-				BriarSnackbarBuilder()
-					.make(list, R.string.error_start_activity, Snackbar.LENGTH_SHORT)
-					.show()
-				return
-			}
-
-			val chooser = Intent.createChooser(intent, file.name).apply {
-				addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-			}
-			startActivity(chooser)
-		} catch (e: ActivityNotFoundException) {
+		if (isExecutable(mimeType = type, extension = ext)) {
 			BriarSnackbarBuilder()
 				.make(list, R.string.error_start_activity, Snackbar.LENGTH_SHORT)
 				.show()
-		} catch (e: SecurityException) {
-			BriarSnackbarBuilder()
-				.make(list, R.string.error_start_activity, Snackbar.LENGTH_SHORT)
-				.show()
-		} catch (e: Exception) {
-			BriarSnackbarBuilder()
-				.make(list, R.string.error_start_activity, Snackbar.LENGTH_SHORT)
-				.show()
+			return
+		}
+
+		ioExecutor.execute {
+			if (!file.exists()) return@execute
+			val executable = isExecutable(file, type, ext)
+			runOnUiThread {
+				if (isFinishing || isDestroyed) return@runOnUiThread
+				if (executable) {
+					BriarSnackbarBuilder()
+						.make(list, R.string.error_start_activity, Snackbar.LENGTH_SHORT)
+						.show()
+					return@runOnUiThread
+				}
+
+				try {
+					val uri = FileProvider.getUriForFile(this, authority, file)
+					val intent = Intent(Intent.ACTION_VIEW).apply {
+						setDataAndType(uri, type)
+						addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+					}
+					if (intent.resolveActivity(packageManager) == null &&
+						packageManager.queryIntentActivities(intent, 0).isEmpty()
+					) {
+						BriarSnackbarBuilder()
+							.make(list, R.string.error_start_activity, Snackbar.LENGTH_SHORT)
+							.show()
+						return@runOnUiThread
+					}
+
+					val chooser = Intent.createChooser(intent, file.name).apply {
+						addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+					}
+					startActivity(chooser)
+				} catch (e: ActivityNotFoundException) {
+					BriarSnackbarBuilder()
+						.make(list, R.string.error_start_activity, Snackbar.LENGTH_SHORT)
+						.show()
+				} catch (e: SecurityException) {
+					BriarSnackbarBuilder()
+						.make(list, R.string.error_start_activity, Snackbar.LENGTH_SHORT)
+						.show()
+				} catch (e: Exception) {
+					BriarSnackbarBuilder()
+						.make(list, R.string.error_start_activity, Snackbar.LENGTH_SHORT)
+						.show()
+				}
+			}
 		}
 	}
 
