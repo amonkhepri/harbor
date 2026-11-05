@@ -41,7 +41,16 @@ import org.briarproject.briar.android.view.BriarRecyclerView
 import org.briarproject.briar.api.connector.ConnectorFileDownloader
 import org.briarproject.briar.api.connector.ConnectorFileSender
 import java.io.File
+import java.io.FileInputStream
+import java.io.IOException
+import java.util.Collections
 import java.util.Locale
+import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Executor
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
+import java.util.zip.ZipInputStream
 import org.briarproject.briar.api.connector.ConnectorImageSender
 import org.briarproject.briar.api.connector.ConnectorMessageDeleter
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult
@@ -57,13 +66,6 @@ import org.briarproject.briar.api.connector.ConnectorTextSender
 import org.briarproject.briar.api.connector.ReadOnlyConnector
 import org.briarproject.nullsafety.MethodsNotNullByDefault
 import org.briarproject.nullsafety.ParametersNotNullByDefault
-import java.io.IOException
-import java.util.Collections
-import java.util.UUID
-import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.Executor
-import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
 
 // A restored layoutManagerState that the async submitList callback has not
@@ -130,14 +132,108 @@ class ConnectorConversationActivity : BriarActivity() {
 		const val THREAD_TITLE = "connector.THREAD_TITLE"
 
 		internal const val ATTACHMENTS_DIR_NAME = "matrix_attachments"
+		internal const val DEFAULT_MIME_TYPE = "application/octet-stream"
 		private val activeProcessDownloadDirs = Collections.synchronizedSet(LinkedHashSet<File>())
 
-		private val EXECUTABLE_EXTENSIONS = setOf("apk", "dex", "so", "sh", "exe", "bat", "bin")
-		private val EXECUTABLE_MIME_TYPES = setOf("application/vnd.android.package-archive")
+		private val EXECUTABLE_EXTENSIONS = setOf(
+			"apk", "dex", "so", "sh", "exe", "bat", "bin", "jar", "class", "cmd", "vbs",
+		)
+		private val EXECUTABLE_MIME_TYPES = setOf(
+			"application/vnd.android.package-archive",
+			"application/x-executable",
+			"application/x-sharedlib",
+			"application/x-sh",
+			"application/x-shellscript",
+			"application/x-msdos-program",
+			"application/x-msdownload",
+			"*/*",
+		)
 
 		internal fun isExecutable(mimeType: String?, extension: String): Boolean {
 			if (extension in EXECUTABLE_EXTENSIONS) return true
 			if (mimeType != null && mimeType.lowercase(Locale.ROOT) in EXECUTABLE_MIME_TYPES) return true
+			return false
+		}
+
+		internal fun isExecutable(file: File?, mimeType: String?, extension: String): Boolean {
+			if (isExecutable(mimeType, extension)) return true
+			if (file != null && file.exists() && file.isFile) {
+				return isExecutableFile(file)
+			}
+			return false
+		}
+
+		private fun isZipExecutable(file: File): Boolean {
+			try {
+				FileInputStream(file).use { fis ->
+					ZipInputStream(fis).use { zis ->
+						var entry = zis.nextEntry
+						var count = 0
+						while (entry != null && count < 100) {
+							val name = entry.name
+							if (name.equals("AndroidManifest.xml", ignoreCase = true) ||
+								name.equals("classes.dex", ignoreCase = true)
+							) {
+								return true
+							}
+							count++
+							entry = zis.nextEntry
+						}
+					}
+				}
+			} catch (ignored: Exception) {}
+			return false
+		}
+
+		private fun isExecutableFile(file: File): Boolean {
+			if (!file.exists() || !file.isFile || file.length() == 0L) return false
+			try {
+				FileInputStream(file).use { fis ->
+					val header = ByteArray(4)
+					val bytesRead = fis.read(header)
+					if (bytesRead < 2) return false
+
+					// Shebang script: #!
+					if (header[0] == 0x23.toByte() && header[1] == 0x21.toByte()) return true
+
+					// Windows DOS/PE executable: MZ
+					if (header[0] == 0x4d.toByte() && header[1] == 0x5a.toByte()) return true
+
+					if (bytesRead >= 4) {
+						// ELF binary (.so, Linux/Android executable): \x7fELF
+						if (header[0] == 0x7f.toByte() &&
+							header[1] == 0x45.toByte() &&
+							header[2] == 0x4c.toByte() &&
+							header[3] == 0x46.toByte()
+						) {
+							return true
+						}
+
+						// Dalvik / Android DEX: "dex\n" (0x64, 0x65, 0x78, 0x0a)
+						if (header[0] == 0x64.toByte() &&
+							header[1] == 0x65.toByte() &&
+							header[2] == 0x78.toByte() &&
+							header[3] == 0x0a.toByte()
+						) {
+							return true
+						}
+
+						// Java bytecode: 0xCAFEBABE
+						if (header[0] == 0xca.toByte() &&
+							header[1] == 0xfe.toByte() &&
+							header[2] == 0xba.toByte() &&
+							header[3] == 0xbe.toByte()
+						) {
+							return true
+						}
+
+						// ZIP container (PK\x03\x04, PK\x05\x06, PK\x07\x08) -> inspect for AndroidManifest.xml / classes.dex
+						if (header[0] == 0x50.toByte() && header[1] == 0x4b.toByte()) {
+							return isZipExecutable(file)
+						}
+					}
+				}
+			} catch (ignored: Exception) {}
 			return false
 		}
 
@@ -1470,12 +1566,12 @@ class ConnectorConversationActivity : BriarActivity() {
 			val type = if (!rawMime.isNullOrEmpty() && rawMime != "*/*") {
 				rawMime
 			} else if (ext.isNotEmpty()) {
-				MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "*/*"
+				MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: DEFAULT_MIME_TYPE
 			} else {
-				"*/*"
+				DEFAULT_MIME_TYPE
 			}
 
-			if (isExecutable(type, ext)) {
+			if (isExecutable(file, type, ext)) {
 				BriarSnackbarBuilder()
 					.make(list, R.string.error_start_activity, Snackbar.LENGTH_SHORT)
 					.show()

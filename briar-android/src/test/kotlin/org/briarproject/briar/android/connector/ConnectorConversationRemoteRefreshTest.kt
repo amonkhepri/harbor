@@ -45,6 +45,8 @@ import java.io.File
 import java.util.ArrayDeque
 import java.util.UUID
 import java.util.concurrent.Executor
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [21], application = Application::class)
@@ -801,10 +803,15 @@ class ConnectorConversationRemoteRefreshTest {
 		ShadowLooper.idleMainLooper()
 
 		assertNull(shadowOf(activity).nextStartedActivity)
-		val listField = ConnectorConversationActivity::class.java.getDeclaredField("list").apply { isAccessible = true }
+		val listField = ConnectorConversationActivity::class.java.getDeclaredField("list").apply {
+			isAccessible =
+				true
+		}
 		val list = listField.get(activity) as BriarRecyclerView
 		val root = list.parent as FrameLayout
-		val snackbarText = root.findViewById<TextView>(com.google.android.material.R.id.snackbar_text)?.text?.toString()
+		val snackbarText = root.findViewById<TextView>(
+			com.google.android.material.R.id.snackbar_text,
+		)?.text?.toString()
 		assertEquals(activity.getString(R.string.error_start_activity), snackbarText)
 		assertEquals(ConnectorDownloadState.DOWNLOADED, messageState(activity).messages[0].downloadState)
 
@@ -869,11 +876,14 @@ class ConnectorConversationRemoteRefreshTest {
 		start(activity)
 		drainWork()
 
-		assertTrue(ConnectorConversationActivity.isExecutable("application/vnd.android.package-archive", "apk"))
+		assertTrue(
+			ConnectorConversationActivity.isExecutable("application/vnd.android.package-archive", "apk"),
+		)
 		assertTrue(ConnectorConversationActivity.isExecutable(null, "apk"))
 		assertTrue(ConnectorConversationActivity.isExecutable(null, "dex"))
 		assertTrue(ConnectorConversationActivity.isExecutable(null, "so"))
 		assertTrue(ConnectorConversationActivity.isExecutable(null, "sh"))
+		assertTrue(ConnectorConversationActivity.isExecutable("*/*", ""))
 		assertFalse(ConnectorConversationActivity.isExecutable("application/pdf", "pdf"))
 		assertFalse(ConnectorConversationActivity.isExecutable("image/png", "png"))
 
@@ -887,11 +897,102 @@ class ConnectorConversationRemoteRefreshTest {
 		ShadowLooper.idleMainLooper()
 		assertNull(shadowOf(activity).nextStartedActivity)
 
-		val listField = ConnectorConversationActivity::class.java.getDeclaredField("list").apply { isAccessible = true }
+		val listField = ConnectorConversationActivity::class.java.getDeclaredField("list").apply {
+			isAccessible =
+				true
+		}
 		val list = listField.get(activity) as BriarRecyclerView
 		val root = list.parent as FrameLayout
-		val snackbarText = root.findViewById<TextView>(com.google.android.material.R.id.snackbar_text)?.text?.toString()
+		val snackbarText = root.findViewById<TextView>(
+			com.google.android.material.R.id.snackbar_text,
+		)?.text?.toString()
 		assertEquals(activity.getString(R.string.error_start_activity), snackbarText)
+
+		// Extensionless APK file containing AndroidManifest.xml must be rejected even with null mimeType
+		val apkNoExt = File(apkDir, "malicious_no_ext")
+		apkNoExt.outputStream().use { fos ->
+			ZipOutputStream(fos).use { zos ->
+				zos.putNextEntry(ZipEntry("AndroidManifest.xml"))
+				zos.write("manifest".toByteArray())
+				zos.closeEntry()
+			}
+		}
+		assertTrue(apkNoExt.exists())
+		assertTrue(ConnectorConversationActivity.isExecutable(apkNoExt, null, ""))
+		activity.openDownloadedFile(apkNoExt, null)
+		ShadowLooper.idleMainLooper()
+		assertNull(shadowOf(activity).nextStartedActivity)
+
+		// Extensionless ELF binary must also be rejected
+		val elfNoExt = File(apkDir, "malicious_elf")
+		elfNoExt.writeBytes(byteArrayOf(0x7f, 'E'.code.toByte(), 'L'.code.toByte(), 'F'.code.toByte()))
+		assertTrue(ConnectorConversationActivity.isExecutable(elfNoExt, null, ""))
+		activity.openDownloadedFile(elfNoExt, null)
+		ShadowLooper.idleMainLooper()
+		assertNull(shadowOf(activity).nextStartedActivity)
+
+		// Extensionless script must also be rejected
+		val scriptNoExt = File(apkDir, "malicious_script")
+		scriptNoExt.writeText("#!/bin/sh\nexit 0")
+		assertTrue(ConnectorConversationActivity.isExecutable(scriptNoExt, null, ""))
+		activity.openDownloadedFile(scriptNoExt, null)
+		ShadowLooper.idleMainLooper()
+		assertNull(shadowOf(activity).nextStartedActivity)
+
+		// Non-executable zip file must NOT be detected as executable
+		val safeZip = File(apkDir, "safe_archive.zip")
+		safeZip.outputStream().use { fos ->
+			ZipOutputStream(fos).use { zos ->
+				zos.putNextEntry(ZipEntry("notes.txt"))
+				zos.write("hello".toByteArray())
+				zos.closeEntry()
+			}
+		}
+		assertFalse(ConnectorConversationActivity.isExecutable(safeZip, "application/zip", "zip"))
+
+		destroy(activity)
+		drainWork()
+	}
+
+	@Test
+	fun unknownFileWithoutExtensionFallsBackToOctetStreamNotWildcard() {
+		val activity = createActivity()
+		start(activity)
+		drainWork()
+
+		val dir = File(File(activity.cacheDir, "matrix_attachments"), "octet_test")
+		dir.mkdirs()
+		val safeFile = File(dir, "unknown_data")
+		safeFile.writeText("safe plain data")
+
+		// Register viewer that only handles application/octet-stream
+		val shadowPackageManager = shadowOf(activity.packageManager)
+		val resolveInfo = ResolveInfo().apply {
+			activityInfo = ActivityInfo().apply {
+				packageName = "org.example.hexviewer"
+				name = "org.example.hexviewer.ViewerActivity"
+			}
+		}
+		val authority = "${activity.packageName}.connector.fileprovider"
+		val expectedContentUri = FileProvider.getUriForFile(activity, authority, safeFile)
+		val octetIntent = Intent(Intent.ACTION_VIEW).apply {
+			setDataAndType(expectedContentUri, "application/octet-stream")
+			addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+		}
+		shadowPackageManager.addResolveInfoForIntent(octetIntent, resolveInfo)
+
+		// Open with rawMime = null, should use application/octet-stream instead of */*
+		activity.openDownloadedFile(safeFile, null)
+		drainWork()
+
+		val started = shadowOf(activity).nextStartedActivity
+		assertNotNull("Chooser should start for application/octet-stream viewer", started)
+		val innerIntent = started.getParcelableExtra<Intent>(Intent.EXTRA_INTENT)
+		assertNotNull(innerIntent)
+		assertEquals(Intent.ACTION_VIEW, innerIntent!!.action)
+		assertEquals("application/octet-stream", innerIntent.type)
+		assertEquals(expectedContentUri, innerIntent.data)
+		assertTrue((innerIntent.flags and Intent.FLAG_GRANT_READ_URI_PERMISSION) != 0)
 
 		destroy(activity)
 		drainWork()
