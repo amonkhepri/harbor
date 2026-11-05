@@ -12,6 +12,8 @@ import androidx.recyclerview.widget.RecyclerView
 import org.briarproject.briar.R
 import org.briarproject.briar.android.Localizer
 import org.briarproject.briar.android.view.BriarRecyclerView
+import org.briarproject.briar.api.connector.ConnectorAttachmentMetadata
+import org.briarproject.briar.api.connector.ConnectorFileDownloader
 import org.briarproject.briar.api.connector.ConnectorMessage
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult
 import org.briarproject.briar.api.connector.ConnectorMessageType
@@ -33,6 +35,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import org.robolectric.shadows.ShadowLooper
+import java.io.File
 import java.util.ArrayDeque
 import java.util.concurrent.Executor
 
@@ -42,7 +45,11 @@ class ConnectorConversationRemoteRefreshTest {
 
 	@get:Rule val rule = InstantTaskExecutorRule()
 
-	private class FakeConnector : ReadOnlyConnector, ConnectorTextSender, ConnectorRoomObserver {
+	private class FakeConnector :
+		ReadOnlyConnector,
+		ConnectorTextSender,
+		ConnectorRoomObserver,
+		ConnectorFileDownloader {
 		override val source = ConnectorSources.MATRIX
 		override fun isEnabled() = true
 		override fun isAuthorized() = true
@@ -54,6 +61,23 @@ class ConnectorConversationRemoteRefreshTest {
 			ConnectorMessageReadResult.Success(messages.toList())
 
 		override fun sendText(threadId: String, text: String) = true
+
+		override fun downloadFile(
+			threadId: String,
+			messageId: String,
+			attachment: ConnectorAttachmentMetadata,
+			destinationDir: File,
+			isCancelled: () -> Boolean,
+		): ConnectorFileDownloader.DownloadResult {
+			if (isCancelled()) {
+				return ConnectorFileDownloader.DownloadResult.Failure(
+					ConnectorFileDownloader.FailureCause.CANCELLED,
+				)
+			}
+			val file = File(destinationDir, "downloaded_" + (attachment.fileName ?: "file"))
+			file.writeText("sample content")
+			return ConnectorFileDownloader.DownloadResult.Success(file)
+		}
 
 		var activeSubscription: FakeSubscription? = null
 
@@ -187,7 +211,9 @@ class ConnectorConversationRemoteRefreshTest {
 	}
 
 	private fun getLayoutManager(activity: ConnectorConversationActivity): LinearLayoutManager {
-		val managerField = ConnectorConversationActivity::class.java.getDeclaredField("layoutManager").apply {
+		val managerField = ConnectorConversationActivity::class.java.getDeclaredField(
+			"layoutManager",
+		).apply {
 			isAccessible = true
 		}
 		return managerField.get(activity) as LinearLayoutManager
@@ -442,5 +468,64 @@ class ConnectorConversationRemoteRefreshTest {
 		val visibleView3 = manager.findViewByPosition(visiblePos3)
 		assertNotNull(visibleView3)
 		assertEquals(expectedOffset, visibleView3!!.top)
+	}
+
+	@Test
+	fun onStopResetsInFlightDownloadsToIdleAndCancelsWorker() {
+		val activity = createActivity()
+		start(activity)
+		drainWork()
+
+		val fileMessage = ConnectorMessage(
+			source = ConnectorSources.MATRIX,
+			threadId = "!room1:matrix.org",
+			messageId = "\$file1",
+			dateSeconds = 1000,
+			isOutgoing = false,
+			text = "attachment.pdf",
+			sourceMessageOrder = 1000L,
+			type = ConnectorMessageType.FILE,
+			attachment = ConnectorAttachmentMetadata(
+				fileName = "attachment.pdf",
+				mimeType = "application/pdf",
+				size = 1024L,
+				uri = "mxc://example.org/file1",
+			),
+		)
+		fakeConnector.messages.add(fileMessage)
+		fakeConnector.activeSubscription?.onUpdate?.invoke()
+		drainWork()
+
+		val items = messageState(activity).messages
+		assertEquals(1, items.size)
+		val item = items[0]
+
+		activity.onFileClicked(item)
+		assertEquals(
+			ConnectorDownloadState.DOWNLOADING,
+			messageState(activity).messages[0].downloadState,
+		)
+
+		val activeDownloadsField = ConnectorConversationActivity::class.java.getDeclaredField(
+			"activeDownloads",
+		).apply {
+			isAccessible = true
+		}
+		val activeDownloads = activeDownloadsField.get(activity) as Map<*, *>
+		assertEquals(1, activeDownloads.size)
+
+		activity.resetActiveDownloads()
+
+		assertEquals(
+			ConnectorDownloadState.IDLE,
+			messageState(activity).messages[0].downloadState,
+		)
+		assertTrue(activeDownloads.isEmpty())
+
+		drainWork()
+		assertEquals(
+			ConnectorDownloadState.IDLE,
+			messageState(activity).messages[0].downloadState,
+		)
 	}
 }

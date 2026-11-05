@@ -1733,39 +1733,63 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 				return DownloadResult.Failure(FailureCause.NETWORK_ERROR)
 			}
 
-			val file = File(path)
-			downloadedFile = file
-
-			val canonicalDestDir = destinationDir.canonicalFile
-			val canonicalFile = file.canonicalFile
-			if (!canonicalFile.toPath().startsWith(canonicalDestDir.toPath()) ||
-				canonicalFile == canonicalDestDir
-			) {
-				cleanUpHandleAndFile(handle, file)
-				return DownloadResult.Failure(FailureCause.NETWORK_ERROR)
+			val tempFile = File(path)
+			val canonicalDestPath = destinationDir.canonicalPath
+			val destPrefix = if (canonicalDestPath.endsWith(File.separator)) {
+				canonicalDestPath
+			} else {
+				canonicalDestPath + File.separator
 			}
 
-			if (isCancelled()) {
-				cleanUpHandleAndFile(handle, file)
-				return DownloadResult.Failure(FailureCause.CANCELLED)
-			}
-
-			if (!file.exists()) {
+			val canonicalTempPath = tempFile.canonicalPath
+			if (!canonicalTempPath.startsWith(destPrefix)) {
 				cleanUpHandleAndFile(handle, null)
 				return DownloadResult.Failure(FailureCause.NETWORK_ERROR)
 			}
 
-			if (file.length() > ConnectorFileDownloader.MAX_FILE_BYTES) {
-				cleanUpHandleAndFile(handle, file)
+			if (isCancelled()) {
+				cleanUpHandleAndFile(handle, null)
+				return DownloadResult.Failure(FailureCause.CANCELLED)
+			}
+
+			if (!tempFile.exists()) {
+				cleanUpHandleAndFile(handle, null)
+				return DownloadResult.Failure(FailureCause.NETWORK_ERROR)
+			}
+
+			if (tempFile.length() > ConnectorFileDownloader.MAX_FILE_BYTES) {
+				cleanUpHandleAndFile(handle, null)
 				return DownloadResult.Failure(FailureCause.OVERSIZE)
+			}
+
+			val targetFile = File(destinationDir, "${UUID.randomUUID()}_$safeFileName")
+			val canonicalTargetPath = targetFile.canonicalPath
+			if (!canonicalTargetPath.startsWith(destPrefix)) {
+				cleanUpHandleAndFile(handle, null)
+				return DownloadResult.Failure(FailureCause.NETWORK_ERROR)
 			}
 
 			val persistMethod = rawHandle.javaClass.methods.firstOrNull {
 				it.name == "persist" && it.parameterTypes.size == 1
 			}
-			persistMethod?.invoke(rawHandle, file.absolutePath)
+			val persisted = (persistMethod?.invoke(rawHandle, targetFile.absolutePath) as? Boolean) == true
+			if (!persisted || !targetFile.exists()) {
+				cleanUpHandleAndFile(handle, targetFile)
+				return DownloadResult.Failure(FailureCause.NETWORK_ERROR)
+			}
+			downloadedFile = targetFile
 
-			DownloadResult.Success(file)
+			if (isCancelled()) {
+				cleanUpHandleAndFile(handle, targetFile)
+				return DownloadResult.Failure(FailureCause.CANCELLED)
+			}
+
+			if (targetFile.length() > ConnectorFileDownloader.MAX_FILE_BYTES) {
+				cleanUpHandleAndFile(handle, targetFile)
+				return DownloadResult.Failure(FailureCause.OVERSIZE)
+			}
+
+			DownloadResult.Success(targetFile)
 		} catch (e: DownloadCancelledException) {
 			cleanUpHandleAndFile(handle, downloadedFile)
 			DownloadResult.Failure(FailureCause.CANCELLED)

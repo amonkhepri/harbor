@@ -465,11 +465,27 @@ class MediaSource(val url: String = "", val json: String = "") {
 	}
 }
 
-class MediaFileHandle(private val path: String) : AutoCloseable {
+class MediaFileHandle(private val tempDir: java.io.File?, private val path: String) :
+	AutoCloseable {
+	constructor(path: String) : this(null, path)
+
 	fun path(): String = path
-	fun persist(newPath: String): Boolean = true
+	fun persist(newPath: String): Boolean {
+		val dest = java.io.File(newPath)
+		val src = java.io.File(path)
+		if (!src.exists()) return false
+		dest.parentFile?.mkdirs()
+		return try {
+			src.copyTo(dest, overwrite = true)
+			src.delete()
+			true
+		} catch (e: Exception) {
+			false
+		}
+	}
 	fun destroy() {
 		FakeMatrixSdkState.mediaFileHandleDestroyCount++
+		tempDir?.deleteRecursively()
 	}
 	override fun close() {
 		destroy()
@@ -724,11 +740,13 @@ class Client internal constructor(
 		val dirPath = tempDir ?: System.getProperty("java.io.tmpdir") ?: "."
 		val dir = java.io.File(dirPath)
 		dir.mkdirs()
+		val handleDir = java.io.File(dir, "tempdir_" + java.util.UUID.randomUUID())
+		handleDir.mkdirs()
 		val targetName = filename ?: "downloaded_file"
-		val file = java.io.File(dir, targetName)
+		val file = java.io.File(handleDir, targetName)
 		val bytes = FakeMatrixSdkState.mediaContentToReturn ?: "fake file content".toByteArray()
 		file.writeBytes(bytes)
-		return MediaFileHandle(file.absolutePath)
+		return MediaFileHandle(handleDir, file.absolutePath)
 	}
 
 	/**

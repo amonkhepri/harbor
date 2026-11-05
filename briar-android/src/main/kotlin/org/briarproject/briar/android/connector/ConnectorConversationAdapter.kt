@@ -142,6 +142,9 @@ internal class ConnectorConversationAdapter(
 				if (reactionSummary != null) {
 					text.text = reactionSummary
 					text.visibility = View.VISIBLE
+				} else if (item.attachment == null) {
+					text.text = decoratedText
+					text.visibility = View.GONE
 				} else {
 					text.text = ""
 					text.visibility = View.GONE

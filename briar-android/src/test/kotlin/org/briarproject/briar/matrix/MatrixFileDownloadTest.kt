@@ -159,7 +159,7 @@ class MatrixFileDownloadTest {
 		assertTrue(result is DownloadResult.Success)
 		val file = (result as DownloadResult.Success).file
 		assertTrue(file.canonicalPath.startsWith(tempDir.canonicalPath))
-		assertEquals("hostile.txt", file.name)
+		assertTrue(file.name.endsWith("hostile.txt"))
 		assertEquals("safe data", file.readText())
 	}
 
@@ -179,8 +179,33 @@ class MatrixFileDownloadTest {
 		assertTrue(result is DownloadResult.Success)
 		val file = (result as DownloadResult.Success).file
 		assertTrue(file.canonicalPath.startsWith(tempDir.canonicalPath))
-		assertEquals("passwd", file.name)
+		assertTrue(file.name.endsWith("passwd"))
 		assertEquals("root data", file.readText())
+	}
+
+	@Test
+	fun handleTempDirIsCleanedUpLeavingPersistedFileDirectlyInDestinationDir() {
+		val client = loggedInClient()
+		FakeMatrixSdkState.mediaContentToReturn = "persisted content".toByteArray()
+
+		val attachment = ConnectorAttachmentMetadata(
+			fileName = "report.pdf",
+			mimeType = "application/pdf",
+			size = 17L,
+			uri = "mxc://example.org/report",
+		)
+
+		val result = client.downloadFile(attachment, tempDir)
+		assertTrue(result is DownloadResult.Success)
+		val file = (result as DownloadResult.Success).file
+		assertTrue(file.exists())
+		assertEquals("persisted content", file.readText())
+		assertEquals(tempDir.absolutePath, file.parentFile?.absolutePath)
+
+		val files = tempDir.listFiles() ?: emptyArray()
+		assertEquals(1, files.size)
+		assertEquals(file.absolutePath, files[0].absolutePath)
+		assertFalse(files[0].isDirectory)
 	}
 
 	@Test

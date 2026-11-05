@@ -488,12 +488,23 @@ class ConnectorConversationActivity : BriarActivity() {
 		startTypingObserver()
 	}
 
+	internal fun resetActiveDownloads() {
+		if (activeDownloads.isNotEmpty()) {
+			var updated = messageState
+			for (echoId in activeDownloads.keys) {
+				updated = updated.updateDownloadState(echoId, ConnectorDownloadState.IDLE, null)
+			}
+			activeDownloads.values.forEach { it.set(true) }
+			activeDownloads.clear()
+			submitMessageState(updated)
+		}
+	}
+
 	override fun onStop() {
 		stopRoomObserver()
 		stopTypingObserver()
 		list.stopPeriodicUpdate()
-		activeDownloads.values.forEach { it.set(true) }
-		activeDownloads.clear()
+		resetActiveDownloads()
 		super.onStop()
 	}
 
@@ -584,8 +595,7 @@ class ConnectorConversationActivity : BriarActivity() {
 		stopRoomObserver()
 		stopTypingObserver()
 		retryCoalescer.cancel()
-		activeDownloads.values.forEach { it.set(true) }
-		activeDownloads.clear()
+		resetActiveDownloads()
 		loadFailedSnackbar?.dismiss()
 		loadFailedSnackbar = null
 		lastLoadFailed = false
