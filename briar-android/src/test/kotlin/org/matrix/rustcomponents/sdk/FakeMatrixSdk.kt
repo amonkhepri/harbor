@@ -198,6 +198,19 @@ class Timeline {
 		FakeMatrixSdkState.sendFailureToThrow?.let { throw it }
 	}
 
+	/** Mirrors the pinned AAR's suspend lookup (MX-058); unknown ids throw like the SDK. */
+	suspend fun getEventTimelineItemByEventId(eventId: String): EventTimelineItem =
+		FakeMatrixSdkState.eventItemsById[eventId]?.toEventTimelineItem()
+			?: throw ClientException.Generic("not found", "not found")
+
+	suspend fun edit(eventOrTransactionId: EventOrTransactionId, newContent: EditedContent) {
+		FakeMatrixSdkState.editCallCount++
+		FakeMatrixSdkState.lastEditedEventId =
+			(eventOrTransactionId as EventOrTransactionId.EventId).eventId
+		FakeMatrixSdkState.lastEditedContent = newContent
+		FakeMatrixSdkState.editFailureToThrow?.let { throw it }
+	}
+
 	fun sendFile(params: UploadParameters, info: FileInfo): SendAttachmentJoinHandle {
 		FakeMatrixSdkState.sendFileCallCount++
 		FakeMatrixSdkState.lastSendFileParams = params
@@ -274,6 +287,7 @@ data class FakeTimelineEventSpec(
 	val isReply: Boolean = false,
 	val reactions: List<Reaction> = emptyList(),
 	val redacted: Boolean = false,
+	val editable: Boolean = own,
 ) {
 	fun toEventTimelineItem(): EventTimelineItem {
 		val content = if (redacted) {
@@ -289,7 +303,7 @@ data class FakeTimelineEventSpec(
 				),
 			)
 		}
-		return EventTimelineItem(identifier, sender, own, content, timestamp)
+		return EventTimelineItem(identifier, sender, own, content, timestamp, editable)
 	}
 }
 
@@ -304,8 +318,10 @@ class EventTimelineItem(
 	private val own: Boolean,
 	val content: TimelineItemContent,
 	val timestamp: ULong,
+	private val editable: Boolean = own,
 ) {
 	fun isOwn(): Boolean = own
+	fun isEditable(): Boolean = editable
 
 	fun destroy() {
 		FakeMatrixSdkState.eventTimelineItemDestroyCount++
@@ -427,6 +443,11 @@ class RoomMessageEventContentWithoutRelation(val messageType: MessageType) {
 	fun close() {
 		FakeMatrixSdkState.roomMessageEventContentCloseCount++
 	}
+}
+
+/** Mirrors the pinned AAR's real shape: `EditedContent.RoomMessage(content)` (MX-058). */
+sealed class EditedContent {
+	class RoomMessage(val content: RoomMessageEventContentWithoutRelation) : EditedContent()
 }
 
 /** Mirrors the pinned AAR's real shape: an owned closeable value `Timeline.send` returns. */
@@ -1010,6 +1031,11 @@ object FakeMatrixSdkState {
 	var lastSentContent: RoomMessageEventContentWithoutRelation? = null
 	var lastReplyToEventId: String? = null
 	var sendFailureToThrow: ClientException? = null
+	var eventItemsById: Map<String, FakeTimelineEventSpec> = emptyMap()
+	var editCallCount = 0
+	var lastEditedEventId: String? = null
+	var lastEditedContent: EditedContent? = null
+	var editFailureToThrow: ClientException? = null
 	var sendSuspendAsynchronously = false
 	var sendDelayMs = 0L
 	var roomMessageEventContentCloseCount = 0
@@ -1141,6 +1167,11 @@ object FakeMatrixSdkState {
 		lastSentContent = null
 		lastReplyToEventId = null
 		sendFailureToThrow = null
+		eventItemsById = emptyMap()
+		editCallCount = 0
+		lastEditedEventId = null
+		lastEditedContent = null
+		editFailureToThrow = null
 		sendSuspendAsynchronously = false
 		sendDelayMs = 0L
 		roomMessageEventContentCloseCount = 0

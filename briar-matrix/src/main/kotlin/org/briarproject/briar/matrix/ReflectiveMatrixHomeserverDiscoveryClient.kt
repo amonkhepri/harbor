@@ -851,17 +851,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			val loadedTimeline =
 				invokeCloseableValue(room, "timeline", emptyArray(), emptyArray(), ::closeQuietly)
 			timeline = loadedTimeline
-			val formattedBodyClass = Class.forName(FORMATTED_BODY_CLASS_NAME)
-			val textContent = Class.forName(TEXT_MESSAGE_CONTENT_CLASS_NAME)
-				.getConstructor(String::class.java, formattedBodyClass)
-				.newInstance(text, null)
-			val messageType = Class.forName(MESSAGE_TYPE_TEXT_CLASS_NAME)
-				.getConstructor(textContent.javaClass)
-				.newInstance(textContent)
-			val createdContent = loadedTimeline.javaClass
-				.getMethod("createMessageContent", Class.forName(MESSAGE_TYPE_CLASS_NAME))
-				.invoke(loadedTimeline, messageType)
-				?: throw SnapshotAdapterFailure()
+			val createdContent = createTextContent(loadedTimeline, text)
 			content = createdContent
 			val contentClass = Class.forName(ROOM_MESSAGE_EVENT_CONTENT_CLASS_NAME)
 			if (inReplyToEventId == null) {
@@ -894,6 +884,94 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			closeQuietly(timeline)
 			closeQuietly(room)
 		}
+	}
+
+	private fun createTextContent(timeline: Any, text: String): Any {
+		val formattedBodyClass = Class.forName(FORMATTED_BODY_CLASS_NAME)
+		val textContent = Class.forName(TEXT_MESSAGE_CONTENT_CLASS_NAME)
+			.getConstructor(String::class.java, formattedBodyClass)
+			.newInstance(text, null)
+		val messageType = Class.forName(MESSAGE_TYPE_TEXT_CLASS_NAME)
+			.getConstructor(textContent.javaClass)
+			.newInstance(textContent)
+		return timeline.javaClass
+			.getMethod("createMessageContent", Class.forName(MESSAGE_TYPE_CLASS_NAME))
+			.invoke(timeline, messageType)
+			?: throw SnapshotAdapterFailure()
+	}
+
+	/**
+	 * MX-058: suspend `Timeline.edit(EventOrTransactionId, EditedContent.RoomMessage)` (26.08.05),
+	 * only after `getEventTimelineItemByEventId` shows an own, editable `MessageType.Text` event;
+	 * foreign, media, redacted or unknown events and SDK failures return false, never throwing.
+	 */
+	@Synchronized
+	override fun editTextMessage(roomId: String, eventId: String, text: String): Boolean {
+		val client = loginClient ?: return false
+		var room: Any? = null
+		var timeline: Any? = null
+		var item: Any? = null
+		var content: Any? = null
+		return try {
+			room = client.javaClass.getMethod("getRoom", String::class.java).invoke(client, roomId)
+				?: throw SnapshotAdapterFailure()
+			val loadedTimeline =
+				invokeCloseableValue(room, "timeline", emptyArray(), emptyArray(), ::closeQuietly)
+			timeline = loadedTimeline
+			val loadedItem = invokeCloseableValue(
+				loadedTimeline,
+				"getEventTimelineItemByEventId",
+				arrayOf(String::class.java),
+				arrayOf(eventId),
+				::destroyQuietly,
+			)
+			item = loadedItem
+			if (!isOwnEditableText(loadedItem)) return false
+			val createdContent = createTextContent(loadedTimeline, text)
+			content = createdContent
+			val editedContent = Class.forName(EDITED_CONTENT_ROOM_MESSAGE_CLASS_NAME)
+				.getConstructor(Class.forName(ROOM_MESSAGE_EVENT_CONTENT_CLASS_NAME))
+				.newInstance(createdContent)
+			val eventIdObj = Class.forName(EVENT_ID_CLASS_NAME)
+				.getConstructor(String::class.java)
+				.newInstance(eventId)
+			invokeUnit(
+				loadedTimeline,
+				"edit",
+				arrayOf(
+					Class.forName(EVENT_OR_TRANSACTION_ID_CLASS_NAME),
+					Class.forName(EDITED_CONTENT_CLASS_NAME),
+				),
+				arrayOf(eventIdObj, editedContent),
+			)
+			true
+		} catch (e: InterruptedException) {
+			Thread.currentThread().interrupt()
+			false
+		} catch (e: Exception) {
+			false
+		} catch (e: LinkageError) {
+			false
+		} finally {
+			closeQuietly(content)
+			destroyQuietly(item)
+			closeQuietly(timeline)
+			closeQuietly(room)
+		}
+	}
+
+	private fun isOwnEditableText(event: Any): Boolean {
+		val eventClass = event.javaClass
+		if (eventClass.getMethod("isOwn").invoke(event) != true) return false
+		if (eventClass.getMethod("isEditable").invoke(event) != true) return false
+		val content = eventClass.getMethod("getContent").invoke(event)
+		if (content?.javaClass?.simpleName != "MsgLike") return false
+		val msgLike = content.javaClass.getMethod("getContent").invoke(content)
+		val kind = msgLike.javaClass.getMethod("getKind").invoke(msgLike)
+		if (kind.javaClass.simpleName != "Message") return false
+		val message = kind.javaClass.getMethod("getContent").invoke(kind)
+		val messageType = message.javaClass.getMethod("getMsgType").invoke(message)
+		return Class.forName(MESSAGE_TYPE_TEXT_CLASS_NAME).isInstance(messageType)
 	}
 
 	@Synchronized
@@ -2470,6 +2548,9 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		const val EVENT_OR_TRANSACTION_ID_CLASS_NAME =
 			"org.matrix.rustcomponents.sdk.EventOrTransactionId"
 		const val EVENT_ID_CLASS_NAME = "org.matrix.rustcomponents.sdk.EventOrTransactionId\$EventId"
+		const val EDITED_CONTENT_CLASS_NAME = "org.matrix.rustcomponents.sdk.EditedContent"
+		const val EDITED_CONTENT_ROOM_MESSAGE_CLASS_NAME =
+			"org.matrix.rustcomponents.sdk.EditedContent\$RoomMessage"
 		const val MEDIA_SOURCE_CLASS_NAME = "org.matrix.rustcomponents.sdk.MediaSource"
 		const val RECEIPT_TYPE_CLASS_NAME = "org.matrix.rustcomponents.sdk.ReceiptType"
 		const val ULONG_CLASS_NAME = "kotlin.ULong"

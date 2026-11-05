@@ -805,6 +805,22 @@ class MatrixRoomConnectorTest {
 		assertFalse(connector.deleteMessage("!room:example.org", "\$event"))
 	}
 
+	@Test
+	fun `editTextMessage forwards only authorized non-blank edits and reports failure`() {
+		val client = FakeMessageSendClient(true)
+		val auth = FakeMatrixAuthSession(MatrixAuthState.CREDENTIAL_ENTRY)
+		val connector = connector(authSession = auth, messageSendClient = client)
+		assertFalse(connector.editTextMessage("!room:example.org", "\$event", "fixed"))
+		auth.state = MatrixAuthState.READY
+		assertFalse(connector.editTextMessage("!room:example.org", "\$event", "  "))
+		assertNull(client.lastEditedText)
+
+		assertTrue(connector.editTextMessage("!room:example.org", "\$event", "fixed"))
+		assertEquals(listOf("!room:example.org", "\$event", "fixed"), client.lastEdit)
+		val failing = connector(authSession = auth, messageSendClient = FakeMessageSendClient(false))
+		assertFalse(failing.editTextMessage("!room:example.org", "\$event", "fixed"))
+	}
+
 	private class FakeMessageSendClient(private val result: Boolean) : MatrixMessageSendClient {
 		var lastRequestedRoomId: String? = null
 			private set
@@ -821,6 +837,14 @@ class MatrixRoomConnectorTest {
 
 		var lastDeletedEventId: String? = null
 			private set
+		var lastEdit: List<String>? = null
+			private set
+		val lastEditedText get() = lastEdit?.get(2)
+
+		override fun editTextMessage(roomId: String, eventId: String, text: String): Boolean {
+			lastEdit = listOf(roomId, eventId, text)
+			return result
+		}
 
 		override fun sendTextMessage(roomId: String, text: String): Boolean {
 			lastRequestedRoomId = roomId

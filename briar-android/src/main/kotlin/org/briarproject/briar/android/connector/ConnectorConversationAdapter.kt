@@ -20,6 +20,8 @@ internal class ConnectorConversationAdapter(
 	private val onFileClicked: ((ConnectorConversationMessageItem) -> Unit)? = null,
 	var thumbnailManager: ConnectorThumbnailManager? = null,
 	var onReplyClicked: ((ConnectorConversationMessageItem) -> Unit)? = null,
+	/** True when the own-message action opens the edit dialog for text rows (MX-058). */
+	var editsOwnText: Boolean = false,
 ) : ListAdapter<
 	ConnectorConversationMessageItem,
 	ConnectorConversationAdapter.MessageViewHolder,
@@ -38,6 +40,7 @@ internal class ConnectorConversationAdapter(
 			onFileClicked,
 			thumbnailManager,
 			onReplyClicked,
+			editsOwnText,
 		)
 	}
 
@@ -57,6 +60,7 @@ internal class ConnectorConversationAdapter(
 		private val onFileClicked: ((ConnectorConversationMessageItem) -> Unit)? = null,
 		private val thumbnailManager: ConnectorThumbnailManager? = null,
 		private val onReplyClicked: ((ConnectorConversationMessageItem) -> Unit)? = null,
+		private val editsOwnText: Boolean = false,
 	) : RecyclerView.ViewHolder(itemView) {
 		constructor(itemView: View, onDeleteClicked: ((ConnectorConversationMessageItem) -> Unit)?) :
 			this(itemView, onDeleteClicked, null, null, null)
@@ -288,15 +292,15 @@ internal class ConnectorConversationAdapter(
 
 		private fun showMessageActions(item: ConnectorConversationMessageItem) {
 			val popup = PopupMenu(itemView.context, itemView)
-			popup.menu.add(
-				Menu.NONE,
-				R.string.connector_conversation_reply,
-				0,
-				R.string.connector_conversation_reply,
-			)
-			popup.menu.add(Menu.NONE, R.string.delete, 1, R.string.delete)
+			val ownAction = if (editsOwnText && item.type == ConnectorMessageType.TEXT) {
+				R.string.connector_conversation_edit
+			} else {
+				R.string.delete
+			}
+			popup.menu.add(Menu.NONE, ACTION_REPLY, 0, R.string.connector_conversation_reply)
+			popup.menu.add(Menu.NONE, ACTION_OWN, 1, ownAction)
 			popup.setOnMenuItemClickListener { menuItem ->
-				if (menuItem.itemId == R.string.delete) {
+				if (menuItem.itemId == ACTION_OWN) {
 					onDeleteClicked?.invoke(item)
 				} else {
 					onReplyClicked?.invoke(item)
@@ -304,6 +308,11 @@ internal class ConnectorConversationAdapter(
 				true
 			}
 			popup.show()
+		}
+
+		private companion object {
+			const val ACTION_REPLY = 1
+			const val ACTION_OWN = 2
 		}
 	}
 

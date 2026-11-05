@@ -54,6 +54,7 @@ import java.util.concurrent.atomic.AtomicLong
 import java.util.zip.ZipFile
 import org.briarproject.briar.api.connector.ConnectorImageSender
 import org.briarproject.briar.api.connector.ConnectorMessageDeleter
+import org.briarproject.briar.api.connector.ConnectorMessageEditor
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult
 import org.briarproject.briar.api.connector.ConnectorMessageType
 import org.briarproject.briar.api.connector.ConnectorReadMarker
@@ -477,6 +478,7 @@ class ConnectorConversationActivity : BriarActivity() {
 		textSender = connector as? ConnectorTextSender
 		replySender = (connector as? ConnectorReplySender)?.takeIf { textSender != null }
 		if (replySender != null) adapter.onReplyClicked = ::onReplyClicked
+		adapter.editsOwnText = connector is ConnectorMessageEditor
 		imageSender = connector as? ConnectorImageSender
 		fileSender = connector as? ConnectorFileSender
 		readMarker = connector as? ConnectorReadMarker
@@ -1458,12 +1460,45 @@ class ConnectorConversationActivity : BriarActivity() {
 	}
 
 	private fun onDeleteMessageClicked(item: ConnectorConversationMessageItem) {
-		// MX-020: Prompt to delete an outgoing message
-		if (connector !is ConnectorMessageDeleter) return
 		if (threadId.isEmpty()) return
+		// MX-058: own text messages open an edit dialog that also offers Delete when supported.
+		if (connector is ConnectorMessageEditor && item.type == ConnectorMessageType.TEXT) {
+			ConnectorEditMessageDialogFragment.newInstance(
+				item.connectorThreadId,
+				item.connectorMessageId,
+				item.text,
+			)
+				.show(supportFragmentManager, ConnectorEditMessageDialogFragment.TAG)
+			return
+		}
+		// MX-020: Prompt to delete an outgoing message
+		if (connector is ConnectorMessageDeleter) {
+			showDeleteConfirmation(item.connectorThreadId, item.connectorMessageId)
+		}
+	}
 
-		ConnectorDeleteMessageDialogFragment.newInstance(item.connectorThreadId, item.connectorMessageId)
+	internal fun canDeleteMessages() = connector is ConnectorMessageDeleter
+
+	internal fun showDeleteConfirmation(targetThreadId: String, connectorMessageId: String) {
+		ConnectorDeleteMessageDialogFragment.newInstance(targetThreadId, connectorMessageId)
 			.show(supportFragmentManager, ConnectorDeleteMessageDialogFragment.TAG)
+	}
+
+	// The local row changes only after the provider accepted the edit; failures keep the original.
+	internal fun confirmEditMessage(targetThreadId: String, connectorMessageId: String, text: String) {
+		val editor = connector as? ConnectorMessageEditor ?: return
+		if (text.isBlank()) return
+		ioExecutor.execute {
+			val success = editor.editTextMessage(targetThreadId, connectorMessageId, text)
+			runOnUiThread {
+				if (isFinishing || isDestroyed) return@runOnUiThread
+				if (!success) {
+					Snackbar.make(list, R.string.connector_conversation_edit_failed, Snackbar.LENGTH_LONG).show()
+					return@runOnUiThread
+				}
+				submitMessageState(markMessageEdited(messageState, targetThreadId, connectorMessageId, text))
+			}
+		}
 	}
 
 	// Persisted ids let confirmation proceed before the post-rotation message reload finishes.
@@ -1802,3 +1837,69 @@ internal fun markMessageDeleted(
 	val messages = state.messages.map { if (it.stableId == item.stableId) updated else it }
 	return state.copy(messages = messages)
 }
+
+class ConnectorEditMessageDialogFragment : DialogFragment() {
+	companion object {
+		const val TAG = "ConnectorEditMessageDialogFragment"
+		private const val ARG_THREAD_ID = "threadId"
+		private const val ARG_MESSAGE_ID = "messageId"
+		private const val ARG_TEXT = "text"
+
+		fun newInstance(
+			threadId: String,
+			messageId: String,
+			text: String,
+		): ConnectorEditMessageDialogFragment = ConnectorEditMessageDialogFragment().apply {
+			arguments = Bundle().apply {
+				putString(ARG_THREAD_ID, threadId)
+				putString(ARG_MESSAGE_ID, messageId)
+				putString(ARG_TEXT, text)
+			}
+		}
+	}
+
+	override fun onCreateDialog(savedInstanceState: Bundle?): Dialog {
+		val activity = requireActivity() as ConnectorConversationActivity
+		val args = requireArguments()
+		val threadId = args.getString(ARG_THREAD_ID)!!
+		val messageId = args.getString(ARG_MESSAGE_ID)!!
+		// A stable id lets the dialog restore in-progress text after rotation.
+		val input = EditText(activity).apply {
+			id = android.R.id.edit
+			setText(args.getString(ARG_TEXT))
+		}
+		val builder = AlertDialog.Builder(activity, R.style.BriarDialogTheme)
+			.setTitle(R.string.connector_conversation_edit)
+			.setView(input)
+			.setPositiveButton(R.string.connector_conversation_edit_save) { _, _ ->
+				activity.confirmEditMessage(threadId, messageId, input.text.toString())
+			}
+			.setNegativeButton(R.string.cancel, null)
+		if (activity.canDeleteMessages()) {
+			builder.setNeutralButton(R.string.delete) { _, _ ->
+				activity.showDeleteConfirmation(threadId, messageId)
+			}
+		}
+		return builder
+			.create()
+	}
+}
+
+internal fun markMessageEdited(
+	state: ConnectorConversationMessageListState,
+	threadId: String,
+	messageId: String,
+	text: String,
+): ConnectorConversationMessageListState = state.copy(
+	messages = state.messages.map {
+		if (it.connectorThreadId == threadId &&
+			it.connectorMessageId == messageId &&
+			it.localEchoStatus == null &&
+			it.type == ConnectorMessageType.TEXT
+		) {
+			it.copy(text = text, isEdited = true)
+		} else {
+			it
+		}
+	},
+)
