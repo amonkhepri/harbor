@@ -14,6 +14,7 @@ import org.briarproject.briar.api.connector.ConnectorMessageType
 internal class ConnectorConversationAdapter(
 	private val onDeleteClicked: ((ConnectorConversationMessageItem) -> Unit)? = null,
 	private val onRetrySendClicked: ((ConnectorConversationMessageItem) -> Unit)? = null,
+	private val onFileClicked: ((ConnectorConversationMessageItem) -> Unit)? = null,
 ) : ListAdapter<
 	ConnectorConversationMessageItem,
 	ConnectorConversationAdapter.MessageViewHolder,
@@ -25,7 +26,7 @@ internal class ConnectorConversationAdapter(
 			parent,
 			false,
 		)
-		return MessageViewHolder(view, onDeleteClicked, onRetrySendClicked)
+		return MessageViewHolder(view, onDeleteClicked, onRetrySendClicked, onFileClicked)
 	}
 
 	override fun onBindViewHolder(holder: MessageViewHolder, position: Int) {
@@ -36,9 +37,10 @@ internal class ConnectorConversationAdapter(
 		itemView: View,
 		private val onDeleteClicked: ((ConnectorConversationMessageItem) -> Unit)? = null,
 		private val onRetrySendClicked: ((ConnectorConversationMessageItem) -> Unit)? = null,
+		private val onFileClicked: ((ConnectorConversationMessageItem) -> Unit)? = null,
 	) : RecyclerView.ViewHolder(itemView) {
 		constructor(itemView: View, onDeleteClicked: ((ConnectorConversationMessageItem) -> Unit)?) :
-			this(itemView, onDeleteClicked, null)
+			this(itemView, onDeleteClicked, null, null)
 		private val text: TextView =
 			itemView.findViewById(R.id.connectorMessageText)
 		private val direction: TextView =
@@ -99,11 +101,25 @@ internal class ConnectorConversationAdapter(
 					item.attachment?.size,
 				)
 				fileName.text = decoratedText
-				val details = ConnectorFileMetadataFormatter.formatFileDetails(
+				val baseDetails = ConnectorFileMetadataFormatter.formatFileDetails(
 					text.resources,
 					mimeType,
 					formattedSize,
 				)
+				val downloadStatus = when (item.downloadState) {
+					ConnectorDownloadState.DOWNLOADING ->
+						text.resources.getString(R.string.connector_file_downloading)
+					ConnectorDownloadState.DOWNLOADED ->
+						text.resources.getString(R.string.connector_file_downloaded)
+					ConnectorDownloadState.FAILED ->
+						text.resources.getString(R.string.connector_file_download_failed)
+					null, ConnectorDownloadState.IDLE -> null
+				}
+				val details = if (downloadStatus != null) {
+					if (baseDetails.isNotEmpty()) "$baseDetails • $downloadStatus" else downloadStatus
+				} else {
+					baseDetails
+				}
 				fileDetails.text = details
 				fileDetails.visibility = if (details.isNotEmpty()) View.VISIBLE else View.GONE
 				fileLayout.contentDescription =
@@ -113,8 +129,16 @@ internal class ConnectorConversationAdapter(
 						mimeType,
 						formattedSize,
 						reactionSummary,
+						downloadStatus,
 					)
 				fileLayout.visibility = View.VISIBLE
+				if (onFileClicked != null) {
+					fileLayout.setOnClickListener { onFileClicked.invoke(item) }
+					fileLayout.isClickable = true
+				} else {
+					fileLayout.setOnClickListener(null)
+					fileLayout.isClickable = false
+				}
 				if (reactionSummary != null) {
 					text.text = reactionSummary
 					text.visibility = View.VISIBLE
@@ -125,6 +149,8 @@ internal class ConnectorConversationAdapter(
 			} else {
 				fileLayout.visibility = View.GONE
 				fileLayout.contentDescription = null
+				fileLayout.setOnClickListener(null)
+				fileLayout.isClickable = false
 				fileName.text = ""
 				fileDetails.text = ""
 				fileDetails.visibility = View.GONE
@@ -198,6 +224,8 @@ internal class ConnectorConversationAdapter(
 			i1.isReply == i2.isReply &&
 			i1.reactions == i2.reactions &&
 			i1.localEchoStatus == i2.localEchoStatus &&
-			i1.attachment == i2.attachment
+			i1.attachment == i2.attachment &&
+			i1.downloadState == i2.downloadState &&
+			i1.downloadedFile == i2.downloadedFile
 	}
 }

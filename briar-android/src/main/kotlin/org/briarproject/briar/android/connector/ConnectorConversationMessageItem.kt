@@ -5,8 +5,11 @@ import org.briarproject.briar.api.connector.ConnectorMessage
 import org.briarproject.briar.api.connector.ConnectorMessageType
 import org.briarproject.briar.api.connector.ConnectorReactionSummary
 import org.briarproject.briar.api.connector.ConnectorSource
+import java.io.File
 
 enum class ConnectorLocalEchoStatus { PENDING, SENT, FAILED }
+
+enum class ConnectorDownloadState { IDLE, DOWNLOADING, DOWNLOADED, FAILED }
 
 data class ConnectorConversationMessageItem(
 	val connectorSource: ConnectorSource,
@@ -21,6 +24,8 @@ data class ConnectorConversationMessageItem(
 	val reactions: List<ConnectorReactionSummary> = emptyList(),
 	val localEchoStatus: ConnectorLocalEchoStatus? = null,
 	val attachment: ConnectorAttachmentMetadata? = null,
+	val downloadState: ConnectorDownloadState? = null,
+	val downloadedFile: File? = null,
 ) {
 	val stableId: String
 		get() = "${connectorSource.id}:$connectorThreadId:$connectorMessageId" +
@@ -81,6 +86,8 @@ data class ConnectorConversationMessageItem(
 					isEdited = false,
 					attachment = null,
 					reactions = emptyList(),
+					downloadState = null,
+					downloadedFile = null,
 				)
 			}
 			val base = when {
@@ -93,11 +100,15 @@ data class ConnectorConversationMessageItem(
 			} else {
 				second.attachment ?: first.attachment
 			}
+			val downloadState = second.downloadState ?: first.downloadState
+			val downloadedFile = second.downloadedFile ?: first.downloadedFile
 			val isReply = second.isReply || first.isReply
 			return base.copy(
 				reactions = base.reactions,
 				attachment = attachment,
 				isReply = isReply,
+				downloadState = downloadState,
+				downloadedFile = downloadedFile,
 			)
 		}
 

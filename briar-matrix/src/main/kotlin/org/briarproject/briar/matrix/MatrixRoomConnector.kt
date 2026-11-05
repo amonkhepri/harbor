@@ -1,7 +1,10 @@
 package org.briarproject.briar.matrix
 
 import org.briarproject.bramble.api.system.Clock
+import org.briarproject.briar.api.connector.ConnectorAttachmentMetadata
+import org.briarproject.briar.api.connector.ConnectorFileDownloader
 import org.briarproject.briar.api.connector.ConnectorFileSender
+import java.io.File
 import org.briarproject.briar.api.connector.ConnectorImageSender
 import org.briarproject.briar.api.connector.ConnectorMessage
 import org.briarproject.briar.api.connector.ConnectorMessageDeleter
@@ -46,17 +49,19 @@ import org.briarproject.briar.api.matrix.MatrixConnector
  * capability (MX-014), and the opt-in [ConnectorReadMarker] capability (MX-019): all three write
  * capabilities fail closed, the same as reading, when not authorized.
  */
-class MatrixRoomConnector(
+class MatrixRoomConnector @JvmOverloads constructor(
 	private val roomSnapshotClient: MatrixRoomSnapshotClient,
 	private val authSession: MatrixAuthSession,
 	private val messageSnapshotClient: MatrixMessageSnapshotClient,
 	private val messageSendClient: MatrixMessageSendClient,
 	private val clock: Clock,
 	private val recentThreadsBudgetMs: Long = DEFAULT_RECENT_THREADS_BUDGET_MS,
+	private val fileDownloadClient: MatrixFileDownloadClient? = null,
 ) : MatrixConnector,
 	ConnectorTextSender,
 	ConnectorImageSender,
 	ConnectorFileSender,
+	ConnectorFileDownloader,
 	ConnectorReadMarker,
 	ConnectorUnreadMarker,
 	ConnectorRoomLeaver,
@@ -191,6 +196,27 @@ class MatrixRoomConnector(
 		onTypingChanged: (isTyping: Boolean) -> Unit,
 	): ConnectorTypingObserver.TypingSubscription? =
 		if (isAuthorized()) messageSnapshotClient.observeTyping(threadId, onTypingChanged) else null
+
+	override fun downloadFile(
+		threadId: String,
+		messageId: String,
+		attachment: ConnectorAttachmentMetadata,
+		destinationDir: File,
+		isCancelled: () -> Boolean,
+	): ConnectorFileDownloader.DownloadResult {
+		if (!isAuthorized()) {
+			return ConnectorFileDownloader.DownloadResult.Failure(
+				ConnectorFileDownloader.FailureCause.LOGGED_OUT,
+			)
+		}
+		val client = fileDownloadClient
+			?: (messageSendClient as? MatrixFileDownloadClient)
+			?: (messageSnapshotClient as? MatrixFileDownloadClient)
+			?: return ConnectorFileDownloader.DownloadResult.Failure(
+				ConnectorFileDownloader.FailureCause.NOT_FOUND,
+			)
+		return client.downloadFile(attachment, destinationDir, isCancelled)
+	}
 
 	companion object {
 		/** Overall wall-clock budget for [getRecentThreads]'s per-room preview loop (MX-034). */

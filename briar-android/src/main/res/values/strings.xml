@@ -1031,5 +1031,8 @@
 	<string name="connector_file_details">%1$s • %2$s</string>
 	<string name="connector_file_accessibility">%1$s, %2$s</string>
 	<string name="connector_file_accessibility_with_details">%1$s, %2$s, %3$s</string>
+	<string name="connector_file_downloading">Downloading…</string>
+	<string name="connector_file_downloaded">Downloaded</string>
+	<string name="connector_file_download_failed">Download failed</string>
 	<string name="connector_typing_indicator">Typing…</string>
 </resources>

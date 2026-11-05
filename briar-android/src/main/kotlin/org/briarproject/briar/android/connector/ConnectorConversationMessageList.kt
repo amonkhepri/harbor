@@ -91,6 +91,20 @@ internal data class ConnectorConversationMessageListState(
 		)
 	}
 
+	fun updateDownloadState(
+		id: String,
+		state: ConnectorDownloadState,
+		file: java.io.File? = null,
+	): ConnectorConversationMessageListState = copy(
+		messages = messages.map { message ->
+			if (message.stableId == id) {
+				message.copy(downloadState = state, downloadedFile = file)
+			} else {
+				message
+			}
+		},
+	)
+
 	fun reconcile(
 		serverMessages: List<ConnectorConversationMessageItem>,
 	): ConnectorConversationMessageListState {

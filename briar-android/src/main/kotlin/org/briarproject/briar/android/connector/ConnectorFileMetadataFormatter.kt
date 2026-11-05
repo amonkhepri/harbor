@@ -60,8 +60,9 @@ internal object ConnectorFileMetadataFormatter {
 		mimeType: String?,
 		formattedSize: String?,
 		reactionSummary: String? = null,
+		downloadStatus: String? = null,
 	): String {
-		val base = when {
+		var base = when {
 			mimeType != null && formattedSize != null ->
 				resources.getString(
 					R.string.connector_file_accessibility_with_details,
@@ -77,6 +78,9 @@ internal object ConnectorFileMetadataFormatter {
 				)
 			else ->
 				resources.getString(R.string.connector_message_file) + ": " + fileName
+		}
+		if (!downloadStatus.isNullOrEmpty()) {
+			base = "$base, $downloadStatus"
 		}
 		return if (reactionSummary.isNullOrEmpty()) {
 			base

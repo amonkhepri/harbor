@@ -454,8 +454,27 @@ class Mentions
 /** Unconstructed stand-in for the pinned AAR's `ThumbnailInfo`; MX-014 sends no thumbnail. */
 class ThumbnailInfo
 
-/** Unconstructed stand-in for the pinned AAR's `MediaSource`; MX-014 sends no thumbnail source. */
-class MediaSource
+/** Stand-in for the pinned AAR's `MediaSource`; supports url and json constructor/converters (MX-053). */
+class MediaSource(val url: String = "", val json: String = "") {
+	fun url(): String = url
+	fun toJson(): String = json.ifEmpty { url }
+
+	companion object {
+		fun fromJson(json: String): MediaSource = MediaSource(url = json, json = json)
+		fun fromUrl(url: String): MediaSource = MediaSource(url = url, json = url)
+	}
+}
+
+class MediaFileHandle(private val path: String) : AutoCloseable {
+	fun path(): String = path
+	fun persist(newPath: String): Boolean = true
+	fun destroy() {
+		FakeMatrixSdkState.mediaFileHandleDestroyCount++
+	}
+	override fun close() {
+		destroy()
+	}
+}
 
 /** FileInfo has the same synthetic ULong constructor marker as ImageInfo in the pinned AAR. */
 class FileInfo(
@@ -690,6 +709,25 @@ class Client internal constructor(
 	fun close() {
 		FakeMatrixSdkState.onDispose?.invoke()
 		FakeMatrixSdkState.clientCloseCount++
+	}
+
+	suspend fun getMediaFile(
+		mediaSource: MediaSource,
+		filename: String?,
+		mimeType: String,
+		useCache: Boolean,
+		tempDir: String?,
+	): MediaFileHandle {
+		FakeMatrixSdkState.getMediaFileCallCount++
+		FakeMatrixSdkState.getMediaFileException?.let { throw it }
+		val dirPath = tempDir ?: System.getProperty("java.io.tmpdir") ?: "."
+		val dir = java.io.File(dirPath)
+		dir.mkdirs()
+		val targetName = filename ?: "downloaded_file"
+		val file = java.io.File(dir, targetName)
+		val bytes = FakeMatrixSdkState.mediaContentToReturn ?: "fake file content".toByteArray()
+		file.writeBytes(bytes)
+		return MediaFileHandle(file.absolutePath)
 	}
 
 	/**
@@ -952,9 +990,17 @@ object FakeMatrixSdkState {
 	var roomInfoCallCount = 0
 	var roomInfoDestroyCount = 0
 	var roomInfoFailureToThrow: Exception? = null
+	var getMediaFileCallCount = 0
+	var getMediaFileException: Exception? = null
+	var mediaContentToReturn: ByteArray? = null
+	var mediaFileHandleDestroyCount = 0
 
 	fun reset() {
 		awaitBuilds()
+		getMediaFileCallCount = 0
+		getMediaFileException = null
+		mediaContentToReturn = null
+		mediaFileHandleDestroyCount = 0
 		roomInfoCallCount = 0
 		roomInfoDestroyCount = 0
 		roomInfoFailureToThrow = null

@@ -8,6 +8,9 @@ import org.briarproject.briar.api.matrix.MatrixAuthSession.RecoverableErrorDetai
 import org.briarproject.briar.api.matrix.MatrixHomeserverDiscoveryClient
 import org.briarproject.briar.api.matrix.MatrixHomeserverDiscoveryClient.DiscoveryResult
 import org.briarproject.briar.api.connector.ConnectorAttachmentMetadata
+import org.briarproject.briar.api.connector.ConnectorFileDownloader
+import org.briarproject.briar.api.connector.ConnectorFileDownloader.DownloadResult
+import org.briarproject.briar.api.connector.ConnectorFileDownloader.FailureCause
 import org.briarproject.briar.api.connector.ConnectorFileSender
 import org.briarproject.briar.api.connector.ConnectorImageSender
 import org.briarproject.briar.api.connector.ConnectorMessageType
@@ -82,7 +85,8 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 	MatrixLoginClient,
 	MatrixRoomSnapshotClient,
 	MatrixMessageSnapshotClient,
-	MatrixMessageSendClient {
+	MatrixMessageSendClient,
+	MatrixFileDownloadClient {
 
 	private var loginClient: Any? = null
 	private val lifecycleLock = Any()
@@ -1630,14 +1634,187 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 				val sizeObj = sizeMethod?.invoke(info)
 				rawSize = sizeObj?.toString()?.toLongOrNull()?.takeIf { it >= 0L }
 			}
+			val sourceMethod = contentClass.methods.firstOrNull {
+				it.name == "getSource" && it.parameterTypes.isEmpty()
+			}
+			val source = sourceMethod?.invoke(content)
+			var mediaUrl: String? = null
+			var mediaJson: String? = null
+			if (source != null) {
+				val urlMethod = source.javaClass.methods.firstOrNull {
+					it.name == "url" && it.parameterTypes.isEmpty()
+				}
+				mediaUrl = urlMethod?.invoke(source) as? String
+				val jsonMethod = source.javaClass.methods.firstOrNull {
+					it.name == "toJson" && it.parameterTypes.isEmpty()
+				}
+				mediaJson = jsonMethod?.invoke(source) as? String
+			}
 			ConnectorAttachmentMetadata(
 				fileName = rawFilename,
 				mimeType = rawMime,
 				size = rawSize,
+				uri = mediaUrl,
+				mediaSourceJson = mediaJson,
 			)
 		} catch (e: Exception) {
 			null
 		}
+	}
+
+	@Synchronized
+	override fun downloadFile(
+		attachment: ConnectorAttachmentMetadata,
+		destinationDir: File,
+		isCancelled: () -> Boolean,
+	): DownloadResult {
+		val generation = synchronized(lifecycleLock) { activeGeneration }
+			?: return DownloadResult.Failure(FailureCause.LOGGED_OUT)
+		val client = synchronized(this) { loginClient }
+			?: return DownloadResult.Failure(FailureCause.LOGGED_OUT)
+
+		if (isCancelled()) return DownloadResult.Failure(FailureCause.CANCELLED)
+
+		val declaredSize = attachment.size
+		if (declaredSize != null && declaredSize > ConnectorFileDownloader.MAX_FILE_BYTES) {
+			return DownloadResult.Failure(FailureCause.OVERSIZE)
+		}
+
+		val mediaSourceJson = attachment.mediaSourceJson
+		val mediaUrl = attachment.uri
+		if (mediaSourceJson.isNullOrBlank() && mediaUrl.isNullOrBlank()) {
+			return DownloadResult.Failure(FailureCause.NOT_FOUND)
+		}
+
+		if (!destinationDir.exists()) destinationDir.mkdirs()
+
+		var mediaSource: Any? = null
+		var handle: Any? = null
+		var downloadedFile: File? = null
+
+		return try {
+			val mediaSourceClass = Class.forName(MEDIA_SOURCE_CLASS_NAME)
+			mediaSource = createMediaSource(mediaSourceClass, mediaSourceJson, mediaUrl)
+				?: return DownloadResult.Failure(FailureCause.NOT_FOUND)
+
+			if (isCancelled()) return DownloadResult.Failure(FailureCause.CANCELLED)
+
+			val rawHandle = invokeCloseableValue(
+				target = client,
+				methodName = "getMediaFile",
+				parameterTypes = arrayOf(
+					mediaSourceClass,
+					String::class.java,
+					String::class.java,
+					Boolean::class.javaPrimitiveType ?: java.lang.Boolean.TYPE,
+					String::class.java,
+				),
+				arguments = arrayOf(
+					mediaSource,
+					attachment.fileName,
+					attachment.mimeType ?: "application/octet-stream",
+					false,
+					destinationDir.absolutePath,
+				),
+				abandon = ::closeQuietly,
+			)
+			handle = rawHandle
+
+			val isCurrent = synchronized(lifecycleLock) { activeGeneration === generation }
+			if (!isCurrent) {
+				cleanUpHandleAndFile(handle, null)
+				return DownloadResult.Failure(FailureCause.LOGGED_OUT)
+			}
+
+			if (isCancelled()) {
+				cleanUpHandleAndFile(handle, null)
+				return DownloadResult.Failure(FailureCause.CANCELLED)
+			}
+
+			val pathMethod = rawHandle.javaClass.getMethod("path")
+			val path = pathMethod.invoke(rawHandle) as? String
+			if (path == null) {
+				cleanUpHandleAndFile(handle, null)
+				return DownloadResult.Failure(FailureCause.NETWORK_ERROR)
+			}
+
+			val file = File(path)
+			downloadedFile = file
+
+			if (isCancelled()) {
+				cleanUpHandleAndFile(handle, file)
+				return DownloadResult.Failure(FailureCause.CANCELLED)
+			}
+
+			if (!file.exists()) {
+				cleanUpHandleAndFile(handle, null)
+				return DownloadResult.Failure(FailureCause.NETWORK_ERROR)
+			}
+
+			if (file.length() > ConnectorFileDownloader.MAX_FILE_BYTES) {
+				cleanUpHandleAndFile(handle, file)
+				return DownloadResult.Failure(FailureCause.OVERSIZE)
+			}
+
+			val persistMethod = rawHandle.javaClass.methods.firstOrNull {
+				it.name == "persist" && it.parameterTypes.size == 1
+			}
+			persistMethod?.invoke(rawHandle, file.absolutePath)
+
+			DownloadResult.Success(file)
+		} catch (e: InterruptedException) {
+			Thread.currentThread().interrupt()
+			cleanUpHandleAndFile(handle, downloadedFile)
+			DownloadResult.Failure(FailureCause.CANCELLED)
+		} catch (e: Exception) {
+			cleanUpHandleAndFile(handle, downloadedFile)
+			DownloadResult.Failure(FailureCause.NETWORK_ERROR)
+		} finally {
+			closeQuietly(handle)
+			destroyQuietly(mediaSource)
+		}
+	}
+
+	private fun cleanUpHandleAndFile(handle: Any?, file: File?) {
+		try {
+			if (file != null && file.exists()) file.delete()
+		} catch (ignored: Exception) {}
+		closeQuietly(handle)
+		destroyQuietly(handle)
+	}
+
+	private fun createMediaSource(mediaSourceClass: Class<*>, json: String?, url: String?): Any? {
+		val companion = try {
+			mediaSourceClass.getField("Companion").get(null)
+		} catch (e: Exception) {
+			null
+		}
+		val target = companion ?: mediaSourceClass
+		if (!json.isNullOrBlank()) {
+			val fromJson = target.javaClass.methods.firstOrNull {
+				it.name == "fromJson" &&
+					it.parameterTypes.size == 1 &&
+					it.parameterTypes[0] == String::class.java
+			}
+			if (fromJson != null) {
+				try {
+					return fromJson.invoke(target, json)
+				} catch (ignored: Exception) {}
+			}
+		}
+		if (!url.isNullOrBlank()) {
+			val fromUrl = target.javaClass.methods.firstOrNull {
+				it.name == "fromUrl" &&
+					it.parameterTypes.size == 1 &&
+					it.parameterTypes[0] == String::class.java
+			}
+			if (fromUrl != null) {
+				try {
+					return fromUrl.invoke(target, url)
+				} catch (ignored: Exception) {}
+			}
+		}
+		return null
 	}
 
 	@Synchronized

@@ -616,4 +616,63 @@ class ConnectorConversationAdapterTest {
 		assertTrue(desc.contains("text/plain"))
 		assertTrue(desc.contains("❤️ 1"))
 	}
+
+	@Test
+	fun testFileMessageRendersExplicitDownloadState() {
+		val context = RuntimeEnvironment.getApplication()
+		val view = LayoutInflater.from(context)
+			.inflate(R.layout.list_item_connector_message, null)
+		var clickedItem: ConnectorConversationMessageItem? = null
+		val holder = ConnectorConversationAdapter.MessageViewHolder(
+			itemView = view,
+			onDeleteClicked = null,
+			onRetrySendClicked = null,
+			onFileClicked = { clickedItem = it },
+		)
+
+		val baseItem = ConnectorConversationMessageItem(
+			connectorSource = ConnectorSources.MATRIX,
+			connectorThreadId = "!room:example.org",
+			connectorMessageId = "\$msg1",
+			dateMillis = 1_000L,
+			isOutgoing = false,
+			text = "",
+			type = ConnectorMessageType.FILE,
+			attachment = ConnectorAttachmentMetadata(
+				fileName = "archive.zip",
+				mimeType = "application/zip",
+				size = 1024L,
+			),
+		)
+
+		// 1. Idle state: file layout is clickable and invokes onFileClicked
+		holder.bind(baseItem)
+		val fileLayout = view.findViewById<View>(R.id.connectorFileLayout)
+		val fileDetails = view.findViewById<TextView>(R.id.connectorFileDetails)
+		assertTrue(fileLayout.isClickable)
+		fileLayout.performClick()
+		assertEquals(baseItem, clickedItem)
+		assertFalse(fileDetails.text.toString().contains("Downloading"))
+
+		// 2. Downloading state: renders downloading status
+		val downloadingItem = baseItem.copy(downloadState = ConnectorDownloadState.DOWNLOADING)
+		holder.bind(downloadingItem)
+		val downloadingText = context.getString(R.string.connector_file_downloading)
+		assertTrue(fileDetails.text.toString().contains(downloadingText))
+		assertTrue(fileLayout.contentDescription.toString().contains(downloadingText))
+
+		// 3. Downloaded state: renders downloaded status
+		val downloadedItem = baseItem.copy(downloadState = ConnectorDownloadState.DOWNLOADED)
+		holder.bind(downloadedItem)
+		val downloadedText = context.getString(R.string.connector_file_downloaded)
+		assertTrue(fileDetails.text.toString().contains(downloadedText))
+		assertTrue(fileLayout.contentDescription.toString().contains(downloadedText))
+
+		// 4. Failed state: renders download failed status
+		val failedItem = baseItem.copy(downloadState = ConnectorDownloadState.FAILED)
+		holder.bind(failedItem)
+		val failedText = context.getString(R.string.connector_file_download_failed)
+		assertTrue(fileDetails.text.toString().contains(failedText))
+		assertTrue(fileLayout.contentDescription.toString().contains(failedText))
+	}
 }

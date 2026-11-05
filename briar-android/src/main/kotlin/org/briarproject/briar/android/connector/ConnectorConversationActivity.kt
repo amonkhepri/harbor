@@ -35,7 +35,9 @@ import org.briarproject.briar.android.util.ActivityLaunchers.OpenImageDocumentAd
 import org.briarproject.briar.android.util.BriarSnackbarBuilder
 import org.briarproject.briar.android.util.UiUtils.launchActivityToOpenFile
 import org.briarproject.briar.android.view.BriarRecyclerView
+import org.briarproject.briar.api.connector.ConnectorFileDownloader
 import org.briarproject.briar.api.connector.ConnectorFileSender
+import java.io.File
 import org.briarproject.briar.api.connector.ConnectorImageSender
 import org.briarproject.briar.api.connector.ConnectorMessageDeleter
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult
@@ -222,7 +224,12 @@ class ConnectorConversationActivity : BriarActivity() {
 	}
 
 	private val adapter =
-		ConnectorConversationAdapter(::onDeleteMessageClicked, ::onRetrySendClicked)
+		ConnectorConversationAdapter(
+			::onDeleteMessageClicked,
+			::onRetrySendClicked,
+			::onFileClicked,
+		)
+	private val activeDownloads = ConcurrentHashMap<String, AtomicBoolean>()
 
 	@Inject
 	lateinit var connectorRegistry: ConnectorRegistry
@@ -485,6 +492,8 @@ class ConnectorConversationActivity : BriarActivity() {
 		stopRoomObserver()
 		stopTypingObserver()
 		list.stopPeriodicUpdate()
+		activeDownloads.values.forEach { it.set(true) }
+		activeDownloads.clear()
 		super.onStop()
 	}
 
@@ -575,6 +584,8 @@ class ConnectorConversationActivity : BriarActivity() {
 		stopRoomObserver()
 		stopTypingObserver()
 		retryCoalescer.cancel()
+		activeDownloads.values.forEach { it.set(true) }
+		activeDownloads.clear()
 		loadFailedSnackbar?.dismiss()
 		loadFailedSnackbar = null
 		lastLoadFailed = false
@@ -1289,6 +1300,77 @@ class ConnectorConversationActivity : BriarActivity() {
 				} else {
 					val res = R.string.connector_conversation_send_failed
 					BriarSnackbarBuilder().make(list, res, Snackbar.LENGTH_LONG).show()
+				}
+			}
+		}
+	}
+
+	internal fun onFileClicked(item: ConnectorConversationMessageItem) {
+		if (item.type != ConnectorMessageType.FILE) return
+		val echoId = item.stableId
+		if (item.downloadState == ConnectorDownloadState.DOWNLOADING) {
+			activeDownloads[echoId]?.set(true)
+			activeDownloads.remove(echoId)
+			submitMessageState(
+				messageState.updateDownloadState(echoId, ConnectorDownloadState.IDLE, null),
+			)
+			return
+		}
+		if (item.downloadState == ConnectorDownloadState.DOWNLOADED) return
+
+		val activeDownloader = connector as? ConnectorFileDownloader ?: return
+		val attachment = item.attachment ?: return
+
+		val declaredSize = attachment.size
+		if (declaredSize != null && declaredSize > ConnectorFileDownloader.MAX_FILE_BYTES) {
+			submitMessageState(
+				messageState.updateDownloadState(echoId, ConnectorDownloadState.FAILED, null),
+			)
+			return
+		}
+
+		val cancelFlag = AtomicBoolean(false)
+		activeDownloads[echoId] = cancelFlag
+		submitMessageState(
+			messageState.updateDownloadState(echoId, ConnectorDownloadState.DOWNLOADING, null),
+		)
+
+		val tempDir = File(cacheDir, "matrix_attachments")
+		ioExecutor.execute {
+			val result = activeDownloader.downloadFile(
+				threadId = item.connectorThreadId,
+				messageId = item.connectorMessageId,
+				attachment = attachment,
+				destinationDir = tempDir,
+				isCancelled = { cancelFlag.get() },
+			)
+			activeDownloads.remove(echoId)
+			runOnUiThread {
+				if (isFinishing || isDestroyed) {
+					if (result is ConnectorFileDownloader.DownloadResult.Success) {
+						result.file.delete()
+					}
+					return@runOnUiThread
+				}
+				when (result) {
+					is ConnectorFileDownloader.DownloadResult.Success -> {
+						submitMessageState(
+							messageState.updateDownloadState(
+								echoId,
+								ConnectorDownloadState.DOWNLOADED,
+								result.file,
+							),
+						)
+					}
+					is ConnectorFileDownloader.DownloadResult.Failure -> {
+						submitMessageState(
+							messageState.updateDownloadState(
+								echoId,
+								ConnectorDownloadState.FAILED,
+								null,
+							),
+						)
+					}
 				}
 			}
 		}
