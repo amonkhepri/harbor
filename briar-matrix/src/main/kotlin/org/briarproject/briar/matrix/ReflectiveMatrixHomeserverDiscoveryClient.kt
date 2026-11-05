@@ -94,7 +94,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 	private var activeGeneration: Any? = null
 	private var activeStore: MatrixStoreConfiguration? = null
 	private val activeDownloadDirs = java.util.Collections.newSetFromMap(
-		java.util.concurrent.ConcurrentHashMap<File, Boolean>()
+		java.util.concurrent.ConcurrentHashMap<File, Boolean>(),
 	)
 	private class TypingLane {
 		val queue = java.util.ArrayDeque<() -> Unit>()
@@ -1682,7 +1682,10 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		if (isCancelled()) return DownloadResult.Failure(FailureCause.CANCELLED)
 
 		val declaredSize = attachment.size
-		if (declaredSize == null || declaredSize <= 0L || declaredSize > ConnectorFileDownloader.MAX_FILE_BYTES) {
+		if (declaredSize == null ||
+			declaredSize <= 0L ||
+			declaredSize > ConnectorFileDownloader.MAX_FILE_BYTES
+		) {
 			return DownloadResult.Failure(FailureCause.OVERSIZE)
 		}
 
@@ -1700,6 +1703,8 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		var mediaSource: Any? = null
 		var handle: Any? = null
 		var downloadedFile: File? = null
+		val stagingDir = File(destinationDir, ".staging_${UUID.randomUUID()}")
+		stagingDir.mkdirs()
 
 		return try {
 			val mediaSourceClass = Class.forName(MEDIA_SOURCE_CLASS_NAME)
@@ -1715,7 +1720,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 				mediaSource = mediaSource,
 				fileName = safeFileName,
 				mimeType = attachment.mimeType ?: "application/octet-stream",
-				destinationDir = destinationDir,
+				stagingDir = stagingDir,
 				generation = generation,
 				isCancelled = isCancelled,
 			)
@@ -1723,19 +1728,19 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 
 			val isCurrent = synchronized(lifecycleLock) { activeGeneration === generation }
 			if (!isCurrent) {
-				cleanUpHandleAndFile(handle, null, destinationDir)
+				cleanUpHandleAndFile(handle, null, stagingDir)
 				return DownloadResult.Failure(FailureCause.LOGGED_OUT)
 			}
 
 			if (isCancelled()) {
-				cleanUpHandleAndFile(handle, null, destinationDir)
+				cleanUpHandleAndFile(handle, null, stagingDir)
 				return DownloadResult.Failure(FailureCause.CANCELLED)
 			}
 
 			val pathMethod = rawHandle.javaClass.getMethod("path")
 			val path = pathMethod.invoke(rawHandle) as? String
 			if (path == null) {
-				cleanUpHandleAndFile(handle, null, destinationDir)
+				cleanUpHandleAndFile(handle, null, stagingDir)
 				return DownloadResult.Failure(FailureCause.NETWORK_ERROR)
 			}
 
@@ -1749,29 +1754,29 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 
 			val canonicalTempPath = tempFile.canonicalPath
 			if (!canonicalTempPath.startsWith(destPrefix)) {
-				cleanUpHandleAndFile(handle, null, destinationDir)
+				cleanUpHandleAndFile(handle, null, stagingDir)
 				return DownloadResult.Failure(FailureCause.NETWORK_ERROR)
 			}
 
 			if (isCancelled()) {
-				cleanUpHandleAndFile(handle, null, destinationDir)
+				cleanUpHandleAndFile(handle, null, stagingDir)
 				return DownloadResult.Failure(FailureCause.CANCELLED)
 			}
 
 			if (!tempFile.exists()) {
-				cleanUpHandleAndFile(handle, null, destinationDir)
+				cleanUpHandleAndFile(handle, null, stagingDir)
 				return DownloadResult.Failure(FailureCause.NETWORK_ERROR)
 			}
 
 			if (tempFile.length() > ConnectorFileDownloader.MAX_FILE_BYTES) {
-				cleanUpHandleAndFile(handle, null, destinationDir)
+				cleanUpHandleAndFile(handle, null, stagingDir)
 				return DownloadResult.Failure(FailureCause.OVERSIZE)
 			}
 
 			val targetFile = File(destinationDir, "${UUID.randomUUID()}_$safeFileName")
 			val canonicalTargetPath = targetFile.canonicalPath
 			if (!canonicalTargetPath.startsWith(destPrefix)) {
-				cleanUpHandleAndFile(handle, null, destinationDir)
+				cleanUpHandleAndFile(handle, null, stagingDir)
 				return DownloadResult.Failure(FailureCause.NETWORK_ERROR)
 			}
 
@@ -1780,39 +1785,46 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			}
 			val persisted = (persistMethod?.invoke(rawHandle, targetFile.absolutePath) as? Boolean) == true
 			if (!persisted || !targetFile.exists()) {
-				cleanUpHandleAndFile(handle, targetFile, destinationDir)
+				cleanUpHandleAndFile(handle, targetFile, stagingDir)
 				return DownloadResult.Failure(FailureCause.NETWORK_ERROR)
 			}
 			downloadedFile = targetFile
 
+			try {
+				stagingDir.deleteRecursively()
+			} catch (ignored: Exception) {}
+
 			if (isCancelled()) {
-				cleanUpHandleAndFile(handle, targetFile, destinationDir)
+				cleanUpHandleAndFile(handle, targetFile, stagingDir)
 				return DownloadResult.Failure(FailureCause.CANCELLED)
 			}
 
 			if (targetFile.length() > ConnectorFileDownloader.MAX_FILE_BYTES) {
-				cleanUpHandleAndFile(handle, targetFile, destinationDir)
+				cleanUpHandleAndFile(handle, targetFile, stagingDir)
 				return DownloadResult.Failure(FailureCause.OVERSIZE)
 			}
 
 			DownloadResult.Success(targetFile)
 		} catch (e: DownloadCancelledException) {
-			cleanUpHandleAndFile(handle, downloadedFile, destinationDir)
+			cleanUpHandleAndFile(handle, downloadedFile, stagingDir)
 			DownloadResult.Failure(FailureCause.CANCELLED)
 		} catch (e: DownloadLoggedOutException) {
-			cleanUpHandleAndFile(handle, downloadedFile, destinationDir)
+			cleanUpHandleAndFile(handle, downloadedFile, stagingDir)
 			DownloadResult.Failure(FailureCause.LOGGED_OUT)
 		} catch (e: DownloadOversizeException) {
-			cleanUpHandleAndFile(handle, downloadedFile, destinationDir)
+			cleanUpHandleAndFile(handle, downloadedFile, stagingDir)
 			DownloadResult.Failure(FailureCause.OVERSIZE)
 		} catch (e: InterruptedException) {
 			Thread.currentThread().interrupt()
-			cleanUpHandleAndFile(handle, downloadedFile, destinationDir)
+			cleanUpHandleAndFile(handle, downloadedFile, stagingDir)
 			DownloadResult.Failure(FailureCause.CANCELLED)
 		} catch (e: Exception) {
-			cleanUpHandleAndFile(handle, downloadedFile, destinationDir)
+			cleanUpHandleAndFile(handle, downloadedFile, stagingDir)
 			DownloadResult.Failure(FailureCause.NETWORK_ERROR)
 		} finally {
+			try {
+				if (stagingDir.exists()) stagingDir.deleteRecursively()
+			} catch (ignored: Exception) {}
 			closeQuietly(handle)
 			destroyQuietly(mediaSource)
 		}
@@ -1824,7 +1836,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		mediaSource: Any,
 		fileName: String,
 		mimeType: String,
-		destinationDir: File,
+		stagingDir: File,
 		generation: Any,
 		isCancelled: () -> Boolean,
 		timeoutMs: Long = 300_000L,
@@ -1857,7 +1869,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			fileName,
 			mimeType,
 			false,
-			destinationDir.absolutePath,
+			stagingDir.absolutePath,
 			continuation,
 		)
 		if (invokeResult !== COROUTINE_SUSPENDED) {
@@ -1880,7 +1892,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 				}
 			}
 			val writtenBytes = runCatching {
-				destinationDir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+				stagingDir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
 			}.getOrDefault(0L)
 			if (writtenBytes > ConnectorFileDownloader.MAX_FILE_BYTES) {
 				if (claimed.compareAndSet(false, true)) {
@@ -1915,24 +1927,14 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		destroyQuietly(handle)
 	}
 
-	private fun cleanUpHandleAndFile(handle: Any?, file: File?, destinationDir: File? = null) {
+	private fun cleanUpHandleAndFile(handle: Any?, file: File?, stagingDir: File? = null) {
 		try {
 			if (file != null && file.exists()) file.delete()
 		} catch (ignored: Exception) {}
-		if (destinationDir != null) {
-			cleanUpDestinationDir(destinationDir)
-		}
-		cleanUpHandle(handle)
-	}
-
-	private fun cleanUpDestinationDir(dir: File) {
 		try {
-			dir.listFiles()?.forEach { child ->
-				if (child.isDirectory && child.name.startsWith("tempdir_")) {
-					child.deleteRecursively()
-				}
-			}
+			if (stagingDir != null && stagingDir.exists()) stagingDir.deleteRecursively()
 		} catch (ignored: Exception) {}
+		cleanUpHandle(handle)
 	}
 
 	private fun createMediaSource(mediaSourceClass: Class<*>, json: String?, url: String?): Any? {

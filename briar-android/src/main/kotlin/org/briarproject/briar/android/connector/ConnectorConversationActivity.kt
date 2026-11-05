@@ -54,6 +54,8 @@ import org.briarproject.briar.api.connector.ReadOnlyConnector
 import org.briarproject.nullsafety.MethodsNotNullByDefault
 import org.briarproject.nullsafety.ParametersNotNullByDefault
 import java.io.IOException
+import java.util.Collections
+import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executor
 import java.util.concurrent.atomic.AtomicBoolean
@@ -230,6 +232,7 @@ class ConnectorConversationActivity : BriarActivity() {
 			::onFileClicked,
 		)
 	private val activeDownloads = ConcurrentHashMap<String, AtomicBoolean>()
+	internal val ownedDownloadDirs = Collections.synchronizedSet(LinkedHashSet<File>())
 
 	@Inject
 	lateinit var connectorRegistry: ConnectorRegistry
@@ -312,7 +315,6 @@ class ConnectorConversationActivity : BriarActivity() {
 
 	override fun onCreate(state: Bundle?) {
 		super.onCreate(state)
-		clearAttachmentDirectory()
 		setContentView(R.layout.activity_connector_conversation)
 
 		val sourceId = intent.getStringExtra(SOURCE_ID)
@@ -597,7 +599,7 @@ class ConnectorConversationActivity : BriarActivity() {
 		stopTypingObserver()
 		retryCoalescer.cancel()
 		resetActiveDownloads()
-		clearAttachmentDirectory()
+		clearOwnedDownloads()
 		loadFailedSnackbar?.dismiss()
 		loadFailedSnackbar = null
 		lastLoadFailed = false
@@ -1328,7 +1330,11 @@ class ConnectorConversationActivity : BriarActivity() {
 			)
 			return
 		}
-		if (item.downloadState == ConnectorDownloadState.DOWNLOADED) return
+		if (item.downloadState == ConnectorDownloadState.DOWNLOADED &&
+			item.downloadedFile?.exists() == true
+		) {
+			return
+		}
 
 		val activeDownloader = connector as? ConnectorFileDownloader ?: return
 		val attachment = item.attachment ?: return
@@ -1350,13 +1356,16 @@ class ConnectorConversationActivity : BriarActivity() {
 			messageState.updateDownloadState(echoId, ConnectorDownloadState.DOWNLOADING, null),
 		)
 
-		val tempDir = File(cacheDir, "matrix_attachments")
+		val downloadSubdir = File(File(cacheDir, "matrix_attachments"), UUID.randomUUID().toString())
+		downloadSubdir.mkdirs()
+		ownedDownloadDirs.add(downloadSubdir)
+
 		ioExecutor.execute {
 			val result = activeDownloader.downloadFile(
 				threadId = item.connectorThreadId,
 				messageId = item.connectorMessageId,
 				attachment = attachment,
-				destinationDir = tempDir,
+				destinationDir = downloadSubdir,
 				isCancelled = { cancelFlag.get() },
 			)
 			val wasCurrent = activeDownloads.remove(echoId, cancelFlag)
@@ -1364,6 +1373,8 @@ class ConnectorConversationActivity : BriarActivity() {
 				if (result is ConnectorFileDownloader.DownloadResult.Success) {
 					result.file.delete()
 				}
+				downloadSubdir.deleteRecursively()
+				ownedDownloadDirs.remove(downloadSubdir)
 				return@execute
 			}
 			runOnUiThread {
@@ -1371,6 +1382,8 @@ class ConnectorConversationActivity : BriarActivity() {
 					if (result is ConnectorFileDownloader.DownloadResult.Success) {
 						result.file.delete()
 					}
+					downloadSubdir.deleteRecursively()
+					ownedDownloadDirs.remove(downloadSubdir)
 					return@runOnUiThread
 				}
 				when (result) {
@@ -1384,6 +1397,8 @@ class ConnectorConversationActivity : BriarActivity() {
 						)
 					}
 					is ConnectorFileDownloader.DownloadResult.Failure -> {
+						downloadSubdir.deleteRecursively()
+						ownedDownloadDirs.remove(downloadSubdir)
 						if (result.cause != ConnectorFileDownloader.FailureCause.CANCELLED) {
 							submitMessageState(
 								messageState.updateDownloadState(
@@ -1399,10 +1414,21 @@ class ConnectorConversationActivity : BriarActivity() {
 		}
 	}
 
+	internal fun clearOwnedDownloads() {
+		val dirs = synchronized(ownedDownloadDirs) {
+			val copy = ownedDownloadDirs.toList()
+			ownedDownloadDirs.clear()
+			copy
+		}
+		for (dir in dirs) {
+			try {
+				dir.deleteRecursively()
+			} catch (ignored: Exception) {}
+		}
+	}
+
 	internal fun clearAttachmentDirectory() {
-		try {
-			File(cacheDir, "matrix_attachments").deleteRecursively()
-		} catch (ignored: Exception) {}
+		clearOwnedDownloads()
 	}
 }
 

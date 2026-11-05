@@ -361,6 +361,77 @@ class MatrixFileDownloadTest {
 		assertEquals("authed file", file.readText())
 	}
 
+	@Test
+	fun sequentialDownloadsInSameDirectoryDoNotTriggerFalseOversize() {
+		val client = loggedInClient()
+		val sixMib = 6 * 1024 * 1024
+		val fiveMib = 5 * 1024 * 1024
+
+		// File 1: 6 MiB (valid, under 10 MiB limit)
+		FakeMatrixSdkState.mediaContentToReturn = ByteArray(sixMib) { 1 }
+		val attachment1 = ConnectorAttachmentMetadata(
+			fileName = "first_6mb.bin",
+			mimeType = "application/octet-stream",
+			size = sixMib.toLong(),
+			uri = "mxc://example.org/first6mb",
+		)
+		val result1 = client.downloadFile(attachment1, tempDir)
+		assertTrue(result1 is DownloadResult.Success)
+		val file1 = (result1 as DownloadResult.Success).file
+		assertTrue(file1.exists())
+		assertEquals(sixMib.toLong(), file1.length())
+
+		// File 2: 5 MiB (valid, under 10 MiB limit; previously would fail because 6MB + 5MB > 10MB)
+		FakeMatrixSdkState.mediaContentToReturn = ByteArray(fiveMib) { 2 }
+		val attachment2 = ConnectorAttachmentMetadata(
+			fileName = "second_5mb.bin",
+			mimeType = "application/octet-stream",
+			size = fiveMib.toLong(),
+			uri = "mxc://example.org/second5mb",
+		)
+		val result2 = client.downloadFile(attachment2, tempDir)
+		assertTrue(result2 is DownloadResult.Success)
+		val file2 = (result2 as DownloadResult.Success).file
+		assertTrue(file2.exists())
+		assertEquals(fiveMib.toLong(), file2.length())
+
+		// Both files exist and neither was corrupted or removed
+		assertTrue(file1.exists())
+		assertTrue(file2.exists())
+	}
+
+	@Test
+	fun cancelledDownloadCleansUpOnlyItsOwnStagingDirWithoutAffectingOtherFiles() {
+		val client = loggedInClient()
+		FakeMatrixSdkState.mediaContentToReturn = "file1 data".toByteArray()
+
+		// First file downloads successfully
+		val attachment1 = ConnectorAttachmentMetadata(
+			fileName = "stable.pdf",
+			mimeType = "application/pdf",
+			size = 10L,
+			uri = "mxc://example.org/stable",
+		)
+		val result1 = client.downloadFile(attachment1, tempDir)
+		assertTrue(result1 is DownloadResult.Success)
+		val file1 = (result1 as DownloadResult.Success).file
+		assertTrue(file1.exists())
+
+		// Second download is cancelled
+		val attachment2 = ConnectorAttachmentMetadata(
+			fileName = "cancel_me.pdf",
+			mimeType = "application/pdf",
+			size = 10L,
+			uri = "mxc://example.org/cancel_me",
+		)
+		val result2 = client.downloadFile(attachment2, tempDir, isCancelled = { true })
+		assertEquals(DownloadResult.Failure(FailureCause.CANCELLED), result2)
+
+		// File 1 is still present and intact
+		assertTrue(file1.exists())
+		assertEquals("file1 data", file1.readText())
+	}
+
 	private class FakeMatrixAuthSession(var state: MatrixAuthState) : MatrixAuthSession {
 		override fun getSnapshot(): MatrixAuthSession.Snapshot =
 			MatrixAuthSession.Snapshot(state, MatrixAuthSession.RecoverableErrorDetail.NONE)

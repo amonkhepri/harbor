@@ -177,6 +177,7 @@ class ConnectorConversationRemoteRefreshTest {
 
 	private fun destroy(activity: ConnectorConversationActivity) {
 		activity.stopRoomObserver()
+		activity.clearOwnedDownloads()
 	}
 
 	private fun messageState(
@@ -573,19 +574,74 @@ class ConnectorConversationRemoteRefreshTest {
 	}
 
 	@Test
-	fun clearAttachmentDirectoryDeletesFilesOnTeardown() {
+	fun activityTeardownDeletesOwnedDownloadsWithoutAffectingOtherScreens() {
 		val activity = createActivity()
 		start(activity)
 		drainWork()
 
-		val tempDir = File(activity.cacheDir, "matrix_attachments")
-		tempDir.mkdirs()
-		val dummyFile = File(tempDir, "persisted_test.pdf")
-		dummyFile.writeText("hello")
-		assertTrue(dummyFile.exists())
+		val otherDir = File(File(activity.cacheDir, "matrix_attachments"), "other_convo")
+		otherDir.mkdirs()
+		val otherFile = File(otherDir, "other.pdf")
+		otherFile.writeText("other")
+		assertTrue(otherFile.exists())
 
-		activity.clearAttachmentDirectory()
-		assertFalse(dummyFile.exists())
-		assertFalse(tempDir.exists())
+		val ownedDir = File(File(activity.cacheDir, "matrix_attachments"), "owned_convo")
+		ownedDir.mkdirs()
+		val ownedFile = File(ownedDir, "owned.pdf")
+		ownedFile.writeText("owned")
+		assertTrue(ownedFile.exists())
+		activity.ownedDownloadDirs.add(ownedDir)
+
+		destroy(activity)
+		drainWork()
+
+		assertFalse(ownedFile.exists())
+		assertFalse(ownedDir.exists())
+		assertTrue(otherFile.exists())
+		assertTrue(otherDir.exists())
+	}
+
+	@Test
+	fun fileClickCreatesDedicatedSubfolderAndCleansUpOnTeardown() {
+		val activity = createActivity()
+		start(activity)
+		drainWork()
+
+		val fileMessage = ConnectorMessage(
+			source = ConnectorSources.MATRIX,
+			threadId = "!room1:matrix.org",
+			messageId = "\$file_download_subfolder",
+			dateSeconds = 1000,
+			isOutgoing = false,
+			text = "subfolder.pdf",
+			sourceMessageOrder = 1000L,
+			type = ConnectorMessageType.FILE,
+			attachment = ConnectorAttachmentMetadata(
+				fileName = "subfolder.pdf",
+				mimeType = "application/pdf",
+				size = 500L,
+				uri = "mxc://example.org/subfolder",
+			),
+		)
+		fakeConnector.messages.add(fileMessage)
+		fakeConnector.activeSubscription?.onUpdate?.invoke()
+		drainWork()
+
+		val item = messageState(activity).messages[0]
+		activity.onFileClicked(item)
+		drainWork()
+
+		assertEquals(ConnectorDownloadState.DOWNLOADED, messageState(activity).messages[0].downloadState)
+		val downloadedFile = messageState(activity).messages[0].downloadedFile
+		assertNotNull(downloadedFile)
+		assertTrue(downloadedFile!!.exists())
+		val parentDir = downloadedFile.parentFile
+		assertNotNull(parentDir)
+		assertEquals(File(activity.cacheDir, "matrix_attachments"), parentDir!!.parentFile)
+
+		destroy(activity)
+		drainWork()
+		assertFalse(downloadedFile.exists())
+		assertFalse(parentDir.exists())
 	}
 }
