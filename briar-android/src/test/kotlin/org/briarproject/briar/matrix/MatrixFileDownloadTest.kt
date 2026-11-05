@@ -16,6 +16,7 @@ import org.junit.Test
 import org.matrix.rustcomponents.sdk.ClientException
 import org.matrix.rustcomponents.sdk.FakeMatrixSdkState
 import java.io.File
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
 class MatrixFileDownloadTest {
@@ -99,6 +100,87 @@ class MatrixFileDownloadTest {
 		assertEquals(DownloadResult.Failure(FailureCause.LOGGED_OUT), result)
 		val target = File(tempDir, "after_logout.pdf")
 		assertFalse(target.exists())
+	}
+
+	@Test
+	fun logoutDuringDownloadAbortsAndLeavesNoPartialAccessibleFile() {
+		val client = loggedInClient()
+		FakeMatrixSdkState.onGetMediaFile = {
+			client.logout()
+		}
+
+		val attachment = ConnectorAttachmentMetadata(
+			fileName = "during_logout.pdf",
+			mimeType = "application/pdf",
+			size = 100L,
+			uri = "mxc://example.org/midlogout",
+		)
+
+		val result = client.downloadFile(attachment, tempDir)
+		assertEquals(DownloadResult.Failure(FailureCause.LOGGED_OUT), result)
+		val children = tempDir.listFiles() ?: emptyArray()
+		assertTrue(children.isEmpty())
+	}
+
+	@Test
+	fun cancellationDuringDownloadCleansUpAndReturnsCancelled() {
+		val client = loggedInClient()
+		val cancelFlag = AtomicBoolean(false)
+		FakeMatrixSdkState.onGetMediaFile = {
+			cancelFlag.set(true)
+		}
+
+		val attachment = ConnectorAttachmentMetadata(
+			fileName = "mid_cancel.pdf",
+			mimeType = "application/pdf",
+			size = 100L,
+			uri = "mxc://example.org/midcancel",
+		)
+
+		val result = client.downloadFile(attachment, tempDir, isCancelled = { cancelFlag.get() })
+		assertEquals(DownloadResult.Failure(FailureCause.CANCELLED), result)
+		val children = tempDir.listFiles() ?: emptyArray()
+		assertTrue(children.isEmpty())
+	}
+
+	@Test
+	fun hostilePathTraversalFileNameIsSanitizedAndContainedWithinTempDir() {
+		val client = loggedInClient()
+		FakeMatrixSdkState.mediaContentToReturn = "safe data".toByteArray()
+
+		val attachment = ConnectorAttachmentMetadata(
+			fileName = "../../hostile.txt",
+			mimeType = "text/plain",
+			size = 9L,
+			uri = "mxc://example.org/hostile",
+		)
+
+		val result = client.downloadFile(attachment, tempDir)
+		assertTrue(result is DownloadResult.Success)
+		val file = (result as DownloadResult.Success).file
+		assertTrue(file.canonicalPath.startsWith(tempDir.canonicalPath))
+		assertEquals("hostile.txt", file.name)
+		assertEquals("safe data", file.readText())
+	}
+
+	@Test
+	fun hostileAbsolutePathFileNameIsSanitizedAndContainedWithinTempDir() {
+		val client = loggedInClient()
+		FakeMatrixSdkState.mediaContentToReturn = "root data".toByteArray()
+
+		val attachment = ConnectorAttachmentMetadata(
+			fileName = "/etc/passwd",
+			mimeType = "text/plain",
+			size = 9L,
+			uri = "mxc://example.org/rootpath",
+		)
+
+		val result = client.downloadFile(attachment, tempDir)
+		assertTrue(result is DownloadResult.Success)
+		val file = (result as DownloadResult.Success).file
+		assertTrue(file.canonicalPath.startsWith(tempDir.canonicalPath))
+		assertEquals("passwd", file.name)
+		assertEquals("root data", file.readText())
 	}
 
 	@Test

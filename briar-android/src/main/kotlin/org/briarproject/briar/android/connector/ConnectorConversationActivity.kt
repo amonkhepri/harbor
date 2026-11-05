@@ -1309,8 +1309,8 @@ class ConnectorConversationActivity : BriarActivity() {
 		if (item.type != ConnectorMessageType.FILE) return
 		val echoId = item.stableId
 		if (item.downloadState == ConnectorDownloadState.DOWNLOADING) {
-			activeDownloads[echoId]?.set(true)
-			activeDownloads.remove(echoId)
+			val existingFlag = activeDownloads.remove(echoId)
+			existingFlag?.set(true)
 			submitMessageState(
 				messageState.updateDownloadState(echoId, ConnectorDownloadState.IDLE, null),
 			)
@@ -1344,9 +1344,15 @@ class ConnectorConversationActivity : BriarActivity() {
 				destinationDir = tempDir,
 				isCancelled = { cancelFlag.get() },
 			)
-			activeDownloads.remove(echoId)
+			val wasCurrent = activeDownloads.remove(echoId, cancelFlag)
+			if (cancelFlag.get() || !wasCurrent) {
+				if (result is ConnectorFileDownloader.DownloadResult.Success) {
+					result.file.delete()
+				}
+				return@execute
+			}
 			runOnUiThread {
-				if (isFinishing || isDestroyed) {
+				if (isFinishing || isDestroyed || cancelFlag.get()) {
 					if (result is ConnectorFileDownloader.DownloadResult.Success) {
 						result.file.delete()
 					}
@@ -1363,13 +1369,15 @@ class ConnectorConversationActivity : BriarActivity() {
 						)
 					}
 					is ConnectorFileDownloader.DownloadResult.Failure -> {
-						submitMessageState(
-							messageState.updateDownloadState(
-								echoId,
-								ConnectorDownloadState.FAILED,
-								null,
-							),
-						)
+						if (result.cause != ConnectorFileDownloader.FailureCause.CANCELLED) {
+							submitMessageState(
+								messageState.updateDownloadState(
+									echoId,
+									ConnectorDownloadState.FAILED,
+									null,
+								),
+							)
+						}
 					}
 				}
 			}

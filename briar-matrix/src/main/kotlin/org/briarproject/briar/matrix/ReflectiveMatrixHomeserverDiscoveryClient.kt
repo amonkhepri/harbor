@@ -20,6 +20,7 @@ import org.briarproject.briar.api.connector.ConnectorRoomLeaver.PreparedLeave
 import org.briarproject.briar.api.connector.ConnectorRoomObserver.RoomSubscription
 import org.briarproject.briar.api.connector.ConnectorTypingObserver.TypingSubscription
 import org.briarproject.briar.api.connector.ConnectorTypingSender.PreparedTyping
+import java.util.UUID
 import java.util.concurrent.Executor
 import java.util.concurrent.Executors
 import java.io.ByteArrayInputStream
@@ -1662,16 +1663,18 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		}
 	}
 
-	@Synchronized
 	override fun downloadFile(
 		attachment: ConnectorAttachmentMetadata,
 		destinationDir: File,
 		isCancelled: () -> Boolean,
 	): DownloadResult {
-		val generation = synchronized(lifecycleLock) { activeGeneration }
-			?: return DownloadResult.Failure(FailureCause.LOGGED_OUT)
-		val client = synchronized(this) { loginClient }
-			?: return DownloadResult.Failure(FailureCause.LOGGED_OUT)
+		val (client, generation) = synchronized(this) {
+			val gen = synchronized(lifecycleLock) { activeGeneration }
+			Pair(loginClient, gen)
+		}
+		if (client == null || generation == null) {
+			return DownloadResult.Failure(FailureCause.LOGGED_OUT)
+		}
 
 		if (isCancelled()) return DownloadResult.Failure(FailureCause.CANCELLED)
 
@@ -1699,24 +1702,16 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 
 			if (isCancelled()) return DownloadResult.Failure(FailureCause.CANCELLED)
 
-			val rawHandle = invokeCloseableValue(
-				target = client,
-				methodName = "getMediaFile",
-				parameterTypes = arrayOf(
-					mediaSourceClass,
-					String::class.java,
-					String::class.java,
-					Boolean::class.javaPrimitiveType ?: java.lang.Boolean.TYPE,
-					String::class.java,
-				),
-				arguments = arrayOf(
-					mediaSource,
-					attachment.fileName,
-					attachment.mimeType ?: "application/octet-stream",
-					false,
-					destinationDir.absolutePath,
-				),
-				abandon = ::closeQuietly,
+			val safeFileName = sanitizeAttachmentFileName(attachment.fileName)
+			val rawHandle = invokeMediaDownload(
+				client = client,
+				mediaSourceClass = mediaSourceClass,
+				mediaSource = mediaSource,
+				fileName = safeFileName,
+				mimeType = attachment.mimeType ?: "application/octet-stream",
+				destinationDir = destinationDir,
+				generation = generation,
+				isCancelled = isCancelled,
 			)
 			handle = rawHandle
 
@@ -1741,6 +1736,15 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			val file = File(path)
 			downloadedFile = file
 
+			val canonicalDestDir = destinationDir.canonicalFile
+			val canonicalFile = file.canonicalFile
+			if (!canonicalFile.toPath().startsWith(canonicalDestDir.toPath()) ||
+				canonicalFile == canonicalDestDir
+			) {
+				cleanUpHandleAndFile(handle, file)
+				return DownloadResult.Failure(FailureCause.NETWORK_ERROR)
+			}
+
 			if (isCancelled()) {
 				cleanUpHandleAndFile(handle, file)
 				return DownloadResult.Failure(FailureCause.CANCELLED)
@@ -1762,6 +1766,12 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			persistMethod?.invoke(rawHandle, file.absolutePath)
 
 			DownloadResult.Success(file)
+		} catch (e: DownloadCancelledException) {
+			cleanUpHandleAndFile(handle, downloadedFile)
+			DownloadResult.Failure(FailureCause.CANCELLED)
+		} catch (e: DownloadLoggedOutException) {
+			cleanUpHandleAndFile(handle, downloadedFile)
+			DownloadResult.Failure(FailureCause.LOGGED_OUT)
 		} catch (e: InterruptedException) {
 			Thread.currentThread().interrupt()
 			cleanUpHandleAndFile(handle, downloadedFile)
@@ -1775,12 +1785,99 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		}
 	}
 
+	private fun invokeMediaDownload(
+		client: Any,
+		mediaSourceClass: Class<*>,
+		mediaSource: Any,
+		fileName: String,
+		mimeType: String,
+		destinationDir: File,
+		generation: Any,
+		isCancelled: () -> Boolean,
+		timeoutMs: Long = 300_000L,
+	): Any {
+		val method = client.javaClass.getMethod(
+			"getMediaFile",
+			mediaSourceClass,
+			String::class.java,
+			String::class.java,
+			Boolean::class.javaPrimitiveType ?: java.lang.Boolean.TYPE,
+			String::class.java,
+			Continuation::class.java,
+		)
+		val outcome = AtomicReference<Result<Any?>>()
+		val latch = CountDownLatch(1)
+		val claimed = AtomicBoolean(false)
+		val continuation = object : Continuation<Any?> {
+			override val context: CoroutineContext = EmptyCoroutineContext
+			override fun resumeWith(result: Result<Any?>) {
+				outcome.set(result)
+				latch.countDown()
+				if (!claimed.compareAndSet(false, true)) {
+					cleanUpHandle(result.getOrNull())
+				}
+			}
+		}
+		val invokeResult = method.invoke(
+			client,
+			mediaSource,
+			fileName,
+			mimeType,
+			false,
+			destinationDir.absolutePath,
+			continuation,
+		)
+		if (invokeResult !== COROUTINE_SUSPENDED) {
+			return invokeResult ?: throw SnapshotAdapterFailure()
+		}
+		val pollIntervalMs = 50L
+		val deadline = System.currentTimeMillis() + timeoutMs
+		while (true) {
+			if (isCancelled()) {
+				if (claimed.compareAndSet(false, true)) {
+					cleanUpHandle(outcome.get()?.getOrNull())
+					throw DownloadCancelledException()
+				}
+			}
+			val currentGen = synchronized(lifecycleLock) { activeGeneration }
+			if (currentGen !== generation) {
+				if (claimed.compareAndSet(false, true)) {
+					cleanUpHandle(outcome.get()?.getOrNull())
+					throw DownloadLoggedOutException()
+				}
+			}
+			if (latch.await(pollIntervalMs, TimeUnit.MILLISECONDS)) {
+				break
+			}
+			if (System.currentTimeMillis() >= deadline) {
+				if (claimed.compareAndSet(false, true)) {
+					cleanUpHandle(outcome.get()?.getOrNull())
+					throw SnapshotAdapterFailure()
+				}
+			}
+		}
+		return (outcome.get() ?: throw SnapshotAdapterFailure()).getOrThrow()
+			?: throw SnapshotAdapterFailure()
+	}
+
+	private fun cleanUpHandle(handle: Any?) {
+		if (handle == null) return
+		try {
+			val path = handle.javaClass.getMethod("path").invoke(handle) as? String
+			if (path != null) {
+				val file = File(path)
+				if (file.exists()) file.delete()
+			}
+		} catch (ignored: Exception) {}
+		closeQuietly(handle)
+		destroyQuietly(handle)
+	}
+
 	private fun cleanUpHandleAndFile(handle: Any?, file: File?) {
 		try {
 			if (file != null && file.exists()) file.delete()
 		} catch (ignored: Exception) {}
-		closeQuietly(handle)
-		destroyQuietly(handle)
+		cleanUpHandle(handle)
 	}
 
 	private fun createMediaSource(mediaSourceClass: Class<*>, json: String?, url: String?): Any? {
@@ -2037,6 +2134,8 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 	/** Adapter-side failure (timeout, missing/blank result) with no SDK exception to map. */
 	private class DiscoveryAdapterFailure : Exception()
 	private class SnapshotAdapterFailure : Exception()
+	private class DownloadCancelledException : Exception()
+	private class DownloadLoggedOutException : Exception()
 
 	/**
 	 * [claimStore] found its directory already in [openedStores]. Kept distinct from a
@@ -2086,4 +2185,29 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		const val GCM_NONCE_LENGTH_BYTES = 12
 		const val GCM_TAG_LENGTH_BITS = 128
 	}
+}
+
+internal fun sanitizeAttachmentFileName(rawName: String?): String {
+	if (rawName.isNullOrBlank()) {
+		return "attachment_" + UUID.randomUUID().toString()
+	}
+	val baseName = rawName.substringAfterLast('/').substringAfterLast('\\').trim()
+	val stripped = baseName.trimStart('.')
+	val safeChars = stripped.filter {
+		it != '/' && it != '\\' && it != '\u0000' && it != '\r' && it != '\n'
+	}.trim()
+	if (safeChars.isEmpty() || safeChars == "." || safeChars == "..") {
+		return "attachment_" + UUID.randomUUID().toString()
+	}
+	val capped = if (safeChars.length > 128) {
+		val ext = safeChars.substringAfterLast('.', "")
+		if (ext.isNotEmpty() && ext.length < 16) {
+			safeChars.take(128 - ext.length - 1) + "." + ext
+		} else {
+			safeChars.take(128)
+		}
+	} else {
+		safeChars
+	}
+	return capped.ifEmpty { "attachment_" + UUID.randomUUID().toString() }
 }

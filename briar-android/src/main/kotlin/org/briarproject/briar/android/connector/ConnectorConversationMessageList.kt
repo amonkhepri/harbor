@@ -131,7 +131,26 @@ internal data class ConnectorConversationMessageListState(
 			if (match != null) consumed.add(match.stableId)
 			match == null
 		}.map { it.copy(knownIds = it.knownIds + consumed) }
-		return copy(messages = serverMessages + remaining.map { it.item }, localEchoes = remaining)
+		val downloadStates = messages.associate {
+			it.stableId to Pair(it.downloadState, it.downloadedFile)
+		}
+		val mergedServerMessages = serverMessages.map { item ->
+			val statePair = downloadStates[item.stableId]
+			if (statePair != null && statePair.first != null) {
+				item.copy(downloadState = statePair.first, downloadedFile = statePair.second)
+			} else {
+				item
+			}
+		}
+		val remainingItems = remaining.map { echo ->
+			val statePair = downloadStates[echo.item.stableId]
+			if (statePair != null && statePair.first != null) {
+				echo.item.copy(downloadState = statePair.first, downloadedFile = statePair.second)
+			} else {
+				echo.item
+			}
+		}
+		return copy(messages = mergedServerMessages + remainingItems, localEchoes = remaining)
 	}
 }
 

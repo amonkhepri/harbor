@@ -719,6 +719,7 @@ class Client internal constructor(
 		tempDir: String?,
 	): MediaFileHandle {
 		FakeMatrixSdkState.getMediaFileCallCount++
+		FakeMatrixSdkState.onGetMediaFile?.invoke()
 		FakeMatrixSdkState.getMediaFileException?.let { throw it }
 		val dirPath = tempDir ?: System.getProperty("java.io.tmpdir") ?: "."
 		val dir = java.io.File(dirPath)
@@ -992,6 +993,7 @@ object FakeMatrixSdkState {
 	var roomInfoFailureToThrow: Exception? = null
 	var getMediaFileCallCount = 0
 	var getMediaFileException: Exception? = null
+	var onGetMediaFile: (suspend () -> Unit)? = null
 	var mediaContentToReturn: ByteArray? = null
 	var mediaFileHandleDestroyCount = 0
 
@@ -999,6 +1001,7 @@ object FakeMatrixSdkState {
 		awaitBuilds()
 		getMediaFileCallCount = 0
 		getMediaFileException = null
+		onGetMediaFile = null
 		mediaContentToReturn = null
 		mediaFileHandleDestroyCount = 0
 		roomInfoCallCount = 0

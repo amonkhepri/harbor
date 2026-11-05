@@ -12,6 +12,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.briarproject.briar.api.connector.ConnectorSources
+import java.io.File
 
 class ConnectorConversationMessageListStateTest {
 
@@ -170,6 +171,43 @@ class ConnectorConversationMessageListStateTest {
 			listOf(otherThread, item.copy(type = ConnectorMessageType.DELETED)),
 			deleted.messages,
 		)
+	}
+
+	@Test fun reconcilePreservesDownloadStateAndDownloadedFileAcrossRefreshes() {
+		val downloadedFile = File("/tmp/test.pdf")
+		val fileItem = messageItem("file-1").copy(
+			type = ConnectorMessageType.FILE,
+			downloadState = ConnectorDownloadState.DOWNLOADING,
+		)
+		val downloadedItem = messageItem("file-2").copy(
+			type = ConnectorMessageType.FILE,
+			downloadState = ConnectorDownloadState.DOWNLOADED,
+			downloadedFile = downloadedFile,
+		)
+		val failedItem = messageItem("file-3").copy(
+			type = ConnectorMessageType.FILE,
+			downloadState = ConnectorDownloadState.FAILED,
+		)
+		val state = ConnectorConversationMessageListState(
+			messages = listOf(fileItem, downloadedItem, failedItem),
+		)
+
+		val freshServer = listOf(
+			messageItem("file-1").copy(type = ConnectorMessageType.FILE),
+			messageItem("file-2").copy(type = ConnectorMessageType.FILE),
+			messageItem("file-3").copy(type = ConnectorMessageType.FILE),
+		)
+
+		val reconciled = state.reconcile(freshServer)
+
+		assertEquals(ConnectorDownloadState.DOWNLOADING, reconciled.messages[0].downloadState)
+		assertEquals(null, reconciled.messages[0].downloadedFile)
+
+		assertEquals(ConnectorDownloadState.DOWNLOADED, reconciled.messages[1].downloadState)
+		assertEquals(downloadedFile, reconciled.messages[1].downloadedFile)
+
+		assertEquals(ConnectorDownloadState.FAILED, reconciled.messages[2].downloadState)
+		assertEquals(null, reconciled.messages[2].downloadedFile)
 	}
 
 	companion object {
