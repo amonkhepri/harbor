@@ -826,7 +826,20 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 	 * fails.
 	 */
 	@Synchronized
-	override fun sendTextMessage(roomId: String, text: String): Boolean {
+	override fun sendTextMessage(roomId: String, text: String): Boolean = sendText(roomId, text, null)
+
+	/**
+	 * Sends [text] as a reply to [inReplyToEventId] (MX-057) through the pinned AAR's suspend
+	 * `Timeline.sendReply(RoomMessageEventContentWithoutRelation, String)`, which returns `Unit`
+	 * and lets the SDK add the `m.relates_to.m.in_reply_to` relation (and forward any thread
+	 * relation of the replied-to event). The message content is built exactly like
+	 * [sendTextMessage]; a blank [inReplyToEventId] fails closed rather than sending ordinary text.
+	 */
+	@Synchronized
+	override fun sendReplyMessage(roomId: String, inReplyToEventId: String, text: String): Boolean =
+		inReplyToEventId.isNotBlank() && sendText(roomId, text, inReplyToEventId)
+
+	private fun sendText(roomId: String, text: String, inReplyToEventId: String?): Boolean {
 		val client = loginClient ?: return false
 		var room: Any? = null
 		var timeline: Any? = null
@@ -850,13 +863,23 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 				.invoke(loadedTimeline, messageType)
 				?: throw SnapshotAdapterFailure()
 			content = createdContent
-			sendHandle = invokeCloseableValue(
-				loadedTimeline,
-				"send",
-				arrayOf(Class.forName(ROOM_MESSAGE_EVENT_CONTENT_CLASS_NAME)),
-				arrayOf(createdContent),
-				::closeQuietly,
-			)
+			val contentClass = Class.forName(ROOM_MESSAGE_EVENT_CONTENT_CLASS_NAME)
+			if (inReplyToEventId == null) {
+				sendHandle = invokeCloseableValue(
+					loadedTimeline,
+					"send",
+					arrayOf(contentClass),
+					arrayOf(createdContent),
+					::closeQuietly,
+				)
+			} else {
+				invokeUnit(
+					loadedTimeline,
+					"sendReply",
+					arrayOf(contentClass, String::class.java),
+					arrayOf(createdContent, inReplyToEventId),
+				)
+			}
 			true
 		} catch (e: InterruptedException) {
 			Thread.currentThread().interrupt()

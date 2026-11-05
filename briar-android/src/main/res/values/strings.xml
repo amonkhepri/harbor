@@ -173,6 +173,9 @@
 	<string name="connector_conversation_direction_outgoing">Outgoing</string>
 	<string name="connector_conversation_compose_hint">Message %1$s</string>
 	<string name="connector_conversation_send">Send</string>
+	<string name="connector_conversation_reply">Reply</string>
+	<string name="connector_conversation_replying_to">Replying to: %1$s</string>
+	<string name="connector_conversation_cancel_reply">Cancel reply</string>
 	<string name="connector_conversation_send_failed">Message could not be sent</string>
 	<string name="connector_conversation_delete_failed">Message could not be deleted</string>
 	<string name="connector_conversation_find">Search loaded messages</string>

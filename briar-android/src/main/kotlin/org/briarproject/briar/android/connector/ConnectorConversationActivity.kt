@@ -63,6 +63,7 @@ import org.briarproject.briar.api.connector.ConnectorTypingObserver
 import org.briarproject.briar.api.connector.ConnectorUnreadMarker
 import org.briarproject.briar.api.connector.ConnectorRegistry
 import org.briarproject.briar.api.connector.ConnectorSources
+import org.briarproject.briar.api.connector.ConnectorReplySender
 import org.briarproject.briar.api.connector.ConnectorTextSender
 import org.briarproject.briar.api.connector.ReadOnlyConnector
 import org.briarproject.nullsafety.MethodsNotNullByDefault
@@ -275,6 +276,8 @@ class ConnectorConversationActivity : BriarActivity() {
 		private const val DEFAULT_IMAGE_FILE_EXTENSION = "jpg"
 		private const val STATE_PENDING_IMAGE = "pendingImage"
 		private const val STATE_FIND_VISIBLE = "findVisible"
+		private const val STATE_REPLY_TO_ID = "replyToId"
+		private const val STATE_REPLY_PREVIEW = "replyPreview"
 
 		private fun emptyTextForState(state: ConnectorConversationAvailabilityState): Int = when (state) {
 			LOADING ->
@@ -389,6 +392,10 @@ class ConnectorConversationActivity : BriarActivity() {
 	private var layoutManagerState: Parcelable? = null
 	private var connector: ReadOnlyConnector? = null
 	private var textSender: ConnectorTextSender? = null
+	private var replySender: ConnectorReplySender? = null
+	private var replyBar: View? = null
+	private var replyPreview: TextView? = null
+	private var replyTarget: ConnectorReplyTarget? = null
 	private var imageSender: ConnectorImageSender? = null
 	private var fileSender: ConnectorFileSender? = null
 	private var readMarker: ConnectorReadMarker? = null
@@ -468,6 +475,8 @@ class ConnectorConversationActivity : BriarActivity() {
 		imageUpload.restore(state?.getString(STATE_PENDING_IMAGE))
 		connector = connectorRegistry.connectors.firstOrNull { it.source.id == sourceId }
 		textSender = connector as? ConnectorTextSender
+		replySender = (connector as? ConnectorReplySender)?.takeIf { textSender != null }
+		if (replySender != null) adapter.onReplyClicked = ::onReplyClicked
 		imageSender = connector as? ConnectorImageSender
 		fileSender = connector as? ConnectorFileSender
 		readMarker = connector as? ConnectorReadMarker
@@ -553,6 +562,16 @@ class ConnectorConversationActivity : BriarActivity() {
 		}
 		sendButton = findViewById(R.id.connectorConversationSendButton)
 		sendButton.setOnClickListener { onSendClicked() }
+		replyBar = findViewById(R.id.connectorConversationReplyBar)
+		replyPreview = findViewById(R.id.connectorConversationReplyPreview)
+		findViewById<View>(R.id.connectorConversationReplyCancel).setOnClickListener {
+			if (!sendInFlight) setReplyTarget(null)
+		}
+		val restoredReplyId = state?.getString(STATE_REPLY_TO_ID)
+		if (replySender != null && restoredReplyId != null) {
+			val preview = state.getString(STATE_REPLY_PREVIEW).orEmpty()
+			setReplyTarget(ConnectorReplyTarget(restoredReplyId, preview))
+		}
 		attachButton = findViewById(R.id.connectorConversationAttachButton)
 		attachButton.setOnClickListener { onAttachImageClicked() }
 		fileButton = findViewById(R.id.connectorConversationFileButton)
@@ -628,6 +647,10 @@ class ConnectorConversationActivity : BriarActivity() {
 		outState.putParcelable(STATE_LAYOUT_MANAGER, stateToSave)
 		outState.putString(STATE_PENDING_IMAGE, imageUpload.pendingImage)
 		outState.putBoolean(STATE_FIND_VISIBLE, findBar.visibility == View.VISIBLE)
+		replyTarget?.let {
+			outState.putString(STATE_REPLY_TO_ID, it.messageId)
+			outState.putString(STATE_REPLY_PREVIEW, it.preview)
+		}
 	}
 
 	override fun onRestoreInstanceState(savedInstanceState: Bundle) {
@@ -1218,6 +1241,7 @@ class ConnectorConversationActivity : BriarActivity() {
 		fileButton.visibility = if (canSendFile()) View.VISIBLE else View.GONE
 		val visible = shouldShowComposeBar(enabled, authorized, threadId, textSender)
 		composeBar.visibility = if (visible) View.VISIBLE else View.GONE
+		replyBar?.visibility = if (visible && replyTarget != null) View.VISIBLE else View.GONE
 		attachButton.visibility =
 			if (shouldShowAttachButton(
 					enabled,
@@ -1241,21 +1265,61 @@ class ConnectorConversationActivity : BriarActivity() {
 		setComposeEnabled(false)
 		val sourceId = intent?.getStringExtra(SOURCE_ID) ?: connector?.source?.id
 		ConnectorDraftStore.clearDraft(sourceId, threadId)
-		submitMessageState(messageState.beginTextSend(connector!!.source, threadId, text))
+		val target = replyTarget
+		val replyToId = target?.messageId
+		submitMessageState(
+			messageState.beginTextSend(
+				connector!!.source,
+				threadId,
+				text,
+				replyToMessageId = replyToId,
+			),
+		)
 		val echoId = messageState.localEchoes.last().item.stableId
 		val activeThreadId = threadId
 		ioExecutor.execute {
-			val sent = try {
-				sender.sendText(activeThreadId, text)
-			} catch (e: RuntimeException) {
-				false
-			}
+			val sent = sendTextOrReply(sender, activeThreadId, replyToId, text)
 			runOnUiThread {
 				if (isFinishing || isDestroyed) return@runOnUiThread
 				submitMessageState(messageState.completeSend(echoId, sent))
+				// A failed send keeps the composed text, so it also keeps the selected reply.
+				if (sent && replyTarget == target) setReplyTarget(null)
 				onSendCompleted(sent, clearComposeText = true)
 			}
 		}
+	}
+
+	/** Sends a reply when [replyToId] is set, otherwise ordinary text (MX-057). */
+	private fun sendTextOrReply(
+		sender: ConnectorTextSender,
+		threadId: String,
+		replyToId: String?,
+		text: String,
+	): Boolean = try {
+		val reply = replySender
+		when {
+			replyToId == null -> sender.sendText(threadId, text)
+			reply == null -> false
+			else -> reply.sendReply(threadId, replyToId, text)
+		}
+	} catch (e: RuntimeException) {
+		false
+	}
+
+	private fun onReplyClicked(item: ConnectorConversationMessageItem) {
+		if (replySender == null || sendInFlight || composeBar.visibility != View.VISIBLE) return
+		if (item.connectorThreadId != threadId || !ConnectorReplyTarget.canReplyTo(item)) return
+		setReplyTarget(ConnectorReplyTarget.from(item, resources))
+		composeText.requestFocus()
+	}
+
+	internal fun setReplyTarget(target: ConnectorReplyTarget?) {
+		replyTarget = target
+		replyPreview?.text = target?.let {
+			getString(R.string.connector_conversation_replying_to, it.preview)
+		}.orEmpty()
+		val visible = target != null && composeBar.visibility == View.VISIBLE
+		replyBar?.visibility = if (visible) View.VISIBLE else View.GONE
 	}
 
 	private fun canSendFile(): Boolean = fileSender != null &&
@@ -1447,13 +1511,17 @@ class ConnectorConversationActivity : BriarActivity() {
 
 		inFlightRetryIds.add(echoId)
 		val generation = retryOwner.begin(echoId)
+		val replyToId = messageState.localEchoes
+			.firstOrNull { it.item.stableId == echoId }
+			?.replyToMessageId
 		submitMessageState(messageState.retrySend(echoId))
 		ioExecutor.execute {
-			val sent = try {
-				if (!activeConnector.isAuthorized()) false else sender.sendText(activeThreadId, item.text)
+			val authorized = try {
+				activeConnector.isAuthorized()
 			} catch (e: RuntimeException) {
 				false
 			}
+			val sent = authorized && sendTextOrReply(sender, activeThreadId, replyToId, item.text)
 			runOnUiThread {
 				inFlightRetryIds.remove(echoId)
 				val dead = !retryOwner.owns(echoId, generation) || isFinishing || isDestroyed

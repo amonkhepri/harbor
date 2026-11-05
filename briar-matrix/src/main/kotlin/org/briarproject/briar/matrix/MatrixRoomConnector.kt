@@ -17,6 +17,7 @@ import org.briarproject.briar.api.connector.ConnectorRoomLeaver
 import org.briarproject.briar.api.connector.ConnectorRoomObserver
 import org.briarproject.briar.api.connector.ConnectorSource
 import org.briarproject.briar.api.connector.ConnectorSources
+import org.briarproject.briar.api.connector.ConnectorReplySender
 import org.briarproject.briar.api.connector.ConnectorTextSender
 import org.briarproject.briar.api.connector.ConnectorThread
 import org.briarproject.briar.api.connector.ConnectorThumbnailLoader
@@ -60,6 +61,7 @@ class MatrixRoomConnector @JvmOverloads constructor(
 	private val fileDownloadClient: MatrixFileDownloadClient? = null,
 ) : MatrixConnector,
 	ConnectorTextSender,
+	ConnectorReplySender,
 	ConnectorImageSender,
 	ConnectorFileSender,
 	ConnectorFileDownloader,
@@ -141,6 +143,11 @@ class MatrixRoomConnector @JvmOverloads constructor(
 	override fun sendText(threadId: String, text: String): Boolean {
 		if (!isAuthorized()) return false
 		return messageSendClient.sendTextMessage(threadId, text)
+	}
+
+	override fun sendReply(threadId: String, replyToMessageId: String, text: String): Boolean {
+		if (!isAuthorized() || replyToMessageId.isBlank()) return false
+		return messageSendClient.sendReplyMessage(threadId, replyToMessageId, text)
 	}
 
 	override fun prepareTyping(threadId: String): ConnectorTypingSender.PreparedTyping? {

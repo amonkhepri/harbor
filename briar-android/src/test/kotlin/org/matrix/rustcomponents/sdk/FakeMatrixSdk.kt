@@ -190,6 +190,14 @@ class Timeline {
 		}
 	}
 
+	/** Mirrors the pinned AAR's real shape: suspend, returns `Unit` (MX-057). */
+	suspend fun sendReply(msg: RoomMessageEventContentWithoutRelation, eventId: String) {
+		FakeMatrixSdkState.sendCallCount++
+		FakeMatrixSdkState.lastSentContent = msg
+		FakeMatrixSdkState.lastReplyToEventId = eventId
+		FakeMatrixSdkState.sendFailureToThrow?.let { throw it }
+	}
+
 	fun sendFile(params: UploadParameters, info: FileInfo): SendAttachmentJoinHandle {
 		FakeMatrixSdkState.sendFileCallCount++
 		FakeMatrixSdkState.lastSendFileParams = params
@@ -1000,6 +1008,7 @@ object FakeMatrixSdkState {
 	var lastCreatedMessageType: MessageType? = null
 	var sendCallCount = 0
 	var lastSentContent: RoomMessageEventContentWithoutRelation? = null
+	var lastReplyToEventId: String? = null
 	var sendFailureToThrow: ClientException? = null
 	var sendSuspendAsynchronously = false
 	var sendDelayMs = 0L
@@ -1130,6 +1139,7 @@ object FakeMatrixSdkState {
 		lastCreatedMessageType = null
 		sendCallCount = 0
 		lastSentContent = null
+		lastReplyToEventId = null
 		sendFailureToThrow = null
 		sendSuspendAsynchronously = false
 		sendDelayMs = 0L

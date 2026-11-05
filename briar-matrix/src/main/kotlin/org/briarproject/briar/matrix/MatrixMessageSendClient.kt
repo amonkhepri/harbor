@@ -43,6 +43,14 @@ interface MatrixMessageSendClient {
 	fun sendTextMessage(roomId: String, text: String): Boolean
 
 	/**
+	 * Sends [text] into [roomId] as a reply to [inReplyToEventId] (MX-057) via the pinned SDK's
+	 * suspend `Timeline.sendReply(RoomMessageEventContentWithoutRelation, String)`. Returns false
+	 * -- never throwing -- under the same conditions as [sendTextMessage]; unsupported clients
+	 * fail closed.
+	 */
+	fun sendReplyMessage(roomId: String, inReplyToEventId: String, text: String): Boolean = false
+
+	/**
 	 * Sends [imageBytes] as a single image attachment into [roomId] as [fileName] with content
 	 * type [mimeType]. Returns true on success, false -- never throwing -- when no session is
 	 * retained, [roomId] cannot be found, or the SDK send call fails.

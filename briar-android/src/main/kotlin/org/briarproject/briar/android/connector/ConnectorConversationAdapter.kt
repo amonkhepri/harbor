@@ -1,10 +1,12 @@
 package org.briarproject.briar.android.connector
 
 import android.view.LayoutInflater
+import android.view.Menu
 import android.view.View
 import android.view.ViewGroup
 import android.widget.ImageView
 import android.widget.TextView
+import androidx.appcompat.widget.PopupMenu
 import androidx.recyclerview.widget.DiffUtil.ItemCallback
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
@@ -17,6 +19,7 @@ internal class ConnectorConversationAdapter(
 	private val onRetrySendClicked: ((ConnectorConversationMessageItem) -> Unit)? = null,
 	private val onFileClicked: ((ConnectorConversationMessageItem) -> Unit)? = null,
 	var thumbnailManager: ConnectorThumbnailManager? = null,
+	var onReplyClicked: ((ConnectorConversationMessageItem) -> Unit)? = null,
 ) : ListAdapter<
 	ConnectorConversationMessageItem,
 	ConnectorConversationAdapter.MessageViewHolder,
@@ -34,6 +37,7 @@ internal class ConnectorConversationAdapter(
 			onRetrySendClicked,
 			onFileClicked,
 			thumbnailManager,
+			onReplyClicked,
 		)
 	}
 
@@ -52,6 +56,7 @@ internal class ConnectorConversationAdapter(
 		private val onRetrySendClicked: ((ConnectorConversationMessageItem) -> Unit)? = null,
 		private val onFileClicked: ((ConnectorConversationMessageItem) -> Unit)? = null,
 		private val thumbnailManager: ConnectorThumbnailManager? = null,
+		private val onReplyClicked: ((ConnectorConversationMessageItem) -> Unit)? = null,
 	) : RecyclerView.ViewHolder(itemView) {
 		constructor(itemView: View, onDeleteClicked: ((ConnectorConversationMessageItem) -> Unit)?) :
 			this(itemView, onDeleteClicked, null, null, null)
@@ -267,17 +272,38 @@ internal class ConnectorConversationAdapter(
 			itemView.setOnLongClickListener {
 				// Delete affordance is connector-neutral: own sent messages without pending
 				// local echo and not already deleted trigger the callback when delete is supported.
-				if (item.isOutgoing &&
+				val canDelete = item.isOutgoing &&
 					item.localEchoStatus == null &&
 					item.type != ConnectorMessageType.DELETED &&
 					onDeleteClicked != null
-				) {
-					onDeleteClicked.invoke(item)
-					true
-				} else {
-					false
+				val canReply = onReplyClicked != null && ConnectorReplyTarget.canReplyTo(item)
+				when {
+					canDelete && canReply -> showMessageActions(item)
+					canDelete -> onDeleteClicked?.invoke(item)
+					canReply -> onReplyClicked?.invoke(item)
 				}
+				canDelete || canReply
 			}
+		}
+
+		private fun showMessageActions(item: ConnectorConversationMessageItem) {
+			val popup = PopupMenu(itemView.context, itemView)
+			popup.menu.add(
+				Menu.NONE,
+				R.string.connector_conversation_reply,
+				0,
+				R.string.connector_conversation_reply,
+			)
+			popup.menu.add(Menu.NONE, R.string.delete, 1, R.string.delete)
+			popup.setOnMenuItemClickListener { menuItem ->
+				if (menuItem.itemId == R.string.delete) {
+					onDeleteClicked?.invoke(item)
+				} else {
+					onReplyClicked?.invoke(item)
+				}
+				true
+			}
+			popup.show()
 		}
 	}
 

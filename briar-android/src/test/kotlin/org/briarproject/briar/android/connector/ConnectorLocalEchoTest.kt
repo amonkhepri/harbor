@@ -20,6 +20,7 @@ import org.briarproject.briar.api.connector.ConnectorFileSender
 import org.briarproject.briar.api.connector.ConnectorImageSender
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult
 import org.briarproject.briar.api.connector.ConnectorMessageType
+import org.briarproject.briar.api.connector.ConnectorReplySender
 import org.briarproject.briar.api.connector.ConnectorSources
 import org.briarproject.briar.api.connector.ConnectorTextSender
 import org.briarproject.briar.api.connector.ConnectorThread
@@ -625,5 +626,105 @@ class ConnectorLocalEchoTest {
 		val media = sentItem.copy(type = ConnectorMessageType.PHOTO, localEchoStatus = FAILED)
 		activity.onRetrySendClicked(media)
 		assertTrue(work.isEmpty())
+	}
+
+	private class FakeReplyConnector(var sendResult: Boolean = true) :
+		ReadOnlyConnector,
+		ConnectorTextSender,
+		ConnectorReplySender {
+		override val source = ConnectorSources.MATRIX
+		override fun isEnabled() = true
+		override fun isAuthorized() = true
+		override fun getRecentThreads(limit: Int) = emptyList<ConnectorThread>()
+		override fun getRecentMessageReadResult(threadId: String, limit: Int) =
+			ConnectorMessageReadResult.Success(emptyList())
+		val sentTexts = mutableListOf<String>()
+		val sentReplies = mutableListOf<Pair<String, String>>()
+		override fun sendText(threadId: String, text: String) = sendResult.also { sentTexts += text }
+		override fun sendReply(threadId: String, replyToMessageId: String, text: String) =
+			sendResult.also { sentReplies += replyToMessageId to text }
+	}
+
+	private fun buildActivityForReply(
+		connector: FakeReplyConnector,
+		work: MutableList<Runnable>,
+	): Pair<ConnectorConversationActivity, TextView> {
+		val activity = buildActivityForTextSend(connector, work)
+		val preview = TextView(activity)
+		setField(activity, "replySender", connector)
+		setField(activity, "replyBar", FrameLayout(activity))
+		setField(activity, "replyPreview", preview)
+		return activity to preview
+	}
+
+	private fun selectReply(
+		activity: ConnectorConversationActivity,
+		item: ConnectorConversationMessageItem,
+	) {
+		ConnectorConversationActivity::class.java
+			.getDeclaredMethod("onReplyClicked", ConnectorConversationMessageItem::class.java)
+			.apply { isAccessible = true }
+			.invoke(activity, item)
+	}
+
+	@Test fun selectedReplySendsReplyRelationAndClearsAfterSuccess() {
+		val work = mutableListOf<Runnable>()
+		val connector = FakeReplyConnector()
+		val (activity, preview) = buildActivityForReply(connector, work)
+		selectReply(activity, server.copy(isOutgoing = false, connectorMessageId = "\$parent"))
+		assertEquals("Replying to: hello", preview.text.toString())
+
+		sendFailingText(activity, work, "answer")
+
+		assertEquals(listOf("\$parent" to "answer"), connector.sentReplies)
+		assertTrue(connector.sentTexts.isEmpty())
+		assertTrue(messageState(activity).messages.last().isReply)
+		assertNull(getField(activity, "replyTarget"))
+		assertEquals("", preview.text.toString())
+	}
+
+	@Test fun cancelledReplySendsOrdinaryText() {
+		val work = mutableListOf<Runnable>()
+		val connector = FakeReplyConnector()
+		val (activity, _) = buildActivityForReply(connector, work)
+		selectReply(activity, server.copy(isOutgoing = false, connectorMessageId = "\$parent"))
+		activity.setReplyTarget(null)
+
+		sendFailingText(activity, work, "plain")
+
+		assertEquals(listOf("plain"), connector.sentTexts)
+		assertTrue(connector.sentReplies.isEmpty())
+		assertFalse(messageState(activity).messages.last().isReply)
+	}
+
+	@Test fun failedReplyKeepsSelectionAndRetriesAsReply() {
+		val work = mutableListOf<Runnable>()
+		val connector = FakeReplyConnector(sendResult = false)
+		val (activity, _) = buildActivityForReply(connector, work)
+		selectReply(activity, server.copy(isOutgoing = false, connectorMessageId = "\$parent"))
+
+		val failed = sendFailingText(activity, work, "answer")
+		assertEquals("\$parent", (getField(activity, "replyTarget") as ConnectorReplyTarget).messageId)
+		connector.sendResult = true
+		activity.onRetrySendClicked(failed)
+		work.removeAt(0).run()
+
+		assertEquals(listOf("\$parent" to "answer", "\$parent" to "answer"), connector.sentReplies)
+		assertTrue(connector.sentTexts.isEmpty())
+	}
+
+	@Test fun localEchoesAndDeletedRowsCannotBeRepliedTo() {
+		val work = mutableListOf<Runnable>()
+		val (activity, _) = buildActivityForReply(FakeReplyConnector(), work)
+		selectReply(activity, server.copy(localEchoStatus = FAILED))
+		selectReply(activity, server.copy(type = ConnectorMessageType.DELETED))
+		assertNull(getField(activity, "replyTarget"))
+	}
+
+	@Test fun replyPreviewIsSingleLineAndBounded() {
+		assertEquals("a b", ConnectorReplyTarget.boundedPreview(" a\n\n b "))
+		val long = ConnectorReplyTarget.boundedPreview("x".repeat(200))
+		assertEquals(ConnectorReplyTarget.MAX_PREVIEW_CODE_POINTS + 1, long.length)
+		assertTrue(long.endsWith("…"))
 	}
 }

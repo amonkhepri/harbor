@@ -17,8 +17,9 @@ internal data class ConnectorConversationMessageListState(
 		threadId: String,
 		text: String,
 		now: Long = System.currentTimeMillis(),
+		replyToMessageId: String? = null,
 	): ConnectorConversationMessageListState =
-		beginSend(source, threadId, ConnectorMessageType.TEXT, text, now)
+		beginSend(source, threadId, ConnectorMessageType.TEXT, text, now, replyToMessageId)
 
 	/** Image/file sends have no caption to show up front, so the row carries the type alone. */
 	fun beginMediaSend(
@@ -34,6 +35,7 @@ internal data class ConnectorConversationMessageListState(
 		type: ConnectorMessageType,
 		text: String,
 		now: Long,
+		replyToMessageId: String? = null,
 	): ConnectorConversationMessageListState {
 		val item = ConnectorConversationMessageItem(
 			source,
@@ -43,6 +45,7 @@ internal data class ConnectorConversationMessageListState(
 			true,
 			text,
 			type,
+			isReply = replyToMessageId != null,
 			localEchoStatus = ConnectorLocalEchoStatus.PENDING,
 		)
 		val confirmed = messages.filter { it.localEchoStatus == null }
@@ -53,6 +56,7 @@ internal data class ConnectorConversationMessageListState(
 				item,
 				confirmed.map { it.stableId }.toSet(),
 				historyBaseline = confirmed.maxOfOrNull { it.dateMillis },
+				replyToMessageId = replyToMessageId,
 			),
 		)
 	}
@@ -159,6 +163,8 @@ internal data class ConnectorLocalEcho(
 	val knownIds: Set<String>,
 	val completed: Boolean = false,
 	val historyBaseline: Long? = null,
+	/** Kept so a failed reply retries as a reply rather than as ordinary text (MX-057). */
+	val replyToMessageId: String? = null,
 )
 
 internal enum class ConnectorConversationAvailabilityState {

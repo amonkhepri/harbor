@@ -70,6 +70,36 @@
 		android:visibility="gone" />
 
 	<LinearLayout
+		android:id="@+id/connectorConversationReplyBar"
+		android:layout_width="match_parent"
+		android:layout_height="wrap_content"
+		android:background="@color/card_background"
+		android:gravity="center_vertical"
+		android:orientation="horizontal"
+		android:paddingStart="16dp"
+		android:paddingEnd="8dp"
+		android:visibility="gone">
+
+		<TextView
+			android:id="@+id/connectorConversationReplyPreview"
+			android:layout_width="0dp"
+			android:layout_height="wrap_content"
+			android:layout_weight="1"
+			android:ellipsize="end"
+			android:maxLines="1"
+			android:textColor="?android:attr/textColorSecondary" />
+
+		<ImageButton
+			android:id="@+id/connectorConversationReplyCancel"
+			android:layout_width="48dp"
+			android:layout_height="48dp"
+			android:background="?attr/selectableItemBackgroundBorderless"
+			android:contentDescription="@string/connector_conversation_cancel_reply"
+			android:src="@drawable/ic_close" />
+
+	</LinearLayout>
+
+	<LinearLayout
 		android:id="@+id/connectorConversationComposeBar"
 		android:layout_width="match_parent"
 		android:layout_height="wrap_content"

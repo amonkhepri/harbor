@@ -85,6 +85,46 @@ class ReflectiveMatrixHomeserverDiscoveryClientSendTest {
 	}
 
 	@Test
+	fun `sendReplyMessage sends the text with an SDK reply relation`() {
+		val client = loggedInClient()
+		FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec("!room:example.org"))
+
+		val sent = client.sendReplyMessage("!room:example.org", "\$parent", "hello there")
+
+		assertTrue(sent)
+		assertEquals("\$parent", FakeMatrixSdkState.lastReplyToEventId)
+		val sentType = FakeMatrixSdkState.lastSentContent?.messageType as MessageType.Text
+		assertEquals("hello there", sentType.content.body)
+		assertEquals(1, FakeMatrixSdkState.sendCallCount)
+		assertEquals(0, FakeMatrixSdkState.sendHandleCloseCount)
+		assertEquals(1, FakeMatrixSdkState.roomMessageEventContentCloseCount)
+		assertEquals(1, FakeMatrixSdkState.timelineCloseCount)
+	}
+
+	@Test
+	fun `sendTextMessage after a reply sends ordinary text without a relation`() {
+		val client = loggedInClient()
+		FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec("!room:example.org"))
+
+		assertTrue(client.sendTextMessage("!room:example.org", "plain"))
+
+		assertEquals(null, FakeMatrixSdkState.lastReplyToEventId)
+		assertEquals(1, FakeMatrixSdkState.sendHandleCloseCount)
+	}
+
+	@Test
+	fun `sendReplyMessage fails closed for a blank target or failed SDK reply`() {
+		val client = loggedInClient()
+		FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec("!room:example.org"))
+
+		assertFalse(client.sendReplyMessage("!room:example.org", " ", "hello"))
+		assertEquals(0, FakeMatrixSdkState.sendCallCount)
+		FakeMatrixSdkState.sendFailureToThrow = ClientException.Generic("failed", "failed")
+		assertFalse(client.sendReplyMessage("!room:example.org", "\$parent", "hello"))
+		assertEquals(1, FakeMatrixSdkState.roomMessageEventContentCloseCount)
+	}
+
+	@Test
 	fun `sendImageMessage returns false when no session is retained`() {
 		val client = ReflectiveMatrixHomeserverDiscoveryClient()
 
