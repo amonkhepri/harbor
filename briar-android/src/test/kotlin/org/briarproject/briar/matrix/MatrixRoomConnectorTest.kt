@@ -2,6 +2,7 @@ package org.briarproject.briar.matrix
 
 import org.briarproject.bramble.api.system.Clock
 import org.briarproject.bramble.test.SettableClock
+import org.briarproject.briar.api.connector.ConnectorAttachmentMetadata
 import org.briarproject.briar.api.connector.ConnectorMessage
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult.LoadFailed
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult.Success
@@ -473,15 +474,16 @@ class MatrixRoomConnectorTest {
 			messageSnapshotClient = snapshotClient,
 			authSession = FakeMatrixAuthSession(MatrixAuthState.HOMESERVER_ENTRY),
 		)
+		val attachment = ConnectorAttachmentMetadata(uri = "mxc://example.org/1")
 
-		val result = connector.loadThumbnail("!room:example.org", "\$1", "mxc://example.org/1", 100, 100)
+		val result = connector.loadThumbnail("!room:example.org", "\$1", attachment, 100, 100)
 
 		assertNull(result)
-		assertNull(snapshotClient.lastRequestedMediaUrl)
+		assertNull(snapshotClient.lastRequestedAttachment)
 	}
 
 	@Test
-	fun `loadThumbnail returns null when mediaUrl is null`() {
+	fun `loadThumbnail returns null when attachment is null`() {
 		val snapshotClient = FakeMessageSnapshotClient(emptyList())
 		snapshotClient.thumbnailToReturn = byteArrayOf(1, 2)
 		val connector = connector(
@@ -489,10 +491,16 @@ class MatrixRoomConnectorTest {
 			authSession = FakeMatrixAuthSession(MatrixAuthState.READY),
 		)
 
-		val result = connector.loadThumbnail("!room:example.org", "\$1", null, 100, 100)
+		val result = connector.loadThumbnail(
+			"!room:example.org",
+			"\$1",
+			null as ConnectorAttachmentMetadata?,
+			100,
+			100,
+		)
 
 		assertNull(result)
-		assertNull(snapshotClient.lastRequestedMediaUrl)
+		assertNull(snapshotClient.lastRequestedAttachment)
 	}
 
 	@Test
@@ -504,11 +512,12 @@ class MatrixRoomConnectorTest {
 			messageSnapshotClient = snapshotClient,
 			authSession = FakeMatrixAuthSession(MatrixAuthState.READY),
 		)
+		val attachment = ConnectorAttachmentMetadata(uri = "mxc://example.org/1")
 
-		val result = connector.loadThumbnail("!room:example.org", "\$1", "mxc://example.org/1", 100, 100)
+		val result = connector.loadThumbnail("!room:example.org", "\$1", attachment, 100, 100)
 
 		assertArrayEquals(expected, result)
-		assertEquals("mxc://example.org/1", snapshotClient.lastRequestedMediaUrl)
+		assertEquals(attachment, snapshotClient.lastRequestedAttachment)
 	}
 
 	@Test
@@ -683,12 +692,24 @@ class MatrixRoomConnectorTest {
 			private set
 		var lastRequestedMediaUrl: String? = null
 			private set
+		var lastRequestedAttachment: ConnectorAttachmentMetadata? = null
+			private set
 		var thumbnailToReturn: ByteArray? = null
 
 		override fun getRecentMessages(roomId: String, limit: Int): List<MatrixMessageSnapshot>? {
 			lastRequestedRoomId = roomId
 			lastRequestedLimit = limit
 			return snapshots
+		}
+
+		override fun getMediaThumbnail(
+			attachment: ConnectorAttachmentMetadata,
+			width: Int,
+			height: Int,
+		): ByteArray? {
+			lastRequestedAttachment = attachment
+			lastRequestedMediaUrl = attachment.uri
+			return thumbnailToReturn
 		}
 
 		override fun getMediaThumbnail(mediaUrl: String, width: Int, height: Int): ByteArray? {

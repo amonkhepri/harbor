@@ -48,9 +48,19 @@ interface MatrixMessageSnapshotClient {
 	): TypingSubscription? = null
 
 	/**
+	 * Loads a media thumbnail for [attachment] bounded to [width] and [height] (MX-055).
+	 */
+	fun getMediaThumbnail(
+		attachment: ConnectorAttachmentMetadata,
+		width: Int,
+		height: Int,
+	): ByteArray? = null
+
+	/**
 	 * Loads a media thumbnail for [mediaUrl] bounded to [width] and [height] (MX-055).
 	 */
-	fun getMediaThumbnail(mediaUrl: String, width: Int, height: Int): ByteArray? = null
+	fun getMediaThumbnail(mediaUrl: String, width: Int, height: Int): ByteArray? =
+		getMediaThumbnail(ConnectorAttachmentMetadata(uri = mediaUrl), width, height)
 }
 
 /**

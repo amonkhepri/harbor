@@ -1,5 +1,6 @@
 package org.briarproject.briar.matrix
 
+import org.briarproject.briar.api.connector.ConnectorAttachmentMetadata
 import org.briarproject.briar.api.connector.ConnectorMessageType
 import org.briarproject.briar.api.connector.ConnectorReactionSummary
 import org.briarproject.briar.api.matrix.MatrixAuthSession.RecoverableErrorDetail.NONE
@@ -177,6 +178,60 @@ class ReflectiveMatrixHomeserverDiscoveryClientMessagesTest {
 
 		assertNull(result)
 		assertEquals(0, FakeMatrixSdkState.getMediaThumbnailCallCount)
+	}
+
+	@Test
+	fun `getMediaThumbnail returns null when logout occurs during fetch`() {
+		val client = loggedInClient()
+		FakeMatrixSdkState.mediaThumbnailToReturn = byteArrayOf(1, 2)
+		FakeMatrixSdkState.onGetMediaThumbnail = {
+			client.logout()
+		}
+
+		val result = client.getMediaThumbnail("mxc://example.org/test", 240, 240)
+
+		assertNull(result)
+		assertEquals(1, FakeMatrixSdkState.getMediaThumbnailCallCount)
+	}
+
+	@Test
+	fun `getMediaThumbnail uses mediaSourceJson from attachment for encrypted rooms`() {
+		val client = loggedInClient()
+		val expected = byteArrayOf(9, 8, 7)
+		FakeMatrixSdkState.mediaThumbnailToReturn = expected
+		val attachment = ConnectorAttachmentMetadata(
+			uri = "mxc://example.org/encrypted_img",
+			mediaSourceJson = "{\"url\":\"mxc://example.org/encrypted_img\",\"key\":\"k\"}",
+		)
+
+		val result = client.getMediaThumbnail(attachment, 240, 240)
+
+		assertArrayEquals(expected, result)
+		assertEquals(
+			"{\"url\":\"mxc://example.org/encrypted_img\",\"key\":\"k\"}",
+			FakeMatrixSdkState.lastMediaThumbnailSource?.toJson(),
+		)
+	}
+
+	@Test
+	fun `getMediaThumbnail prefers thumbnailSourceJson from attachment when present`() {
+		val client = loggedInClient()
+		val expected = byteArrayOf(5, 6, 7)
+		FakeMatrixSdkState.mediaThumbnailToReturn = expected
+		val attachment = ConnectorAttachmentMetadata(
+			uri = "mxc://example.org/orig_img",
+			mediaSourceJson = "{\"url\":\"mxc://example.org/orig_img\"}",
+			thumbnailUri = "mxc://example.org/thumb_img",
+			thumbnailSourceJson = "{\"url\":\"mxc://example.org/thumb_img\"}",
+		)
+
+		val result = client.getMediaThumbnail(attachment, 240, 240)
+
+		assertArrayEquals(expected, result)
+		assertEquals(
+			"{\"url\":\"mxc://example.org/thumb_img\"}",
+			FakeMatrixSdkState.lastMediaThumbnailSource?.toJson(),
+		)
 	}
 
 	@Test

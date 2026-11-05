@@ -1258,13 +1258,26 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		)
 	}
 
-	override fun getMediaThumbnail(mediaUrl: String, width: Int, height: Int): ByteArray? {
-		val client = loginClient ?: return null
-		if (mediaUrl.isBlank() || width <= 0 || height <= 0) return null
+	override fun getMediaThumbnail(
+		attachment: ConnectorAttachmentMetadata,
+		width: Int,
+		height: Int,
+	): ByteArray? {
+		if (width <= 0 || height <= 0) return null
+		val (client, generation) = synchronized(this) {
+			val gen = synchronized(lifecycleLock) { activeGeneration }
+			Pair(loginClient, gen)
+		}
+		if (client == null || generation == null) return null
+
+		val sourceJson = attachment.thumbnailSourceJson ?: attachment.mediaSourceJson
+		val sourceUrl = attachment.thumbnailUri ?: attachment.uri
+		if (sourceJson.isNullOrBlank() && sourceUrl.isNullOrBlank()) return null
+
 		var mediaSource: Any? = null
 		return try {
 			val mediaSourceClass = Class.forName(MEDIA_SOURCE_CLASS_NAME)
-			mediaSource = createMediaSource(mediaSourceClass, null, mediaUrl) ?: return null
+			mediaSource = createMediaSource(mediaSourceClass, sourceJson, sourceUrl) ?: return null
 			val method = client.javaClass.methods.firstOrNull {
 				it.name.startsWith("getMediaThumbnail") && it.parameterTypes.size == 4
 			} ?: return null
@@ -1284,18 +1297,23 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 				height.toLong(),
 				continuation,
 			)
-			if (invokeResult !== COROUTINE_SUSPENDED) {
+			val resultBytes = if (invokeResult !== COROUTINE_SUSPENDED) {
 				invokeResult as? ByteArray
 			} else {
 				if (!latch.await(discoveryTimeoutMs, TimeUnit.MILLISECONDS)) return null
 				outcome.get()?.getOrNull() as? ByteArray
 			}
+			val isCurrent = synchronized(lifecycleLock) { activeGeneration === generation }
+			if (!isCurrent) null else resultBytes
 		} catch (e: Exception) {
 			null
 		} finally {
 			destroyQuietly(mediaSource)
 		}
 	}
+
+	override fun getMediaThumbnail(mediaUrl: String, width: Int, height: Int): ByteArray? =
+		getMediaThumbnail(ConnectorAttachmentMetadata(uri = mediaUrl), width, height)
 
 	@Synchronized
 	override fun observeRoom(roomId: String, onUpdate: () -> Unit): RoomSubscription? {
@@ -1697,12 +1715,32 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 				}
 				mediaJson = jsonMethod?.invoke(source) as? String
 			}
+			var thumbUrl: String? = null
+			var thumbJson: String? = null
+			if (info != null) {
+				val thumbSourceMethod = info.javaClass.methods.firstOrNull {
+					it.name == "getThumbnailSource" && it.parameterTypes.isEmpty()
+				}
+				val thumbSource = thumbSourceMethod?.invoke(info)
+				if (thumbSource != null) {
+					val urlMethod = thumbSource.javaClass.methods.firstOrNull {
+						it.name == "url" && it.parameterTypes.isEmpty()
+					}
+					thumbUrl = urlMethod?.invoke(thumbSource) as? String
+					val jsonMethod = thumbSource.javaClass.methods.firstOrNull {
+						it.name == "toJson" && it.parameterTypes.isEmpty()
+					}
+					thumbJson = jsonMethod?.invoke(thumbSource) as? String
+				}
+			}
 			ConnectorAttachmentMetadata(
 				fileName = rawFilename,
 				mimeType = rawMime,
 				size = rawSize,
 				uri = mediaUrl,
 				mediaSourceJson = mediaJson,
+				thumbnailUri = thumbUrl,
+				thumbnailSourceJson = thumbJson,
 			)
 		} catch (e: Exception) {
 			null

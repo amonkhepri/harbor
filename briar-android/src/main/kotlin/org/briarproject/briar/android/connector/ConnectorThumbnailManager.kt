@@ -50,7 +50,7 @@ class ConnectorThumbnailManager(
 				thumbnailLoader.loadThumbnail(
 					item.connectorThreadId,
 					item.connectorMessageId,
-					item.attachment?.uri,
+					item.attachment,
 					maxWidth,
 					maxHeight,
 				)
@@ -103,6 +103,8 @@ class ConnectorThumbnailManager(
 		const val DEFAULT_MAX_DIMENSION: Int = 480
 		const val MAX_IMAGE_BYTES: Int = ConnectorImageSender.MAX_IMAGE_BYTES
 		const val DEFAULT_CACHE_SIZE_BYTES: Int = 8 * 1024 * 1024
+		const val MAX_DECODED_PIXELS: Int = 1024 * 1024
+		const val MAX_DECODED_BYTES: Int = 2 * 1024 * 1024
 
 		fun cacheKey(threadId: String, messageId: String): String = "$threadId:$messageId"
 
@@ -158,8 +160,10 @@ class ConnectorThumbnailManager(
 				if (origWidth <= 0 || origHeight <= 0) return null
 
 				var inSampleSize = 1
-				while (origWidth / (inSampleSize * 2) >= maxWidth &&
-					origHeight / (inSampleSize * 2) >= maxHeight
+				while (origWidth / inSampleSize > maxWidth ||
+					origHeight / inSampleSize > maxHeight ||
+					(origWidth.toLong() * origHeight.toLong()) / (inSampleSize.toLong() * inSampleSize.toLong()) >
+					MAX_DECODED_PIXELS
 				) {
 					inSampleSize *= 2
 				}
@@ -168,7 +172,13 @@ class ConnectorThumbnailManager(
 					this.inSampleSize = inSampleSize
 					inPreferredConfig = Bitmap.Config.RGB_565
 				}
-				BitmapFactory.decodeByteArray(bytes, 0, bytes.size, decodeOptions)
+				val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, decodeOptions)
+				if (bitmap != null && bitmap.byteCount > MAX_DECODED_BYTES) {
+					bitmap.recycle()
+					null
+				} else {
+					bitmap
+				}
 			} catch (t: Throwable) {
 				null
 			}

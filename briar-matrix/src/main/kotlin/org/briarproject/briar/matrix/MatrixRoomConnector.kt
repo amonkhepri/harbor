@@ -202,13 +202,12 @@ class MatrixRoomConnector @JvmOverloads constructor(
 	override fun loadThumbnail(
 		threadId: String,
 		messageId: String,
-		mediaUrl: String?,
+		attachment: ConnectorAttachmentMetadata?,
 		maxWidth: Int,
 		maxHeight: Int,
 	): ByteArray? {
-		if (!isAuthorized()) return null
-		val url = mediaUrl ?: return null
-		return messageSnapshotClient.getMediaThumbnail(url, maxWidth, maxHeight)
+		if (!isAuthorized() || attachment == null) return null
+		return messageSnapshotClient.getMediaThumbnail(attachment, maxWidth, maxHeight)
 	}
 
 	override fun downloadFile(

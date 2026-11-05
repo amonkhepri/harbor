@@ -741,6 +741,7 @@ class Client internal constructor(
 		FakeMatrixSdkState.lastMediaThumbnailSource = source
 		FakeMatrixSdkState.lastMediaThumbnailWidth = width
 		FakeMatrixSdkState.lastMediaThumbnailHeight = height
+		FakeMatrixSdkState.onGetMediaThumbnail?.invoke()
 		FakeMatrixSdkState.mediaThumbnailFailureToThrow?.let { throw it }
 		return FakeMatrixSdkState.mediaThumbnailToReturn ?: ByteArray(0)
 	}
@@ -1045,6 +1046,7 @@ object FakeMatrixSdkState {
 	var lastMediaThumbnailSource: MediaSource? = null
 	var lastMediaThumbnailWidth: ULong? = null
 	var lastMediaThumbnailHeight: ULong? = null
+	var onGetMediaThumbnail: (() -> Unit)? = null
 
 	fun reset() {
 		awaitBuilds()
@@ -1055,6 +1057,7 @@ object FakeMatrixSdkState {
 		lastMediaThumbnailSource = null
 		lastMediaThumbnailWidth = null
 		lastMediaThumbnailHeight = null
+		onGetMediaThumbnail = null
 		getMediaFileCallCount = 0
 		getMediaFileException = null
 		onGetMediaFile = null

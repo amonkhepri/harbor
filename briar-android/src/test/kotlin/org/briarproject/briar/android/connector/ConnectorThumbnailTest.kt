@@ -73,6 +73,16 @@ class ConnectorThumbnailTest {
 	}
 
 	@Test
+	fun decodeBoundedBitmapDownsamplesExtremeAspectRatioImage() {
+		val bytes = createSamplePng(1200, 60)
+		val decoded = ConnectorThumbnailManager.decodeBoundedBitmap(bytes, 200, 200)
+
+		assertNotNull(decoded)
+		assertTrue(decoded!!.width <= 200)
+		assertTrue(decoded.height <= 200)
+	}
+
+	@Test
 	fun decodeBoundedBitmapReturnsNullForCorruptBytesWithoutCrashing() {
 		val corrupt = byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8)
 		val decoded = ConnectorThumbnailManager.decodeBoundedBitmap(corrupt, 200, 200)
@@ -131,6 +141,44 @@ class ConnectorThumbnailTest {
 
 		manager.clear()
 		assertNull(manager.getCached("thread1", "msg1"))
+	}
+
+	@Test
+	fun thumbnailManagerPassesAttachmentWithEncryptedSourceJsonToLoader() {
+		val bytes = createSamplePng(100, 100)
+		var passedAttachment: ConnectorAttachmentMetadata? = null
+		val loader = ConnectorThumbnailLoader { _, _, attachment, _, _ ->
+			passedAttachment = attachment
+			bytes
+		}
+		val manager = ConnectorThumbnailManager(loader, directExecutor, directHandler)
+		val attachment = ConnectorAttachmentMetadata(
+			uri = "mxc://example.org/photo",
+			mediaSourceJson = "{\"url\":\"mxc://example.org/photo\",\"key\":\"secret\"}",
+			thumbnailSourceJson = "{\"url\":\"mxc://example.org/thumb\",\"key\":\"thumbsecret\"}",
+		)
+		val item = ConnectorConversationMessageItem(
+			connectorSource = ConnectorSources.MATRIX,
+			connectorThreadId = "thread1",
+			connectorMessageId = "msg1",
+			dateMillis = 1_000L,
+			isOutgoing = false,
+			text = "Photo",
+			type = ConnectorMessageType.PHOTO,
+			attachment = attachment,
+		)
+
+		manager.loadThumbnail(item) {}
+
+		assertEquals(
+			"{\"url\":\"mxc://example.org/thumb\",\"key\":\"thumbsecret\"}",
+			passedAttachment?.thumbnailSourceJson,
+		)
+		assertEquals(
+			"{\"url\":\"mxc://example.org/photo\",\"key\":\"secret\"}",
+			passedAttachment?.mediaSourceJson,
+		)
+		assertEquals("mxc://example.org/photo", passedAttachment?.uri)
 	}
 
 	@Test
