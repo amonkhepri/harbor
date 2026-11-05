@@ -1270,7 +1270,8 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		}
 		if (client == null || generation == null) return null
 
-		val sourceJson = attachment.thumbnailSourceJson ?: attachment.mediaSourceJson
+		val sourceJson = attachment.thumbnailSourceJson // encrypted originals: no full-res fetch
+			?: attachment.mediaSourceJson?.also { if ("\"key\"" in it) return null }
 		val sourceUrl = attachment.thumbnailUri ?: attachment.uri
 		if (sourceJson.isNullOrBlank() && sourceUrl.isNullOrBlank()) return null
 

@@ -195,10 +195,9 @@ class ReflectiveMatrixHomeserverDiscoveryClientMessagesTest {
 	}
 
 	@Test
-	fun `getMediaThumbnail uses mediaSourceJson from attachment for encrypted rooms`() {
+	fun `getMediaThumbnail skips encrypted original without thumbnail source`() {
 		val client = loggedInClient()
-		val expected = byteArrayOf(9, 8, 7)
-		FakeMatrixSdkState.mediaThumbnailToReturn = expected
+		FakeMatrixSdkState.mediaThumbnailToReturn = byteArrayOf(9, 8, 7)
 		val attachment = ConnectorAttachmentMetadata(
 			uri = "mxc://example.org/encrypted_img",
 			mediaSourceJson = "{\"url\":\"mxc://example.org/encrypted_img\",\"key\":\"k\"}",
@@ -206,11 +205,45 @@ class ReflectiveMatrixHomeserverDiscoveryClientMessagesTest {
 
 		val result = client.getMediaThumbnail(attachment, 240, 240)
 
+		assertNull(result)
+		assertEquals(0, FakeMatrixSdkState.getMediaThumbnailCallCount)
+	}
+
+	@Test
+	fun `getMediaThumbnail uses plain mediaSourceJson when no thumbnail source`() {
+		val client = loggedInClient()
+		val expected = byteArrayOf(4, 3, 2)
+		FakeMatrixSdkState.mediaThumbnailToReturn = expected
+		val attachment = ConnectorAttachmentMetadata(
+			uri = "mxc://example.org/plain_img",
+			mediaSourceJson = "{\"url\":\"mxc://example.org/plain_img\"}",
+		)
+
+		val result = client.getMediaThumbnail(attachment, 240, 240)
+
 		assertArrayEquals(expected, result)
 		assertEquals(
-			"{\"url\":\"mxc://example.org/encrypted_img\",\"key\":\"k\"}",
+			"{\"url\":\"mxc://example.org/plain_img\"}",
 			FakeMatrixSdkState.lastMediaThumbnailSource?.toJson(),
 		)
+	}
+
+	@Test
+	fun `getMediaThumbnail uses encrypted thumbnail source when present`() {
+		val client = loggedInClient()
+		val expected = byteArrayOf(1, 1, 2)
+		FakeMatrixSdkState.mediaThumbnailToReturn = expected
+		val thumbJson = "{\"url\":\"mxc://example.org/enc_thumb\",\"key\":\"k\"}"
+		val attachment = ConnectorAttachmentMetadata(
+			uri = "mxc://example.org/enc_orig",
+			mediaSourceJson = "{\"url\":\"mxc://example.org/enc_orig\",\"key\":\"k\"}",
+			thumbnailSourceJson = thumbJson,
+		)
+
+		val result = client.getMediaThumbnail(attachment, 240, 240)
+
+		assertArrayEquals(expected, result)
+		assertEquals(thumbJson, FakeMatrixSdkState.lastMediaThumbnailSource?.toJson())
 	}
 
 	@Test
