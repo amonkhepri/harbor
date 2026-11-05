@@ -40,6 +40,7 @@ import org.briarproject.briar.android.util.UiUtils.launchActivityToOpenFile
 import org.briarproject.briar.android.view.BriarRecyclerView
 import org.briarproject.briar.api.connector.ConnectorFileDownloader
 import org.briarproject.briar.api.connector.ConnectorFileSender
+import org.briarproject.briar.api.connector.ConnectorThumbnailLoader
 import java.io.File
 import java.io.FileInputStream
 import java.io.IOException
@@ -391,6 +392,7 @@ class ConnectorConversationActivity : BriarActivity() {
 	private var imageSender: ConnectorImageSender? = null
 	private var fileSender: ConnectorFileSender? = null
 	private var readMarker: ConnectorReadMarker? = null
+	private var thumbnailManager: ConnectorThumbnailManager? = null
 	private val readStateLock = Any()
 	private val unreadOwner = ConnectorConversationLoadOwner()
 	private val leaveOwner = ConnectorConversationLoadOwner()
@@ -469,6 +471,12 @@ class ConnectorConversationActivity : BriarActivity() {
 		imageSender = connector as? ConnectorImageSender
 		fileSender = connector as? ConnectorFileSender
 		readMarker = connector as? ConnectorReadMarker
+		val thumbnailLoader = connector as? ConnectorThumbnailLoader
+		if (thumbnailLoader != null) {
+			val manager = ConnectorThumbnailManager(thumbnailLoader, ioExecutor)
+			thumbnailManager = manager
+			adapter.thumbnailManager = manager
+		}
 		fileUpload = ViewModelProvider(this)[ConnectorFileUploadState::class.java]
 		sourceName = connector?.source?.displayName
 			?: getString(R.string.connector_conversation_label)
@@ -752,6 +760,8 @@ class ConnectorConversationActivity : BriarActivity() {
 		loadOwner.invalidate()
 		retryOwner.invalidate()
 		inFlightRetryIds.clear()
+		thumbnailManager?.clear()
+		thumbnailManager = null
 		super.onDestroy()
 	}
 

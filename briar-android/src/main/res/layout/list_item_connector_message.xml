@@ -57,6 +57,18 @@
 		android:textColor="?android:attr/textColorPrimary"
 		android:textSize="@dimen/text_size_medium" />
 
+	<ImageView
+		android:id="@+id/connectorMessageThumbnail"
+		android:layout_width="wrap_content"
+		android:layout_height="wrap_content"
+		android:layout_marginTop="@dimen/margin_tiny"
+		android:adjustViewBounds="true"
+		android:contentDescription="@string/connector_message_photo"
+		android:maxHeight="240dp"
+		android:maxWidth="240dp"
+		android:scaleType="fitCenter"
+		android:visibility="gone" />
+
 	<LinearLayout
 		android:layout_width="wrap_content"
 		android:layout_height="wrap_content"

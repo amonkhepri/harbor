@@ -1258,6 +1258,45 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		)
 	}
 
+	override fun getMediaThumbnail(mediaUrl: String, width: Int, height: Int): ByteArray? {
+		val client = loginClient ?: return null
+		if (mediaUrl.isBlank() || width <= 0 || height <= 0) return null
+		var mediaSource: Any? = null
+		return try {
+			val mediaSourceClass = Class.forName(MEDIA_SOURCE_CLASS_NAME)
+			mediaSource = createMediaSource(mediaSourceClass, null, mediaUrl) ?: return null
+			val method = client.javaClass.methods.firstOrNull {
+				it.name.startsWith("getMediaThumbnail") && it.parameterTypes.size == 4
+			} ?: return null
+			val outcome = AtomicReference<Result<Any?>>()
+			val latch = CountDownLatch(1)
+			val continuation = object : Continuation<Any?> {
+				override val context: CoroutineContext = EmptyCoroutineContext
+				override fun resumeWith(result: Result<Any?>) {
+					outcome.set(result)
+					latch.countDown()
+				}
+			}
+			val invokeResult = method.invoke(
+				client,
+				mediaSource,
+				width.toLong(),
+				height.toLong(),
+				continuation,
+			)
+			if (invokeResult !== COROUTINE_SUSPENDED) {
+				invokeResult as? ByteArray
+			} else {
+				if (!latch.await(discoveryTimeoutMs, TimeUnit.MILLISECONDS)) return null
+				outcome.get()?.getOrNull() as? ByteArray
+			}
+		} catch (e: Exception) {
+			null
+		} finally {
+			destroyQuietly(mediaSource)
+		}
+	}
+
 	@Synchronized
 	override fun observeRoom(roomId: String, onUpdate: () -> Unit): RoomSubscription? {
 		if (roomId.isBlank()) return null

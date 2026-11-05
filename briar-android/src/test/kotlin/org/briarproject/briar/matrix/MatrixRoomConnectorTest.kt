@@ -11,6 +11,7 @@ import org.briarproject.briar.api.connector.ConnectorSources
 import org.briarproject.briar.api.matrix.MatrixAuthSession
 import org.briarproject.briar.api.matrix.MatrixAuthSession.RecoverableErrorDetail.NONE
 import org.briarproject.briar.api.matrix.MatrixAuthState
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -465,6 +466,52 @@ class MatrixRoomConnectorTest {
 	}
 
 	@Test
+	fun `loadThumbnail fails closed without querying snapshot client when not authorized`() {
+		val snapshotClient = FakeMessageSnapshotClient(emptyList())
+		snapshotClient.thumbnailToReturn = byteArrayOf(1, 2)
+		val connector = connector(
+			messageSnapshotClient = snapshotClient,
+			authSession = FakeMatrixAuthSession(MatrixAuthState.HOMESERVER_ENTRY),
+		)
+
+		val result = connector.loadThumbnail("!room:example.org", "\$1", "mxc://example.org/1", 100, 100)
+
+		assertNull(result)
+		assertNull(snapshotClient.lastRequestedMediaUrl)
+	}
+
+	@Test
+	fun `loadThumbnail returns null when mediaUrl is null`() {
+		val snapshotClient = FakeMessageSnapshotClient(emptyList())
+		snapshotClient.thumbnailToReturn = byteArrayOf(1, 2)
+		val connector = connector(
+			messageSnapshotClient = snapshotClient,
+			authSession = FakeMatrixAuthSession(MatrixAuthState.READY),
+		)
+
+		val result = connector.loadThumbnail("!room:example.org", "\$1", null, 100, 100)
+
+		assertNull(result)
+		assertNull(snapshotClient.lastRequestedMediaUrl)
+	}
+
+	@Test
+	fun `loadThumbnail delegates to snapshot client when authorized`() {
+		val snapshotClient = FakeMessageSnapshotClient(emptyList())
+		val expected = byteArrayOf(1, 2, 3)
+		snapshotClient.thumbnailToReturn = expected
+		val connector = connector(
+			messageSnapshotClient = snapshotClient,
+			authSession = FakeMatrixAuthSession(MatrixAuthState.READY),
+		)
+
+		val result = connector.loadThumbnail("!room:example.org", "\$1", "mxc://example.org/1", 100, 100)
+
+		assertArrayEquals(expected, result)
+		assertEquals("mxc://example.org/1", snapshotClient.lastRequestedMediaUrl)
+	}
+
+	@Test
 	fun `sendImage reports the send client's failure`() {
 		val connector = connector(
 			messageSendClient = FakeMessageSendClient(false),
@@ -634,11 +681,19 @@ class MatrixRoomConnectorTest {
 			private set
 		var lastRequestedLimit: Int? = null
 			private set
+		var lastRequestedMediaUrl: String? = null
+			private set
+		var thumbnailToReturn: ByteArray? = null
 
 		override fun getRecentMessages(roomId: String, limit: Int): List<MatrixMessageSnapshot>? {
 			lastRequestedRoomId = roomId
 			lastRequestedLimit = limit
 			return snapshots
+		}
+
+		override fun getMediaThumbnail(mediaUrl: String, width: Int, height: Int): ByteArray? {
+			lastRequestedMediaUrl = mediaUrl
+			return thumbnailToReturn
 		}
 	}
 

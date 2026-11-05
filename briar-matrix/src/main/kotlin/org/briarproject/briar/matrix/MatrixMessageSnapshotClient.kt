@@ -46,6 +46,11 @@ interface MatrixMessageSnapshotClient {
 		roomId: String,
 		onTypingChanged: (isTyping: Boolean) -> Unit,
 	): TypingSubscription? = null
+
+	/**
+	 * Loads a media thumbnail for [mediaUrl] bounded to [width] and [height] (MX-055).
+	 */
+	fun getMediaThumbnail(mediaUrl: String, width: Int, height: Int): ByteArray? = null
 }
 
 /**

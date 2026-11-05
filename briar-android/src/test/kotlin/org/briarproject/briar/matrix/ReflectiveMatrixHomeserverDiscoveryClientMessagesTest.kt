@@ -4,6 +4,7 @@ import org.briarproject.briar.api.connector.ConnectorMessageType
 import org.briarproject.briar.api.connector.ConnectorReactionSummary
 import org.briarproject.briar.api.matrix.MatrixAuthSession.RecoverableErrorDetail.NONE
 import org.junit.After
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -16,6 +17,7 @@ import org.matrix.rustcomponents.sdk.FileInfo
 import org.matrix.rustcomponents.sdk.FileMessageContent
 import org.matrix.rustcomponents.sdk.ImageInfo
 import org.matrix.rustcomponents.sdk.ImageMessageContent
+import org.matrix.rustcomponents.sdk.MediaSource
 import org.matrix.rustcomponents.sdk.MessageType
 import org.matrix.rustcomponents.sdk.Reaction
 import org.matrix.rustcomponents.sdk.ReactionSenderData
@@ -109,6 +111,72 @@ class ReflectiveMatrixHomeserverDiscoveryClientMessagesTest {
 		assertEquals(ConnectorMessageType.PHOTO, result?.single()?.type)
 		assertEquals(1, FakeMatrixSdkState.messageContentDestroyCount)
 		assertEquals(1, FakeMatrixSdkState.eventTimelineItemDestroyCount)
+	}
+
+	@Test
+	fun `getRecentMessages preserves Matrix Image attachment uri`() {
+		val client = loggedInClient()
+		FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec("!room:example.org"))
+		FakeMatrixSdkState.timelineDiffsToReturn = listOf(
+			TimelineDiff.Reset(
+				listOf(
+					remoteEvent(
+						"\$photo:example.org",
+						"image.jpg",
+						2_000uL,
+						messageType = MessageType.Image(
+							ImageMessageContent(
+								filename = "image.jpg",
+								source = MediaSource("mxc://example.org/img123"),
+							),
+						),
+					),
+				),
+			),
+		)
+
+		val result = client.getRecentMessages("!room:example.org", 1)
+
+		assertEquals(ConnectorMessageType.PHOTO, result?.single()?.type)
+		assertEquals("mxc://example.org/img123", result?.single()?.attachment?.uri)
+	}
+
+	@Test
+	fun `getMediaThumbnail returns SDK bytes when available`() {
+		val client = loggedInClient()
+		val expected = byteArrayOf(1, 2, 3, 4)
+		FakeMatrixSdkState.mediaThumbnailToReturn = expected
+
+		val result = client.getMediaThumbnail("mxc://example.org/test", 240, 240)
+
+		assertArrayEquals(expected, result)
+		assertEquals(1, FakeMatrixSdkState.getMediaThumbnailCallCount)
+		assertEquals("mxc://example.org/test", FakeMatrixSdkState.lastMediaThumbnailSource?.url())
+		assertEquals(240uL, FakeMatrixSdkState.lastMediaThumbnailWidth)
+		assertEquals(240uL, FakeMatrixSdkState.lastMediaThumbnailHeight)
+		assertEquals(1, FakeMatrixSdkState.mediaSourceDestroyCount)
+	}
+
+	@Test
+	fun `getMediaThumbnail returns null when SDK throws`() {
+		val client = loggedInClient()
+		FakeMatrixSdkState.mediaThumbnailFailureToThrow = RuntimeException("boom")
+
+		val result = client.getMediaThumbnail("mxc://example.org/test", 240, 240)
+
+		assertNull(result)
+		assertEquals(1, FakeMatrixSdkState.mediaSourceDestroyCount)
+	}
+
+	@Test
+	fun `getMediaThumbnail returns null when logged out`() {
+		val client = loggedInClient()
+		client.logout()
+
+		val result = client.getMediaThumbnail("mxc://example.org/test", 240, 240)
+
+		assertNull(result)
+		assertEquals(0, FakeMatrixSdkState.getMediaThumbnailCallCount)
 	}
 
 	@Test
