@@ -521,6 +521,32 @@ class MatrixRoomConnectorTest {
 	}
 
 	@Test
+	fun `loadThumbnail passes attachment with thumbnail source json to snapshot client`() {
+		val snapshotClient = FakeMessageSnapshotClient(emptyList())
+		val expected = byteArrayOf(7, 8, 9)
+		snapshotClient.thumbnailToReturn = expected
+		val connector = connector(
+			messageSnapshotClient = snapshotClient,
+			authSession = FakeMatrixAuthSession(MatrixAuthState.READY),
+		)
+		val attachment = ConnectorAttachmentMetadata(
+			uri = "mxc://example.org/orig",
+			mediaSourceJson = "{\"url\":\"mxc://example.org/orig\",\"key\":\"orig_key\"}",
+			thumbnailUri = "mxc://example.org/thumb",
+			thumbnailSourceJson = "{\"url\":\"mxc://example.org/thumb\",\"key\":\"thumb_key\"}",
+		)
+
+		val result = connector.loadThumbnail("!room:example.org", "\$1", attachment, 150, 150)
+
+		assertArrayEquals(expected, result)
+		assertEquals(attachment, snapshotClient.lastRequestedAttachment)
+		assertEquals(
+			"{\"url\":\"mxc://example.org/thumb\",\"key\":\"thumb_key\"}",
+			snapshotClient.lastRequestedAttachment?.thumbnailSourceJson,
+		)
+	}
+
+	@Test
 	fun `sendImage reports the send client's failure`() {
 		val connector = connector(
 			messageSendClient = FakeMessageSendClient(false),

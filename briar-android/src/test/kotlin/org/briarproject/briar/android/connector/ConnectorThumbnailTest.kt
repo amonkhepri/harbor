@@ -13,6 +13,7 @@ import org.briarproject.briar.api.connector.ConnectorMessageType
 import org.briarproject.briar.api.connector.ConnectorSources
 import org.briarproject.briar.api.connector.ConnectorThumbnailLoader
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -140,6 +141,25 @@ class ConnectorThumbnailTest {
 		assertNotNull(manager.getCached("thread1", "msg1"))
 
 		manager.clear()
+		assertNull(manager.getCached("thread1", "msg1"))
+	}
+
+	@Test
+	fun loadThumbnailCancellationSuppressesCallbackAndCache() {
+		val bytes = createSamplePng(100, 100)
+		var callbackInvoked = false
+		var taskToRun: Runnable? = null
+		val pausedExecutor = Executor { runnable -> taskToRun = runnable }
+		val loader = ConnectorThumbnailLoader { _, _, _, _, _ -> bytes }
+		val manager = ConnectorThumbnailManager(loader, pausedExecutor, directHandler)
+		val item = photoItem("msg1", "thread1")
+
+		val handle = manager.loadThumbnail(item) { callbackInvoked = true }
+		handle.cancel()
+
+		taskToRun?.run()
+
+		assertFalse(callbackInvoked)
 		assertNull(manager.getCached("thread1", "msg1"))
 	}
 
