@@ -83,6 +83,7 @@ class ConnectorConversationRemoteRefreshTest {
 		override fun getRecentThreads(limit: Int) = emptyList<ConnectorThread>()
 
 		val messages = mutableListOf<ConnectorMessage>()
+		var downloadFailure: ConnectorFileDownloader.FailureCause? = null
 
 		override fun getRecentMessageReadResult(threadId: String, limit: Int) =
 			ConnectorMessageReadResult.Success(messages.toList())
@@ -101,6 +102,7 @@ class ConnectorConversationRemoteRefreshTest {
 					ConnectorFileDownloader.FailureCause.CANCELLED,
 				)
 			}
+			downloadFailure?.let { return ConnectorFileDownloader.DownloadResult.Failure(it) }
 			val file = File(destinationDir, "downloaded_" + (attachment.fileName ?: "file"))
 			file.writeText("sample content")
 			return ConnectorFileDownloader.DownloadResult.Success(file)
@@ -1075,6 +1077,82 @@ class ConnectorConversationRemoteRefreshTest {
 			rejected = true
 		}
 		assertTrue("File outside matrix_attachments must be rejected by FileProvider", rejected)
+
+		destroy(activity)
+		drainWork()
+	}
+
+	private fun addReceivedImage(activity: ConnectorConversationActivity, messageId: String) {
+		fakeConnector.messages.add(
+			ConnectorMessage(
+				source = ConnectorSources.MATRIX,
+				threadId = "!room1:matrix.org",
+				messageId = messageId,
+				dateSeconds = 1000,
+				isOutgoing = false,
+				text = "photo.jpg",
+				sourceMessageOrder = 1000L,
+				type = ConnectorMessageType.PHOTO,
+				attachment = ConnectorAttachmentMetadata(
+					fileName = "photo.jpg",
+					mimeType = "image/jpeg",
+					size = 350L,
+					uri = "mxc://example.org/photo",
+				),
+			),
+		)
+		fakeConnector.activeSubscription?.onUpdate?.invoke()
+		drainWork()
+		assertEquals(ConnectorMessageType.PHOTO, messageState(activity).messages[0].type)
+	}
+
+	@Test
+	fun receivedImageTapDownloadsAndOpensInAppViewer() {
+		val activity = createActivity()
+		start(activity)
+		drainWork()
+		addReceivedImage(activity, "\$image_open")
+
+		activity.onFileClicked(messageState(activity).messages[0])
+		drainWork()
+
+		val item = messageState(activity).messages[0]
+		assertEquals(ConnectorDownloadState.DOWNLOADED, item.downloadState)
+		val started = shadowOf(activity).nextStartedActivity
+		assertEquals(
+			ConnectorImageViewerActivity::class.java.name,
+			started.component?.className,
+		)
+		assertEquals(
+			item.downloadedFile!!.absolutePath,
+			started.getStringExtra(ConnectorImageViewerActivity.EXTRA_IMAGE_PATH),
+		)
+
+		// Tapping again reopens the staged image in-app without an external chooser
+		activity.onFileClicked(item)
+		drainWork()
+		assertEquals(
+			ConnectorImageViewerActivity::class.java.name,
+			shadowOf(activity).nextStartedActivity.component?.className,
+		)
+
+		destroy(activity)
+		drainWork()
+	}
+
+	@Test
+	fun failedImageFetchMarksFailedWithoutOpeningViewer() {
+		val activity = createActivity()
+		start(activity)
+		drainWork()
+		addReceivedImage(activity, "\$image_fail")
+		fakeConnector.downloadFailure = ConnectorFileDownloader.FailureCause.NETWORK_ERROR
+
+		activity.onFileClicked(messageState(activity).messages[0])
+		drainWork()
+
+		assertEquals(ConnectorDownloadState.FAILED, messageState(activity).messages[0].downloadState)
+		assertNull(shadowOf(activity).nextStartedActivity)
 
 		destroy(activity)
 		drainWork()

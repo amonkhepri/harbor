@@ -20,6 +20,7 @@ import org.briarproject.briar.android.blog.RssFeedImportFragment;
 import org.briarproject.briar.android.blog.RssFeedManageFragment;
 import org.briarproject.briar.android.blog.WriteBlogPostActivity;
 import org.briarproject.briar.android.connector.ConnectorConversationActivity;
+import org.briarproject.briar.android.connector.ConnectorImageViewerActivity;
 import org.briarproject.briar.android.contact.ContactListFragment;
 import org.briarproject.briar.android.contact.add.nearby.AddNearbyContactActivity;
 import org.briarproject.briar.android.contact.add.nearby.AddNearbyContactErrorFragment;
@@ -118,6 +119,8 @@ public interface ActivityComponent {
 	void inject(ConversationActivity activity);
 
 	void inject(ConnectorConversationActivity activity);
+
+	void inject(ConnectorImageViewerActivity activity);
 
 	void inject(org.briarproject.briar.android.matrix.MatrixSetupActivity activity);
 

@@ -93,6 +93,15 @@ internal class ConnectorConversationAdapter(
 					)
 				}
 			}
+			val downloadStatus = when (item.downloadState) {
+				ConnectorDownloadState.DOWNLOADING ->
+					text.resources.getString(R.string.connector_file_downloading)
+				ConnectorDownloadState.DOWNLOADED ->
+					text.resources.getString(R.string.connector_file_downloaded)
+				ConnectorDownloadState.FAILED ->
+					text.resources.getString(R.string.connector_file_download_failed)
+				null, ConnectorDownloadState.IDLE -> null
+			}
 			if (isFile) {
 				val mimeType =
 					ConnectorFileMetadataFormatter.sanitizeMimeType(item.attachment?.mimeType)
@@ -106,15 +115,6 @@ internal class ConnectorConversationAdapter(
 					mimeType,
 					formattedSize,
 				)
-				val downloadStatus = when (item.downloadState) {
-					ConnectorDownloadState.DOWNLOADING ->
-						text.resources.getString(R.string.connector_file_downloading)
-					ConnectorDownloadState.DOWNLOADED ->
-						text.resources.getString(R.string.connector_file_downloaded)
-					ConnectorDownloadState.FAILED ->
-						text.resources.getString(R.string.connector_file_download_failed)
-					null, ConnectorDownloadState.IDLE -> null
-				}
 				val details = if (downloadStatus != null) {
 					if (baseDetails.isNotEmpty()) "$baseDetails • $downloadStatus" else downloadStatus
 				} else {
@@ -157,12 +157,17 @@ internal class ConnectorConversationAdapter(
 				fileName.text = ""
 				fileDetails.text = ""
 				fileDetails.visibility = View.GONE
-				text.text = if (reactionSummary == null) {
+				val photoText = if (item.type == ConnectorMessageType.PHOTO && downloadStatus != null) {
+					"$decoratedText • $downloadStatus"
+				} else {
 					decoratedText
+				}
+				text.text = if (reactionSummary == null) {
+					photoText
 				} else {
 					text.resources.getString(
 						R.string.connector_message_with_reactions,
-						decoratedText,
+						photoText,
 						reactionSummary,
 					)
 				}
@@ -188,6 +193,11 @@ internal class ConnectorConversationAdapter(
 				onRetrySendClicked != null
 			) {
 				itemView.setOnClickListener { onRetrySendClicked.invoke(item) }
+			} else if (item.type == ConnectorMessageType.PHOTO &&
+				item.attachment != null &&
+				onFileClicked != null
+			) {
+				itemView.setOnClickListener { onFileClicked.invoke(item) }
 			} else {
 				itemView.setOnClickListener(null)
 				itemView.isClickable = false

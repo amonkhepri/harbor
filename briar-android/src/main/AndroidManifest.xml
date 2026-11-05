@@ -166,6 +166,11 @@
 			android:exported="false"
 			android:label="@string/matrix_setup_title" />
 		<activity
+			android:name="org.briarproject.briar.android.connector.ConnectorImageViewerActivity"
+			android:exported="false"
+			android:label="@string/connector_message_photo"
+			android:theme="@style/BriarTheme.ActionBarOverlay" />
+		<activity
 			android:name="org.briarproject.briar.android.connector.ConnectorConversationActivity"
 			android:exported="false"
 			android:label="@string/connector_conversation_label"

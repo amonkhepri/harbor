@@ -1034,5 +1034,6 @@
 	<string name="connector_file_downloading">Downloading…</string>
 	<string name="connector_file_downloaded">Downloaded</string>
 	<string name="connector_file_download_failed">Download failed</string>
+	<string name="connector_image_open_failed">Could not display this image</string>
 	<string name="connector_typing_indicator">Typing…</string>
 </resources>

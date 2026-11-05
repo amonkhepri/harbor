@@ -1464,7 +1464,8 @@ class ConnectorConversationActivity : BriarActivity() {
 	}
 
 	internal fun onFileClicked(item: ConnectorConversationMessageItem) {
-		if (item.type != ConnectorMessageType.FILE) return
+		val isImage = item.type == ConnectorMessageType.PHOTO
+		if (item.type != ConnectorMessageType.FILE && !isImage) return
 		val echoId = item.stableId
 		if (item.downloadState == ConnectorDownloadState.DOWNLOADING) {
 			val existingFlag = activeDownloads.remove(echoId)
@@ -1477,7 +1478,7 @@ class ConnectorConversationActivity : BriarActivity() {
 		if (item.downloadState == ConnectorDownloadState.DOWNLOADED) {
 			val file = item.downloadedFile
 			if (file != null && file.exists()) {
-				openDownloadedFile(file, item.attachment?.mimeType)
+				if (isImage) openImageViewer(file) else openDownloadedFile(file, item.attachment?.mimeType)
 				return
 			}
 			submitMessageState(
@@ -1547,6 +1548,7 @@ class ConnectorConversationActivity : BriarActivity() {
 								result.file,
 							),
 						)
+						if (isImage) openImageViewer(result.file)
 					}
 					is ConnectorFileDownloader.DownloadResult.Failure -> {
 						downloadSubdir.deleteRecursively()
@@ -1565,6 +1567,11 @@ class ConnectorConversationActivity : BriarActivity() {
 				}
 			}
 		}
+	}
+
+	/** MX-056: images open in-app rather than through external viewers. */
+	internal fun openImageViewer(file: File) {
+		startActivity(ConnectorImageViewerActivity.intent(this, file))
 	}
 
 	internal fun openDownloadedFile(file: File, mimeType: String?) {
