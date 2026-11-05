@@ -37,6 +37,7 @@ import org.robolectric.annotation.Config
 import org.robolectric.shadows.ShadowLooper
 import java.io.File
 import java.util.ArrayDeque
+import java.util.UUID
 import java.util.concurrent.Executor
 
 @RunWith(RobolectricTestRunner::class)
@@ -643,5 +644,25 @@ class ConnectorConversationRemoteRefreshTest {
 		drainWork()
 		assertFalse(downloadedFile.exists())
 		assertFalse(parentDir.exists())
+	}
+
+	@Test
+	fun onCreateSweepsOrphanedDownloadsFromLostInMemoryState() {
+		val attachmentsRoot = File(RuntimeEnvironment.getApplication().cacheDir, "matrix_attachments")
+		val orphanedSubdir = File(attachmentsRoot, "orphaned_${UUID.randomUUID()}")
+		orphanedSubdir.mkdirs()
+		val orphanedFile = File(orphanedSubdir, "stale.pdf")
+		orphanedFile.writeText("stale data")
+		assertTrue(orphanedFile.exists())
+
+		val activity = createActivity()
+		start(activity)
+		drainWork()
+
+		assertFalse(orphanedFile.exists())
+		assertFalse(orphanedSubdir.exists())
+
+		destroy(activity)
+		drainWork()
 	}
 }

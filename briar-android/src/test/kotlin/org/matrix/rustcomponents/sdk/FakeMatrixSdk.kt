@@ -1,5 +1,8 @@
 package org.matrix.rustcomponents.sdk
 
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlin.coroutines.coroutineContext
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlin.coroutines.suspendCoroutine
@@ -738,6 +741,11 @@ class Client internal constructor(
 		tempDir: String?,
 	): MediaFileHandle {
 		FakeMatrixSdkState.getMediaFileCallCount++
+		coroutineContext[Job]?.invokeOnCompletion { cause ->
+			if (cause is CancellationException) {
+				FakeMatrixSdkState.downloadJobCancelled = true
+			}
+		}
 		FakeMatrixSdkState.onGetMediaFile?.invoke()
 		FakeMatrixSdkState.getMediaFileException?.let { throw it }
 		val dirPath = tempDir ?: System.getProperty("java.io.tmpdir") ?: "."
@@ -1017,6 +1025,7 @@ object FakeMatrixSdkState {
 	var onGetMediaFile: (suspend () -> Unit)? = null
 	var mediaContentToReturn: ByteArray? = null
 	var mediaFileHandleDestroyCount = 0
+	var downloadJobCancelled = false
 
 	fun reset() {
 		awaitBuilds()
@@ -1025,6 +1034,7 @@ object FakeMatrixSdkState {
 		onGetMediaFile = null
 		mediaContentToReturn = null
 		mediaFileHandleDestroyCount = 0
+		downloadJobCancelled = false
 		roomInfoCallCount = 0
 		roomInfoDestroyCount = 0
 		roomInfoFailureToThrow = null

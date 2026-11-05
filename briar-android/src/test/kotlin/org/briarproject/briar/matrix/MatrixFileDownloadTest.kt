@@ -16,6 +16,7 @@ import org.junit.Test
 import org.matrix.rustcomponents.sdk.ClientException
 import org.matrix.rustcomponents.sdk.FakeMatrixSdkState
 import java.io.File
+import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
@@ -141,6 +142,7 @@ class MatrixFileDownloadTest {
 		assertEquals(DownloadResult.Failure(FailureCause.CANCELLED), result)
 		val children = tempDir.listFiles() ?: emptyArray()
 		assertTrue(children.isEmpty())
+		assertTrue(FakeMatrixSdkState.downloadJobCancelled)
 	}
 
 	@Test
@@ -266,6 +268,53 @@ class MatrixFileDownloadTest {
 		client.logout()
 		assertFalse(file.exists())
 		assertFalse(tempDir.exists())
+	}
+
+	@Test
+	fun logoutAfterSessionRestoreCleansUpPersistedAttachmentDirectory() {
+		val storeDir = File(tempDir, "store_" + UUID.randomUUID())
+		storeDir.mkdirs()
+		val store = MatrixStoreConfiguration(storeDir, "matrix-sdk", ByteArray(32) { it.toByte() })
+		val client1 = ReflectiveMatrixHomeserverDiscoveryClient()
+		assertEquals(
+			MatrixAuthSession.RecoverableErrorDetail.NONE,
+			client1.login("https://matrix.example.org", "alice", "swordfish", store),
+		)
+
+		val attachmentDir = File(tempDir, "attachments_" + UUID.randomUUID())
+		attachmentDir.mkdirs()
+		FakeMatrixSdkState.mediaContentToReturn = "persisted attachment data".toByteArray()
+		val attachment = ConnectorAttachmentMetadata(
+			fileName = "persisted.bin",
+			mimeType = "application/octet-stream",
+			size = 25L,
+			uri = "mxc://example.org/persisted",
+		)
+		val result = client1.downloadFile(attachment, attachmentDir)
+		assertTrue(result is DownloadResult.Success)
+		val file = (result as DownloadResult.Success).file
+		assertTrue(file.exists())
+
+		// Simulate process death: client1 closed without logout; in-memory sets cleared
+		client1.close()
+
+		// A new client in a subsequent process restores the session from a copied cold store
+		val coldStoreDir = File(tempDir, "cold_store_" + UUID.randomUUID())
+		storeDir.copyRecursively(coldStoreDir, overwrite = true)
+		val coldStore =
+			MatrixStoreConfiguration(coldStoreDir, store.databaseName, store.copyEncryptionKey())
+
+		val client2 = ReflectiveMatrixHomeserverDiscoveryClient()
+		val restoreResult = client2.restore(coldStore)
+		assertTrue(
+			"Restore failed: $restoreResult",
+			restoreResult is MatrixLoginClient.RestoreResult.Restored,
+		)
+
+		// Logout in restored session sweeps durably recorded attachment directory
+		client2.logout()
+		assertFalse(file.exists())
+		assertFalse(attachmentDir.exists())
 	}
 
 	@Test

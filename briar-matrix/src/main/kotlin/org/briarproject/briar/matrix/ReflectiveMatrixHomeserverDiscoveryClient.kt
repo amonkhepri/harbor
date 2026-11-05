@@ -21,6 +21,7 @@ import org.briarproject.briar.api.connector.ConnectorRoomObserver.RoomSubscripti
 import org.briarproject.briar.api.connector.ConnectorTypingObserver.TypingSubscription
 import org.briarproject.briar.api.connector.ConnectorTypingSender.PreparedTyping
 import java.util.UUID
+import java.util.concurrent.CancellationException
 import java.util.concurrent.Executor
 import java.util.concurrent.Executors
 import java.io.ByteArrayInputStream
@@ -94,6 +95,9 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 	private var activeGeneration: Any? = null
 	private var activeStore: MatrixStoreConfiguration? = null
 	private val activeDownloadDirs = java.util.Collections.newSetFromMap(
+		java.util.concurrent.ConcurrentHashMap<File, Boolean>(),
+	)
+	private val activeAttachmentRoots = java.util.Collections.newSetFromMap(
 		java.util.concurrent.ConcurrentHashMap<File, Boolean>(),
 	)
 	private class TypingLane {
@@ -1696,8 +1700,29 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		}
 
 		if (!destinationDir.exists()) destinationDir.mkdirs()
+		val attachmentsRoot: File = if (destinationDir.name == "matrix_attachments") {
+			destinationDir
+		} else if (destinationDir.parentFile?.name == "matrix_attachments") {
+			destinationDir.parentFile!!
+		} else {
+			destinationDir
+		}
 		synchronized(activeDownloadDirs) {
 			activeDownloadDirs.add(destinationDir)
+		}
+		synchronized(activeAttachmentRoots) {
+			activeAttachmentRoots.add(attachmentsRoot)
+		}
+		val store = synchronized(this) { activeStore }
+		if (store != null) {
+			try {
+				val rootsFile = File(store.directory, "matrix_attachment_roots")
+				val rootPath = attachmentsRoot.absolutePath
+				val existing = if (rootsFile.exists()) rootsFile.readLines() else emptyList()
+				if (!existing.contains(rootPath)) {
+					rootsFile.appendText(rootPath + "\n")
+				}
+			} catch (ignored: Exception) {}
 		}
 
 		var mediaSource: Any? = null
@@ -1820,7 +1845,14 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			DownloadResult.Failure(FailureCause.CANCELLED)
 		} catch (e: Exception) {
 			cleanUpHandleAndFile(handle, downloadedFile, stagingDir)
-			DownloadResult.Failure(FailureCause.NETWORK_ERROR)
+			val isCancellation = e is CancellationException ||
+				e.javaClass.name == "kotlinx.coroutines.CancellationException" ||
+				isCancelled()
+			if (isCancellation) {
+				DownloadResult.Failure(FailureCause.CANCELLED)
+			} else {
+				DownloadResult.Failure(FailureCause.NETWORK_ERROR)
+			}
 		} finally {
 			try {
 				if (stagingDir.exists()) stagingDir.deleteRecursively()
@@ -1850,11 +1882,35 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			String::class.java,
 			Continuation::class.java,
 		)
+		val job: Any? = try {
+			val jobKt = Class.forName("kotlinx.coroutines.JobKt")
+			val jobMethod = jobKt.getMethod("Job", Class.forName("kotlinx.coroutines.Job"))
+			jobMethod.invoke(null, null)
+		} catch (e: Exception) {
+			null
+		}
+		val coroutineContext: CoroutineContext = if (job is CoroutineContext) {
+			job
+		} else {
+			EmptyCoroutineContext
+		}
+		fun cancelJob() {
+			if (job != null) {
+				try {
+					val cancelMethod = job.javaClass.methods.firstOrNull {
+						it.name == "cancel" &&
+							it.parameterTypes.size == 1 &&
+							CancellationException::class.java.isAssignableFrom(it.parameterTypes[0])
+					}
+					cancelMethod?.invoke(job, CancellationException("Media download cancelled"))
+				} catch (ignored: Exception) {}
+			}
+		}
 		val outcome = AtomicReference<Result<Any?>>()
 		val latch = CountDownLatch(1)
 		val claimed = AtomicBoolean(false)
 		val continuation = object : Continuation<Any?> {
-			override val context: CoroutineContext = EmptyCoroutineContext
+			override val context: CoroutineContext = coroutineContext
 			override fun resumeWith(result: Result<Any?>) {
 				outcome.set(result)
 				latch.countDown()
@@ -1873,12 +1929,24 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			continuation,
 		)
 		if (invokeResult !== COROUTINE_SUSPENDED) {
+			if (isCancelled()) {
+				cancelJob()
+				cleanUpHandle(invokeResult)
+				throw DownloadCancelledException()
+			}
+			val currentGen = synchronized(lifecycleLock) { activeGeneration }
+			if (currentGen !== generation) {
+				cancelJob()
+				cleanUpHandle(invokeResult)
+				throw DownloadLoggedOutException()
+			}
 			return invokeResult ?: throw SnapshotAdapterFailure()
 		}
 		val pollIntervalMs = 50L
 		val deadline = System.currentTimeMillis() + timeoutMs
 		while (true) {
 			if (isCancelled()) {
+				cancelJob()
 				if (claimed.compareAndSet(false, true)) {
 					cleanUpHandle(outcome.get()?.getOrNull())
 					throw DownloadCancelledException()
@@ -1886,6 +1954,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			}
 			val currentGen = synchronized(lifecycleLock) { activeGeneration }
 			if (currentGen !== generation) {
+				cancelJob()
 				if (claimed.compareAndSet(false, true)) {
 					cleanUpHandle(outcome.get()?.getOrNull())
 					throw DownloadLoggedOutException()
@@ -1895,6 +1964,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 				stagingDir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
 			}.getOrDefault(0L)
 			if (writtenBytes > ConnectorFileDownloader.MAX_FILE_BYTES) {
+				cancelJob()
 				if (claimed.compareAndSet(false, true)) {
 					cleanUpHandle(outcome.get()?.getOrNull())
 					throw DownloadOversizeException()
@@ -1904,6 +1974,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 				break
 			}
 			if (System.currentTimeMillis() >= deadline) {
+				cancelJob()
 				if (claimed.compareAndSet(false, true)) {
 					cleanUpHandle(outcome.get()?.getOrNull())
 					throw SnapshotAdapterFailure()
@@ -1994,6 +2065,29 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 				dir.deleteRecursively()
 			} catch (ignored: Exception) {}
 		}
+		val rootsToClear = synchronized(activeAttachmentRoots) {
+			val copy = ArrayList(activeAttachmentRoots)
+			activeAttachmentRoots.clear()
+			copy
+		}
+		val store = activeStore
+		if (store != null) {
+			try {
+				val rootsFile = File(store.directory, "matrix_attachment_roots")
+				if (rootsFile.exists()) {
+					rootsFile.readLines().forEach { line ->
+						val trimmed = line.trim()
+						if (trimmed.isNotEmpty()) rootsToClear.add(File(trimmed))
+					}
+					rootsFile.delete()
+				}
+			} catch (ignored: Exception) {}
+		}
+		for (root in rootsToClear) {
+			try {
+				root.deleteRecursively()
+			} catch (ignored: Exception) {}
+		}
 		activeStore = null
 		val client = loginClient ?: return
 		loginClient = null
@@ -2025,6 +2119,29 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		for (dir in downloadDirsToClear) {
 			try {
 				dir.deleteRecursively()
+			} catch (ignored: Exception) {}
+		}
+		val rootsToClear = synchronized(activeAttachmentRoots) {
+			val copy = ArrayList(activeAttachmentRoots)
+			activeAttachmentRoots.clear()
+			copy
+		}
+		val store = activeStore
+		if (store != null) {
+			try {
+				val rootsFile = File(store.directory, "matrix_attachment_roots")
+				if (rootsFile.exists()) {
+					rootsFile.readLines().forEach { line ->
+						val trimmed = line.trim()
+						if (trimmed.isNotEmpty()) rootsToClear.add(File(trimmed))
+					}
+					rootsFile.delete()
+				}
+			} catch (ignored: Exception) {}
+		}
+		for (root in rootsToClear) {
+			try {
+				root.deleteRecursively()
 			} catch (ignored: Exception) {}
 		}
 		val client = loginClient

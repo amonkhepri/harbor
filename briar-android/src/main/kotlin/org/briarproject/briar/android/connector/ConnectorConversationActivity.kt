@@ -125,6 +125,28 @@ class ConnectorConversationActivity : BriarActivity() {
 		const val THREAD_ID = "connector.THREAD_ID"
 		const val THREAD_TITLE = "connector.THREAD_TITLE"
 
+		internal const val ATTACHMENTS_DIR_NAME = "matrix_attachments"
+		private val activeProcessDownloadDirs = Collections.synchronizedSet(LinkedHashSet<File>())
+
+		/**
+		 * Sweeps [cacheDir]/matrix_attachments of any directories whose in-memory state was lost
+		 * (e.g. from an earlier killed process, unhandled teardown, or orphaned downloads).
+		 */
+		internal fun sweepOrphanedDownloads(cacheDir: File) {
+			try {
+				val attachmentsRoot = File(cacheDir, ATTACHMENTS_DIR_NAME)
+				if (!attachmentsRoot.exists()) return
+				val active = synchronized(activeProcessDownloadDirs) {
+					HashSet(activeProcessDownloadDirs)
+				}
+				attachmentsRoot.listFiles()?.forEach { fileOrDir ->
+					if (fileOrDir !in active) {
+						fileOrDir.deleteRecursively()
+					}
+				}
+			} catch (ignored: Exception) {}
+		}
+
 		private const val MESSAGE_LIMIT = 50
 		private const val REFRESH_INTERVAL_MS = 15_000L
 		internal const val TYPING_EXPIRY_MS = 5_000L
@@ -315,6 +337,7 @@ class ConnectorConversationActivity : BriarActivity() {
 
 	override fun onCreate(state: Bundle?) {
 		super.onCreate(state)
+		sweepOrphanedDownloads(cacheDir)
 		setContentView(R.layout.activity_connector_conversation)
 
 		val sourceId = intent.getStringExtra(SOURCE_ID)
@@ -888,6 +911,7 @@ class ConnectorConversationActivity : BriarActivity() {
 	internal fun getLoadFailedSnackbar(): Snackbar? = loadFailedSnackbar
 
 	internal fun startRoomObserver() {
+		sweepOrphanedDownloads(cacheDir)
 		val observer = connector as? ConnectorRoomObserver ?: return
 		if (!hasValidThreadId(threadId)) return
 		stopRoomObserver()
@@ -1356,9 +1380,10 @@ class ConnectorConversationActivity : BriarActivity() {
 			messageState.updateDownloadState(echoId, ConnectorDownloadState.DOWNLOADING, null),
 		)
 
-		val downloadSubdir = File(File(cacheDir, "matrix_attachments"), UUID.randomUUID().toString())
+		val downloadSubdir = File(File(cacheDir, ATTACHMENTS_DIR_NAME), UUID.randomUUID().toString())
 		downloadSubdir.mkdirs()
 		ownedDownloadDirs.add(downloadSubdir)
+		activeProcessDownloadDirs.add(downloadSubdir)
 
 		ioExecutor.execute {
 			val result = activeDownloader.downloadFile(
@@ -1375,6 +1400,7 @@ class ConnectorConversationActivity : BriarActivity() {
 				}
 				downloadSubdir.deleteRecursively()
 				ownedDownloadDirs.remove(downloadSubdir)
+				activeProcessDownloadDirs.remove(downloadSubdir)
 				return@execute
 			}
 			runOnUiThread {
@@ -1384,6 +1410,7 @@ class ConnectorConversationActivity : BriarActivity() {
 					}
 					downloadSubdir.deleteRecursively()
 					ownedDownloadDirs.remove(downloadSubdir)
+					activeProcessDownloadDirs.remove(downloadSubdir)
 					return@runOnUiThread
 				}
 				when (result) {
@@ -1399,6 +1426,7 @@ class ConnectorConversationActivity : BriarActivity() {
 					is ConnectorFileDownloader.DownloadResult.Failure -> {
 						downloadSubdir.deleteRecursively()
 						ownedDownloadDirs.remove(downloadSubdir)
+						activeProcessDownloadDirs.remove(downloadSubdir)
 						if (result.cause != ConnectorFileDownloader.FailureCause.CANCELLED) {
 							submitMessageState(
 								messageState.updateDownloadState(
@@ -1421,6 +1449,7 @@ class ConnectorConversationActivity : BriarActivity() {
 			copy
 		}
 		for (dir in dirs) {
+			activeProcessDownloadDirs.remove(dir)
 			try {
 				dir.deleteRecursively()
 			} catch (ignored: Exception) {}
@@ -1429,6 +1458,7 @@ class ConnectorConversationActivity : BriarActivity() {
 
 	internal fun clearAttachmentDirectory() {
 		clearOwnedDownloads()
+		sweepOrphanedDownloads(cacheDir)
 	}
 }
 
