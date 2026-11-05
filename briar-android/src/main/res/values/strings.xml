@@ -175,6 +175,9 @@
 	<string name="connector_conversation_send">Send</string>
 	<string name="connector_conversation_send_failed">Message could not be sent</string>
 	<string name="connector_conversation_delete_failed">Message could not be deleted</string>
+	<string name="connector_conversation_edit">Edit message</string>
+	<string name="connector_conversation_edit_save">Save</string>
+	<string name="connector_conversation_edit_failed">Message could not be edited</string>
 	<string name="connector_conversation_find">Search loaded messages</string>
 	<string name="connector_conversation_find_hint">Search loaded messages</string>
 	<string name="connector_conversation_find_count">%1$d/%2$d</string>

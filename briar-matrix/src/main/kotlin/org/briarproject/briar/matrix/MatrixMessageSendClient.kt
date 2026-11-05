@@ -65,4 +65,11 @@ interface MatrixMessageSendClient {
 	 * throwing -- when no session is retained, [roomId] cannot be found, or the SDK call fails.
 	 */
 	fun deleteMessage(roomId: String, eventId: String): Boolean
+
+	/**
+	 * Replaces the body of the user's own text event [eventId] in [roomId] with [text] (MX-058).
+	 * Returns false -- never throwing -- when the event is not an own editable text message or
+	 * the SDK call fails. Unsupported clients fail closed.
+	 */
+	fun editTextMessage(roomId: String, eventId: String, text: String): Boolean = false
 }

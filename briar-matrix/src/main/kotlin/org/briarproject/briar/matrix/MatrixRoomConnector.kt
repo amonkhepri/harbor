@@ -8,6 +8,7 @@ import java.io.File
 import org.briarproject.briar.api.connector.ConnectorImageSender
 import org.briarproject.briar.api.connector.ConnectorMessage
 import org.briarproject.briar.api.connector.ConnectorMessageDeleter
+import org.briarproject.briar.api.connector.ConnectorMessageEditor
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult.LoadFailed
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult.Success
@@ -68,6 +69,7 @@ class MatrixRoomConnector @JvmOverloads constructor(
 	ConnectorRoomLeaver,
 	ConnectorTypingSender,
 	ConnectorMessageDeleter,
+	ConnectorMessageEditor,
 	ConnectorRoomObserver,
 	ConnectorTypingObserver,
 	ConnectorThumbnailLoader {
@@ -185,6 +187,11 @@ class MatrixRoomConnector @JvmOverloads constructor(
 	override fun deleteMessage(threadId: String, messageId: String): Boolean {
 		if (!isAuthorized()) return false
 		return messageSendClient.deleteMessage(threadId, messageId)
+	}
+
+	override fun editTextMessage(threadId: String, messageId: String, text: String): Boolean {
+		if (!isAuthorized() || text.isBlank()) return false
+		return messageSendClient.editTextMessage(threadId, messageId, text)
 	}
 
 	override fun observeRoom(
