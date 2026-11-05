@@ -82,7 +82,8 @@ class ConnectorImageViewerActivity : BriarActivity() {
 	override fun onCreate(state: Bundle?) {
 		super.onCreate(state)
 		setContentView(R.layout.activity_connector_image_viewer)
-		supportActionBar?.setDisplayHomeAsUpEnabled(true)
+		// The overlay theme has no window action bar, so supply the toolbar for title and up.
+		setUpCustomToolbar(false)
 		val photoView: PhotoView = findViewById(R.id.connectorImageView)
 		val progress: ProgressBar = findViewById(R.id.connectorImageProgress)
 		val error: TextView = findViewById(R.id.connectorImageError)

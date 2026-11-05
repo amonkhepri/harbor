@@ -1,8 +1,13 @@
 package org.briarproject.briar.android.connector
 
 import android.app.Application
+import android.view.ContextThemeWrapper
+import android.view.LayoutInflater
+import androidx.appcompat.widget.Toolbar
 import androidx.arch.core.executor.testing.InstantTaskExecutorRule
+import org.briarproject.briar.R
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Rule
@@ -79,5 +84,15 @@ class ConnectorImageViewerActivityTest {
 		assertSame(ImageState.Loading, viewer.image.value)
 		viewer.load(file) { pending.add(it) }
 		assertEquals(1, pending.size)
+	}
+
+	@Test
+	fun viewerLayoutProvidesToolbarForTitleAndUpNavigation() {
+		val themed = ContextThemeWrapper(
+			RuntimeEnvironment.getApplication(),
+			R.style.BriarTheme_ActionBarOverlay,
+		)
+		val root = LayoutInflater.from(themed).inflate(R.layout.activity_connector_image_viewer, null)
+		assertNotNull(root.findViewById<Toolbar>(R.id.toolbar))
 	}
 }

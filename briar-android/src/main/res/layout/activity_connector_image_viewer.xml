@@ -27,4 +27,13 @@
 		android:textColor="@android:color/white"
 		android:visibility="gone" />
 
+	<com.google.android.material.appbar.MaterialToolbar
+		android:id="@+id/toolbar"
+		style="@style/BriarToolbar"
+		android:layout_width="match_parent"
+		android:layout_height="wrap_content"
+		android:layout_gravity="top"
+		android:background="@color/msg_status_bubble_background"
+		android:fitsSystemWindows="true" />
+
 </FrameLayout>
