@@ -3,6 +3,7 @@ package org.briarproject.briar.android.connector
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.ImageView
 import android.widget.TextView
 import androidx.recyclerview.widget.DiffUtil.ItemCallback
 import androidx.recyclerview.widget.ListAdapter
@@ -15,6 +16,7 @@ internal class ConnectorConversationAdapter(
 	private val onDeleteClicked: ((ConnectorConversationMessageItem) -> Unit)? = null,
 	private val onRetrySendClicked: ((ConnectorConversationMessageItem) -> Unit)? = null,
 	private val onFileClicked: ((ConnectorConversationMessageItem) -> Unit)? = null,
+	var thumbnailManager: ConnectorThumbnailManager? = null,
 ) : ListAdapter<
 	ConnectorConversationMessageItem,
 	ConnectorConversationAdapter.MessageViewHolder,
@@ -26,11 +28,22 @@ internal class ConnectorConversationAdapter(
 			parent,
 			false,
 		)
-		return MessageViewHolder(view, onDeleteClicked, onRetrySendClicked, onFileClicked)
+		return MessageViewHolder(
+			view,
+			onDeleteClicked,
+			onRetrySendClicked,
+			onFileClicked,
+			thumbnailManager,
+		)
 	}
 
 	override fun onBindViewHolder(holder: MessageViewHolder, position: Int) {
 		holder.bind(getItem(position))
+	}
+
+	override fun onViewRecycled(holder: MessageViewHolder) {
+		holder.recycle()
+		super.onViewRecycled(holder)
 	}
 
 	class MessageViewHolder(
@@ -38,11 +51,14 @@ internal class ConnectorConversationAdapter(
 		private val onDeleteClicked: ((ConnectorConversationMessageItem) -> Unit)? = null,
 		private val onRetrySendClicked: ((ConnectorConversationMessageItem) -> Unit)? = null,
 		private val onFileClicked: ((ConnectorConversationMessageItem) -> Unit)? = null,
+		private val thumbnailManager: ConnectorThumbnailManager? = null,
 	) : RecyclerView.ViewHolder(itemView) {
 		constructor(itemView: View, onDeleteClicked: ((ConnectorConversationMessageItem) -> Unit)?) :
-			this(itemView, onDeleteClicked, null, null)
+			this(itemView, onDeleteClicked, null, null, null)
 		private val text: TextView =
 			itemView.findViewById(R.id.connectorMessageText)
+		private val thumbnail: ImageView =
+			itemView.findViewById(R.id.connectorMessageThumbnail)
 		private val direction: TextView =
 			itemView.findViewById(R.id.connectorMessageDirection)
 		private val date: TextView =
@@ -54,7 +70,53 @@ internal class ConnectorConversationAdapter(
 		private val fileDetails: TextView =
 			itemView.findViewById(R.id.connectorFileDetails)
 
+		private var boundThreadId: String? = null
+		private var boundMessageId: String? = null
+		private var thumbnailCancellation: Cancellable? = null
+
+		fun recycle() {
+			thumbnailCancellation?.cancel()
+			thumbnailCancellation = null
+			boundThreadId = null
+			boundMessageId = null
+			thumbnail.setImageDrawable(null)
+			thumbnail.visibility = View.GONE
+		}
+
 		fun bind(item: ConnectorConversationMessageItem) {
+			thumbnailCancellation?.cancel()
+			thumbnailCancellation = null
+			boundThreadId = item.connectorThreadId
+			boundMessageId = item.connectorMessageId
+
+			if (item.type == ConnectorMessageType.PHOTO) {
+				thumbnail.visibility = View.VISIBLE
+				val manager = thumbnailManager
+				if (manager != null) {
+					val cached = manager.getCached(item.connectorThreadId, item.connectorMessageId)
+					if (cached != null) {
+						thumbnail.setImageBitmap(cached)
+					} else {
+						thumbnail.setImageDrawable(null)
+						thumbnailCancellation = manager.loadThumbnail(item) { bitmap ->
+							if (boundThreadId == item.connectorThreadId &&
+								boundMessageId == item.connectorMessageId
+							) {
+								if (bitmap != null) {
+									thumbnail.setImageBitmap(bitmap)
+								} else {
+									thumbnail.setImageResource(R.drawable.ic_image_broken)
+								}
+							}
+						}
+					}
+				} else {
+					thumbnail.setImageDrawable(null)
+				}
+			} else {
+				thumbnail.visibility = View.GONE
+				thumbnail.setImageDrawable(null)
+			}
 			val isFile = item.type == ConnectorMessageType.FILE
 			val fileFallbackName = text.resources.getString(R.string.connector_message_file)
 			val safeFileName = if (isFile) {

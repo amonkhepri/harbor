@@ -19,6 +19,7 @@ import org.briarproject.briar.api.connector.ConnectorSource
 import org.briarproject.briar.api.connector.ConnectorSources
 import org.briarproject.briar.api.connector.ConnectorTextSender
 import org.briarproject.briar.api.connector.ConnectorThread
+import org.briarproject.briar.api.connector.ConnectorThumbnailLoader
 import org.briarproject.briar.api.connector.ConnectorUnreadMarker
 import org.briarproject.briar.api.connector.ConnectorTypingSender
 import org.briarproject.briar.api.connector.ConnectorTypingObserver
@@ -68,7 +69,8 @@ class MatrixRoomConnector @JvmOverloads constructor(
 	ConnectorTypingSender,
 	ConnectorMessageDeleter,
 	ConnectorRoomObserver,
-	ConnectorTypingObserver {
+	ConnectorTypingObserver,
+	ConnectorThumbnailLoader {
 	override val source: ConnectorSource = ConnectorSources.MATRIX
 
 	override fun isEnabled(): Boolean = true
@@ -196,6 +198,17 @@ class MatrixRoomConnector @JvmOverloads constructor(
 		onTypingChanged: (isTyping: Boolean) -> Unit,
 	): ConnectorTypingObserver.TypingSubscription? =
 		if (isAuthorized()) messageSnapshotClient.observeTyping(threadId, onTypingChanged) else null
+
+	override fun loadThumbnail(
+		threadId: String,
+		messageId: String,
+		attachment: ConnectorAttachmentMetadata?,
+		maxWidth: Int,
+		maxHeight: Int,
+	): ByteArray? {
+		if (!isAuthorized() || attachment == null) return null
+		return messageSnapshotClient.getMediaThumbnail(attachment, maxWidth, maxHeight)
+	}
 
 	override fun downloadFile(
 		threadId: String,

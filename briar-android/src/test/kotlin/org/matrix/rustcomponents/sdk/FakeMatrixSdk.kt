@@ -461,6 +461,9 @@ class ThumbnailInfo
 class MediaSource(val url: String = "", val json: String = "") {
 	fun url(): String = url
 	fun toJson(): String = json.ifEmpty { url }
+	fun destroy() {
+		FakeMatrixSdkState.mediaSourceDestroyCount++
+	}
 
 	companion object {
 		@JvmStatic
@@ -731,6 +734,16 @@ class Client internal constructor(
 	fun close() {
 		FakeMatrixSdkState.onDispose?.invoke()
 		FakeMatrixSdkState.clientCloseCount++
+	}
+
+	suspend fun getMediaThumbnail(source: MediaSource, width: ULong, height: ULong): ByteArray {
+		FakeMatrixSdkState.getMediaThumbnailCallCount++
+		FakeMatrixSdkState.lastMediaThumbnailSource = source
+		FakeMatrixSdkState.lastMediaThumbnailWidth = width
+		FakeMatrixSdkState.lastMediaThumbnailHeight = height
+		FakeMatrixSdkState.onGetMediaThumbnail?.invoke()
+		FakeMatrixSdkState.mediaThumbnailFailureToThrow?.let { throw it }
+		return FakeMatrixSdkState.mediaThumbnailToReturn ?: ByteArray(0)
 	}
 
 	suspend fun getMediaFile(
@@ -1026,9 +1039,25 @@ object FakeMatrixSdkState {
 	var mediaContentToReturn: ByteArray? = null
 	var mediaFileHandleDestroyCount = 0
 	var downloadJobCancelled = false
+	var getMediaThumbnailCallCount = 0
+	var mediaSourceDestroyCount = 0
+	var mediaThumbnailFailureToThrow: Throwable? = null
+	var mediaThumbnailToReturn: ByteArray? = null
+	var lastMediaThumbnailSource: MediaSource? = null
+	var lastMediaThumbnailWidth: ULong? = null
+	var lastMediaThumbnailHeight: ULong? = null
+	var onGetMediaThumbnail: (() -> Unit)? = null
 
 	fun reset() {
 		awaitBuilds()
+		getMediaThumbnailCallCount = 0
+		mediaSourceDestroyCount = 0
+		mediaThumbnailFailureToThrow = null
+		mediaThumbnailToReturn = null
+		lastMediaThumbnailSource = null
+		lastMediaThumbnailWidth = null
+		lastMediaThumbnailHeight = null
+		onGetMediaThumbnail = null
 		getMediaFileCallCount = 0
 		getMediaFileException = null
 		onGetMediaFile = null

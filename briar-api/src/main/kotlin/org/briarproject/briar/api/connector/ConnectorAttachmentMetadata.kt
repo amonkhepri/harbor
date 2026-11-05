@@ -6,4 +6,6 @@ data class ConnectorAttachmentMetadata(
 	val size: Long? = null,
 	val uri: String? = null,
 	val mediaSourceJson: String? = null,
+	val thumbnailUri: String? = null,
+	val thumbnailSourceJson: String? = null,
 )
