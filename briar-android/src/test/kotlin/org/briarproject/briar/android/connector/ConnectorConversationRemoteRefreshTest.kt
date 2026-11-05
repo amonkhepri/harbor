@@ -2,11 +2,15 @@ package org.briarproject.briar.android.connector
 
 import android.app.Application
 import android.content.Intent
+import android.content.pm.ActivityInfo
+import android.content.pm.ResolveInfo
 import android.view.View
 import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.ImageButton
+import android.widget.TextView
 import androidx.arch.core.executor.testing.InstantTaskExecutorRule
+import androidx.core.content.FileProvider
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import org.briarproject.briar.R
@@ -26,6 +30,7 @@ import org.briarproject.briar.api.connector.ReadOnlyConnector
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -33,6 +38,7 @@ import org.junit.runner.RunWith
 import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.shadows.ShadowLooper
 import java.io.File
@@ -45,6 +51,24 @@ import java.util.concurrent.Executor
 class ConnectorConversationRemoteRefreshTest {
 
 	@get:Rule val rule = InstantTaskExecutorRule()
+
+	@org.junit.Before
+	fun setUp() {
+		resetFileProviderCache()
+	}
+
+	@org.junit.After
+	fun tearDown() {
+		resetFileProviderCache()
+	}
+
+	private fun resetFileProviderCache() {
+		try {
+			val sCacheField = FileProvider::class.java.getDeclaredField("sCache")
+			sCacheField.isAccessible = true
+			(sCacheField.get(null) as? MutableMap<*, *>)?.clear()
+		} catch (ignored: Exception) {}
+	}
 
 	private class FakeConnector :
 		ReadOnlyConnector,
@@ -661,6 +685,213 @@ class ConnectorConversationRemoteRefreshTest {
 
 		assertFalse(orphanedFile.exists())
 		assertFalse(orphanedSubdir.exists())
+
+		destroy(activity)
+		drainWork()
+	}
+
+	@Test
+	fun downloadedFileClickOpensFileSafelyWithContentUriAndReadGrant() {
+		val activity = createActivity()
+		start(activity)
+		drainWork()
+
+		val fileMessage = ConnectorMessage(
+			source = ConnectorSources.MATRIX,
+			threadId = "!room1:matrix.org",
+			messageId = "\$file_open_safe",
+			dateSeconds = 1000,
+			isOutgoing = false,
+			text = "open_safe.pdf",
+			sourceMessageOrder = 1000L,
+			type = ConnectorMessageType.FILE,
+			attachment = ConnectorAttachmentMetadata(
+				fileName = "open_safe.pdf",
+				mimeType = "application/pdf",
+				size = 350L,
+				uri = "mxc://example.org/safe_pdf",
+			),
+		)
+		fakeConnector.messages.add(fileMessage)
+		fakeConnector.activeSubscription?.onUpdate?.invoke()
+		drainWork()
+
+		// First click downloads the file
+		val item = messageState(activity).messages[0]
+		activity.onFileClicked(item)
+		drainWork()
+
+		assertEquals(ConnectorDownloadState.DOWNLOADED, messageState(activity).messages[0].downloadState)
+		val downloadedFile = messageState(activity).messages[0].downloadedFile
+		assertNotNull(downloadedFile)
+		assertTrue(downloadedFile!!.exists())
+
+		// Register a compatible viewer in shadow PackageManager
+		val shadowPackageManager = shadowOf(activity.packageManager)
+		val resolveInfo = ResolveInfo().apply {
+			activityInfo = ActivityInfo().apply {
+				packageName = "org.example.pdfviewer"
+				name = "org.example.pdfviewer.ViewerActivity"
+			}
+		}
+		val authority = "${activity.packageName}.connector.fileprovider"
+		val expectedContentUri = FileProvider.getUriForFile(activity, authority, downloadedFile)
+		val filterIntent = Intent(Intent.ACTION_VIEW).apply {
+			setDataAndType(expectedContentUri, "application/pdf")
+			addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+		}
+		shadowPackageManager.addResolveInfoForIntent(filterIntent, resolveInfo)
+
+		// Second click on downloaded item directs open action
+		val downloadedItem = messageState(activity).messages[0]
+		activity.onFileClicked(downloadedItem)
+		drainWork()
+
+		val started = shadowOf(activity).nextStartedActivity
+		assertNotNull(started)
+		assertEquals(Intent.ACTION_CHOOSER, started.action)
+		assertEquals(downloadedFile.name, started.getStringExtra(Intent.EXTRA_TITLE))
+
+		val innerIntent = started.getParcelableExtra<Intent>(Intent.EXTRA_INTENT)
+		assertNotNull(innerIntent)
+		assertEquals(Intent.ACTION_VIEW, innerIntent!!.action)
+		assertEquals(expectedContentUri, innerIntent.data)
+		assertEquals("content", innerIntent.data?.scheme)
+		assertEquals("application/pdf", innerIntent.type)
+		assertTrue((innerIntent.flags and Intent.FLAG_GRANT_READ_URI_PERMISSION) != 0)
+		assertEquals(0, innerIntent.flags and Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+
+		destroy(activity)
+		drainWork()
+	}
+
+	@Test
+	fun absentViewerProducesRecoverableSnackbarWithoutActivityLaunch() {
+		val activity = createActivity()
+		start(activity)
+		drainWork()
+
+		val fileMessage = ConnectorMessage(
+			source = ConnectorSources.MATRIX,
+			threadId = "!room1:matrix.org",
+			messageId = "\$file_absent_viewer",
+			dateSeconds = 1000,
+			isOutgoing = false,
+			text = "no_viewer.xyz",
+			sourceMessageOrder = 1000L,
+			type = ConnectorMessageType.FILE,
+			attachment = ConnectorAttachmentMetadata(
+				fileName = "no_viewer.xyz",
+				mimeType = "application/x-custom-unknown",
+				size = 350L,
+				uri = "mxc://example.org/unknown_type",
+			),
+		)
+		fakeConnector.messages.add(fileMessage)
+		fakeConnector.activeSubscription?.onUpdate?.invoke()
+		drainWork()
+
+		activity.onFileClicked(messageState(activity).messages[0])
+		drainWork()
+		assertEquals(ConnectorDownloadState.DOWNLOADED, messageState(activity).messages[0].downloadState)
+
+		// Click downloaded file when no external viewer handles the intent
+		activity.onFileClicked(messageState(activity).messages[0])
+		drainWork()
+		ShadowLooper.idleMainLooper()
+
+		assertNull(shadowOf(activity).nextStartedActivity)
+		val listField = ConnectorConversationActivity::class.java.getDeclaredField("list").apply { isAccessible = true }
+		val list = listField.get(activity) as BriarRecyclerView
+		val root = list.parent as FrameLayout
+		val snackbarText = root.findViewById<TextView>(com.google.android.material.R.id.snackbar_text)?.text?.toString()
+		assertEquals(activity.getString(R.string.error_start_activity), snackbarText)
+		assertEquals(ConnectorDownloadState.DOWNLOADED, messageState(activity).messages[0].downloadState)
+
+		destroy(activity)
+		drainWork()
+	}
+
+	@Test
+	fun downloadedFileClickReDownloadsIfCachedFileWasDeleted() {
+		val activity = createActivity()
+		start(activity)
+		drainWork()
+
+		val fileMessage = ConnectorMessage(
+			source = ConnectorSources.MATRIX,
+			threadId = "!room1:matrix.org",
+			messageId = "\$file_redownload",
+			dateSeconds = 1000,
+			isOutgoing = false,
+			text = "redownload.pdf",
+			sourceMessageOrder = 1000L,
+			type = ConnectorMessageType.FILE,
+			attachment = ConnectorAttachmentMetadata(
+				fileName = "redownload.pdf",
+				mimeType = "application/pdf",
+				size = 350L,
+				uri = "mxc://example.org/redownload",
+			),
+		)
+		fakeConnector.messages.add(fileMessage)
+		fakeConnector.activeSubscription?.onUpdate?.invoke()
+		drainWork()
+
+		activity.onFileClicked(messageState(activity).messages[0])
+		drainWork()
+
+		assertEquals(ConnectorDownloadState.DOWNLOADED, messageState(activity).messages[0].downloadState)
+		val file = messageState(activity).messages[0].downloadedFile!!
+		assertTrue(file.exists())
+
+		// Simulate external cache policy deletion
+		file.delete()
+		assertFalse(file.exists())
+
+		// Clicking item re-initiates download
+		activity.onFileClicked(messageState(activity).messages[0])
+		assertEquals(ConnectorDownloadState.DOWNLOADING, messageState(activity).messages[0].downloadState)
+		drainWork()
+
+		assertEquals(ConnectorDownloadState.DOWNLOADED, messageState(activity).messages[0].downloadState)
+		val newFile = messageState(activity).messages[0].downloadedFile
+		assertNotNull(newFile)
+		assertTrue(newFile!!.exists())
+
+		destroy(activity)
+		drainWork()
+	}
+
+	@Test
+	fun executableFileRefusesToLaunchSafely() {
+		val activity = createActivity()
+		start(activity)
+		drainWork()
+
+		assertTrue(ConnectorConversationActivity.isExecutable("application/vnd.android.package-archive", "apk"))
+		assertTrue(ConnectorConversationActivity.isExecutable(null, "apk"))
+		assertTrue(ConnectorConversationActivity.isExecutable(null, "dex"))
+		assertTrue(ConnectorConversationActivity.isExecutable(null, "so"))
+		assertTrue(ConnectorConversationActivity.isExecutable(null, "sh"))
+		assertFalse(ConnectorConversationActivity.isExecutable("application/pdf", "pdf"))
+		assertFalse(ConnectorConversationActivity.isExecutable("image/png", "png"))
+
+		val apkDir = File(File(activity.cacheDir, "matrix_attachments"), "apk_test")
+		apkDir.mkdirs()
+		val apkFile = File(apkDir, "malicious.apk")
+		apkFile.writeText("fake apk binary")
+		assertTrue(apkFile.exists())
+
+		activity.openDownloadedFile(apkFile, "application/vnd.android.package-archive")
+		ShadowLooper.idleMainLooper()
+		assertNull(shadowOf(activity).nextStartedActivity)
+
+		val listField = ConnectorConversationActivity::class.java.getDeclaredField("list").apply { isAccessible = true }
+		val list = listField.get(activity) as BriarRecyclerView
+		val root = list.parent as FrameLayout
+		val snackbarText = root.findViewById<TextView>(com.google.android.material.R.id.snackbar_text)?.text?.toString()
+		assertEquals(activity.getString(R.string.error_start_activity), snackbarText)
 
 		destroy(activity)
 		drainWork()

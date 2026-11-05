@@ -544,6 +544,16 @@
 				android:value="org.briarproject.briar.android.settings.SettingsActivity" />
 		</activity>
 
+		<provider
+			android:name="androidx.core.content.FileProvider"
+			android:authorities="${applicationId}.connector.fileprovider"
+			android:exported="false"
+			android:grantUriPermissions="true">
+			<meta-data
+				android:name="android.support.FILE_PROVIDER_PATHS"
+				android:resource="@xml/connector_file_paths" />
+		</provider>
+
 	</application>
 
 	<queries>
@@ -564,6 +574,10 @@
 		</intent>
 		<intent>
 			<action android:name="android.settings.CHANNEL_NOTIFICATION_SETTINGS" />
+		</intent>
+		<intent>
+			<action android:name="android.intent.action.VIEW" />
+			<data android:mimeType="*/*" />
 		</intent>
 	</queries>
 

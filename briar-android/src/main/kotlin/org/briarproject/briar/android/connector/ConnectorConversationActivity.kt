@@ -1,6 +1,8 @@
 package org.briarproject.briar.android.connector
 
 import android.app.Dialog
+import android.content.ActivityNotFoundException
+import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.os.Parcelable
@@ -17,6 +19,7 @@ import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.ActionBar
+import androidx.core.content.FileProvider
 import androidx.fragment.app.DialogFragment
 import androidx.lifecycle.ViewModelProvider
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -38,6 +41,7 @@ import org.briarproject.briar.android.view.BriarRecyclerView
 import org.briarproject.briar.api.connector.ConnectorFileDownloader
 import org.briarproject.briar.api.connector.ConnectorFileSender
 import java.io.File
+import java.util.Locale
 import org.briarproject.briar.api.connector.ConnectorImageSender
 import org.briarproject.briar.api.connector.ConnectorMessageDeleter
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult
@@ -127,6 +131,15 @@ class ConnectorConversationActivity : BriarActivity() {
 
 		internal const val ATTACHMENTS_DIR_NAME = "matrix_attachments"
 		private val activeProcessDownloadDirs = Collections.synchronizedSet(LinkedHashSet<File>())
+
+		private val EXECUTABLE_EXTENSIONS = setOf("apk", "dex", "so", "sh", "exe", "bat", "bin")
+		private val EXECUTABLE_MIME_TYPES = setOf("application/vnd.android.package-archive")
+
+		internal fun isExecutable(mimeType: String?, extension: String): Boolean {
+			if (extension in EXECUTABLE_EXTENSIONS) return true
+			if (mimeType != null && mimeType.lowercase(Locale.ROOT) in EXECUTABLE_MIME_TYPES) return true
+			return false
+		}
 
 		/**
 		 * Sweeps [cacheDir]/matrix_attachments of any directories whose in-memory state was lost
@@ -1354,10 +1367,15 @@ class ConnectorConversationActivity : BriarActivity() {
 			)
 			return
 		}
-		if (item.downloadState == ConnectorDownloadState.DOWNLOADED &&
-			item.downloadedFile?.exists() == true
-		) {
-			return
+		if (item.downloadState == ConnectorDownloadState.DOWNLOADED) {
+			val file = item.downloadedFile
+			if (file != null && file.exists()) {
+				openDownloadedFile(file, item.attachment?.mimeType)
+				return
+			}
+			submitMessageState(
+				messageState.updateDownloadState(echoId, ConnectorDownloadState.IDLE, null),
+			)
 		}
 
 		val activeDownloader = connector as? ConnectorFileDownloader ?: return
@@ -1439,6 +1457,60 @@ class ConnectorConversationActivity : BriarActivity() {
 					}
 				}
 			}
+		}
+	}
+
+	internal fun openDownloadedFile(file: File, mimeType: String?) {
+		if (!file.exists()) return
+		try {
+			val authority = "${applicationContext.packageName}.connector.fileprovider"
+			val uri = FileProvider.getUriForFile(this, authority, file)
+			val rawMime = ConnectorFileMetadataFormatter.sanitizeMimeType(mimeType)
+			val ext = file.extension.lowercase(Locale.ROOT)
+			val type = if (!rawMime.isNullOrEmpty() && rawMime != "*/*") {
+				rawMime
+			} else if (ext.isNotEmpty()) {
+				MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "*/*"
+			} else {
+				"*/*"
+			}
+
+			if (isExecutable(type, ext)) {
+				BriarSnackbarBuilder()
+					.make(list, R.string.error_start_activity, Snackbar.LENGTH_SHORT)
+					.show()
+				return
+			}
+
+			val intent = Intent(Intent.ACTION_VIEW).apply {
+				setDataAndType(uri, type)
+				addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+			}
+			if (intent.resolveActivity(packageManager) == null &&
+				packageManager.queryIntentActivities(intent, 0).isEmpty()
+			) {
+				BriarSnackbarBuilder()
+					.make(list, R.string.error_start_activity, Snackbar.LENGTH_SHORT)
+					.show()
+				return
+			}
+
+			val chooser = Intent.createChooser(intent, file.name).apply {
+				addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+			}
+			startActivity(chooser)
+		} catch (e: ActivityNotFoundException) {
+			BriarSnackbarBuilder()
+				.make(list, R.string.error_start_activity, Snackbar.LENGTH_SHORT)
+				.show()
+		} catch (e: SecurityException) {
+			BriarSnackbarBuilder()
+				.make(list, R.string.error_start_activity, Snackbar.LENGTH_SHORT)
+				.show()
+		} catch (e: Exception) {
+			BriarSnackbarBuilder()
+				.make(list, R.string.error_start_activity, Snackbar.LENGTH_SHORT)
+				.show()
 		}
 	}
 
