@@ -896,4 +896,35 @@ class ConnectorConversationRemoteRefreshTest {
 		destroy(activity)
 		drainWork()
 	}
+
+	@Test
+	fun fileProviderOnlyExposesMatrixAttachmentsDirectory() {
+		val activity = createActivity()
+		start(activity)
+		drainWork()
+
+		val authority = "${activity.packageName}.connector.fileprovider"
+		val matrixAttachmentsDir = File(activity.cacheDir, "matrix_attachments")
+		matrixAttachmentsDir.mkdirs()
+		val validFile = File(matrixAttachmentsDir, "test.pdf")
+		validFile.writeText("valid")
+		val validUri = FileProvider.getUriForFile(activity, authority, validFile)
+		assertNotNull(validUri)
+		assertEquals("content", validUri.scheme)
+		assertTrue(validUri.path?.contains("matrix_attachments") == true)
+
+		// Files outside matrix_attachments (e.g. root cacheDir) must NOT be addressable
+		val outsideFile = File(activity.cacheDir, "private_cache_file.txt")
+		outsideFile.writeText("private")
+		var rejected = false
+		try {
+			FileProvider.getUriForFile(activity, authority, outsideFile)
+		} catch (e: IllegalArgumentException) {
+			rejected = true
+		}
+		assertTrue("File outside matrix_attachments must be rejected by FileProvider", rejected)
+
+		destroy(activity)
+		drainWork()
+	}
 }
