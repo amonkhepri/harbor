@@ -528,4 +528,64 @@ class ConnectorConversationRemoteRefreshTest {
 			messageState(activity).messages[0].downloadState,
 		)
 	}
+
+	@Test
+	fun missingSizeFileClickFailsImmediatelyWithoutStartingDownload() {
+		val activity = createActivity()
+		start(activity)
+		drainWork()
+
+		val fileMessage = ConnectorMessage(
+			source = ConnectorSources.MATRIX,
+			threadId = "!room1:matrix.org",
+			messageId = "\$file_null_size",
+			dateSeconds = 1000,
+			isOutgoing = false,
+			text = "unknown.pdf",
+			sourceMessageOrder = 1000L,
+			type = ConnectorMessageType.FILE,
+			attachment = ConnectorAttachmentMetadata(
+				fileName = "unknown.pdf",
+				mimeType = "application/pdf",
+				size = null,
+				uri = "mxc://example.org/unknown",
+			),
+		)
+		fakeConnector.messages.add(fileMessage)
+		fakeConnector.activeSubscription?.onUpdate?.invoke()
+		drainWork()
+
+		val item = messageState(activity).messages[0]
+		activity.onFileClicked(item)
+
+		assertEquals(
+			ConnectorDownloadState.FAILED,
+			messageState(activity).messages[0].downloadState,
+		)
+
+		val activeDownloadsField = ConnectorConversationActivity::class.java.getDeclaredField(
+			"activeDownloads",
+		).apply {
+			isAccessible = true
+		}
+		val activeDownloads = activeDownloadsField.get(activity) as Map<*, *>
+		assertTrue(activeDownloads.isEmpty())
+	}
+
+	@Test
+	fun clearAttachmentDirectoryDeletesFilesOnTeardown() {
+		val activity = createActivity()
+		start(activity)
+		drainWork()
+
+		val tempDir = File(activity.cacheDir, "matrix_attachments")
+		tempDir.mkdirs()
+		val dummyFile = File(tempDir, "persisted_test.pdf")
+		dummyFile.writeText("hello")
+		assertTrue(dummyFile.exists())
+
+		activity.clearAttachmentDirectory()
+		assertFalse(dummyFile.exists())
+		assertFalse(tempDir.exists())
+	}
 }

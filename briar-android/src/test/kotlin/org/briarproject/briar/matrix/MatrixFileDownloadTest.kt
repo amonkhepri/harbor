@@ -225,6 +225,70 @@ class MatrixFileDownloadTest {
 	}
 
 	@Test
+	fun missingOrInvalidSizeOversizeFailsClosedWithoutCreatingFile() {
+		val client = loggedInClient()
+		val nullSizeAttachment = ConnectorAttachmentMetadata(
+			fileName = "unknown.zip",
+			mimeType = "application/zip",
+			size = null,
+			uri = "mxc://example.org/unknown",
+		)
+		val nullResult = client.downloadFile(nullSizeAttachment, tempDir)
+		assertEquals(DownloadResult.Failure(FailureCause.OVERSIZE), nullResult)
+		assertEquals(0, FakeMatrixSdkState.getMediaFileCallCount)
+
+		val negativeSizeAttachment = ConnectorAttachmentMetadata(
+			fileName = "invalid.zip",
+			mimeType = "application/zip",
+			size = -10L,
+			uri = "mxc://example.org/invalid",
+		)
+		val negResult = client.downloadFile(negativeSizeAttachment, tempDir)
+		assertEquals(DownloadResult.Failure(FailureCause.OVERSIZE), negResult)
+		assertEquals(0, FakeMatrixSdkState.getMediaFileCallCount)
+	}
+
+	@Test
+	fun logoutCleansUpDestinationDirectory() {
+		val client = loggedInClient()
+		FakeMatrixSdkState.mediaContentToReturn = "disposable".toByteArray()
+		val attachment = ConnectorAttachmentMetadata(
+			fileName = "disposable.bin",
+			mimeType = "application/octet-stream",
+			size = 10L,
+			uri = "mxc://example.org/disp",
+		)
+		val result = client.downloadFile(attachment, tempDir)
+		assertTrue(result is DownloadResult.Success)
+		val file = (result as DownloadResult.Success).file
+		assertTrue(file.exists())
+
+		client.logout()
+		assertFalse(file.exists())
+		assertFalse(tempDir.exists())
+	}
+
+	@Test
+	fun mediaSourceStaticMethodsFallbackWorksWithoutCompanion() {
+		val client = loggedInClient()
+		val createMediaSourceMethod = ReflectiveMatrixHomeserverDiscoveryClient::class.java
+			.getDeclaredMethod(
+				"createMediaSource",
+				Class::class.java,
+				String::class.java,
+				String::class.java,
+			).apply { isAccessible = true }
+
+		val result = createMediaSourceMethod.invoke(
+			client,
+			Class.forName("org.briarproject.briar.matrix.StaticTestMediaSourceFactoryKt"),
+			null,
+			"mxc://example.org/static",
+		)
+		assertEquals("source:mxc://example.org/static", result)
+	}
+
+	@Test
 	fun downloadedOversizeCleansUpAndLeavesNoPartialFile() {
 		val client = loggedInClient()
 		val oversizedBytes = ByteArray((ConnectorFileDownloader.MAX_FILE_BYTES + 1024L).toInt())

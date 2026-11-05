@@ -1,6 +1,7 @@
 package org.briarproject.briar.android.connector
 
 import android.app.Dialog
+import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.os.Parcelable
@@ -17,6 +18,7 @@ import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.ActionBar
+import androidx.core.content.FileProvider
 import androidx.fragment.app.DialogFragment
 import androidx.lifecycle.ViewModelProvider
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -312,6 +314,7 @@ class ConnectorConversationActivity : BriarActivity() {
 
 	override fun onCreate(state: Bundle?) {
 		super.onCreate(state)
+		clearAttachmentDirectory()
 		setContentView(R.layout.activity_connector_conversation)
 
 		val sourceId = intent.getStringExtra(SOURCE_ID)
@@ -596,6 +599,7 @@ class ConnectorConversationActivity : BriarActivity() {
 		stopTypingObserver()
 		retryCoalescer.cancel()
 		resetActiveDownloads()
+		clearAttachmentDirectory()
 		loadFailedSnackbar?.dismiss()
 		loadFailedSnackbar = null
 		lastLoadFailed = false
@@ -1326,13 +1330,22 @@ class ConnectorConversationActivity : BriarActivity() {
 			)
 			return
 		}
-		if (item.downloadState == ConnectorDownloadState.DOWNLOADED) return
+		if (item.downloadState == ConnectorDownloadState.DOWNLOADED) {
+			val file = item.downloadedFile
+			if (file != null && file.exists()) {
+				openDownloadedFile(file, item.attachment?.mimeType)
+				return
+			}
+			submitMessageState(
+				messageState.updateDownloadState(echoId, ConnectorDownloadState.IDLE, null),
+			)
+		}
 
 		val activeDownloader = connector as? ConnectorFileDownloader ?: return
 		val attachment = item.attachment ?: return
 
 		val declaredSize = attachment.size
-		if (declaredSize != null && declaredSize > ConnectorFileDownloader.MAX_FILE_BYTES) {
+		if (declaredSize == null || declaredSize <= 0L || declaredSize > ConnectorFileDownloader.MAX_FILE_BYTES) {
 			submitMessageState(
 				messageState.updateDownloadState(echoId, ConnectorDownloadState.FAILED, null),
 			)
@@ -1392,6 +1405,29 @@ class ConnectorConversationActivity : BriarActivity() {
 				}
 			}
 		}
+	}
+
+	internal fun openDownloadedFile(file: File, mimeType: String?) {
+		try {
+			val authority = "${applicationContext.packageName}.connector.fileprovider"
+			val uri = FileProvider.getUriForFile(this, authority, file)
+			val type = ConnectorFileMetadataFormatter.sanitizeMimeType(mimeType)?.ifEmpty { "*/*" } ?: "*/*"
+			val intent = Intent(Intent.ACTION_VIEW).apply {
+				setDataAndType(uri, type)
+				addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+			}
+			startActivity(Intent.createChooser(intent, file.name))
+		} catch (e: Exception) {
+			BriarSnackbarBuilder()
+				.make(list, R.string.error_start_activity, Snackbar.LENGTH_SHORT)
+				.show()
+		}
+	}
+
+	internal fun clearAttachmentDirectory() {
+		try {
+			File(cacheDir, "matrix_attachments").deleteRecursively()
+		} catch (ignored: Exception) {}
 	}
 }
 

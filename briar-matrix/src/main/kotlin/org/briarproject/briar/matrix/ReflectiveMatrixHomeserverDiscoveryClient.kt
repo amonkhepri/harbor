@@ -93,6 +93,9 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 	private val lifecycleLock = Any()
 	private var activeGeneration: Any? = null
 	private var activeStore: MatrixStoreConfiguration? = null
+	private val activeDownloadDirs = java.util.Collections.newSetFromMap(
+		java.util.concurrent.ConcurrentHashMap<File, Boolean>()
+	)
 	private class TypingLane {
 		val queue = java.util.ArrayDeque<() -> Unit>()
 		var busy = false
@@ -1679,7 +1682,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		if (isCancelled()) return DownloadResult.Failure(FailureCause.CANCELLED)
 
 		val declaredSize = attachment.size
-		if (declaredSize != null && declaredSize > ConnectorFileDownloader.MAX_FILE_BYTES) {
+		if (declaredSize == null || declaredSize <= 0L || declaredSize > ConnectorFileDownloader.MAX_FILE_BYTES) {
 			return DownloadResult.Failure(FailureCause.OVERSIZE)
 		}
 
@@ -1690,6 +1693,9 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		}
 
 		if (!destinationDir.exists()) destinationDir.mkdirs()
+		synchronized(activeDownloadDirs) {
+			activeDownloadDirs.add(destinationDir)
+		}
 
 		var mediaSource: Any? = null
 		var handle: Any? = null
@@ -1717,19 +1723,19 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 
 			val isCurrent = synchronized(lifecycleLock) { activeGeneration === generation }
 			if (!isCurrent) {
-				cleanUpHandleAndFile(handle, null)
+				cleanUpHandleAndFile(handle, null, destinationDir)
 				return DownloadResult.Failure(FailureCause.LOGGED_OUT)
 			}
 
 			if (isCancelled()) {
-				cleanUpHandleAndFile(handle, null)
+				cleanUpHandleAndFile(handle, null, destinationDir)
 				return DownloadResult.Failure(FailureCause.CANCELLED)
 			}
 
 			val pathMethod = rawHandle.javaClass.getMethod("path")
 			val path = pathMethod.invoke(rawHandle) as? String
 			if (path == null) {
-				cleanUpHandleAndFile(handle, null)
+				cleanUpHandleAndFile(handle, null, destinationDir)
 				return DownloadResult.Failure(FailureCause.NETWORK_ERROR)
 			}
 
@@ -1743,29 +1749,29 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 
 			val canonicalTempPath = tempFile.canonicalPath
 			if (!canonicalTempPath.startsWith(destPrefix)) {
-				cleanUpHandleAndFile(handle, null)
+				cleanUpHandleAndFile(handle, null, destinationDir)
 				return DownloadResult.Failure(FailureCause.NETWORK_ERROR)
 			}
 
 			if (isCancelled()) {
-				cleanUpHandleAndFile(handle, null)
+				cleanUpHandleAndFile(handle, null, destinationDir)
 				return DownloadResult.Failure(FailureCause.CANCELLED)
 			}
 
 			if (!tempFile.exists()) {
-				cleanUpHandleAndFile(handle, null)
+				cleanUpHandleAndFile(handle, null, destinationDir)
 				return DownloadResult.Failure(FailureCause.NETWORK_ERROR)
 			}
 
 			if (tempFile.length() > ConnectorFileDownloader.MAX_FILE_BYTES) {
-				cleanUpHandleAndFile(handle, null)
+				cleanUpHandleAndFile(handle, null, destinationDir)
 				return DownloadResult.Failure(FailureCause.OVERSIZE)
 			}
 
 			val targetFile = File(destinationDir, "${UUID.randomUUID()}_$safeFileName")
 			val canonicalTargetPath = targetFile.canonicalPath
 			if (!canonicalTargetPath.startsWith(destPrefix)) {
-				cleanUpHandleAndFile(handle, null)
+				cleanUpHandleAndFile(handle, null, destinationDir)
 				return DownloadResult.Failure(FailureCause.NETWORK_ERROR)
 			}
 
@@ -1774,34 +1780,37 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			}
 			val persisted = (persistMethod?.invoke(rawHandle, targetFile.absolutePath) as? Boolean) == true
 			if (!persisted || !targetFile.exists()) {
-				cleanUpHandleAndFile(handle, targetFile)
+				cleanUpHandleAndFile(handle, targetFile, destinationDir)
 				return DownloadResult.Failure(FailureCause.NETWORK_ERROR)
 			}
 			downloadedFile = targetFile
 
 			if (isCancelled()) {
-				cleanUpHandleAndFile(handle, targetFile)
+				cleanUpHandleAndFile(handle, targetFile, destinationDir)
 				return DownloadResult.Failure(FailureCause.CANCELLED)
 			}
 
 			if (targetFile.length() > ConnectorFileDownloader.MAX_FILE_BYTES) {
-				cleanUpHandleAndFile(handle, targetFile)
+				cleanUpHandleAndFile(handle, targetFile, destinationDir)
 				return DownloadResult.Failure(FailureCause.OVERSIZE)
 			}
 
 			DownloadResult.Success(targetFile)
 		} catch (e: DownloadCancelledException) {
-			cleanUpHandleAndFile(handle, downloadedFile)
+			cleanUpHandleAndFile(handle, downloadedFile, destinationDir)
 			DownloadResult.Failure(FailureCause.CANCELLED)
 		} catch (e: DownloadLoggedOutException) {
-			cleanUpHandleAndFile(handle, downloadedFile)
+			cleanUpHandleAndFile(handle, downloadedFile, destinationDir)
 			DownloadResult.Failure(FailureCause.LOGGED_OUT)
+		} catch (e: DownloadOversizeException) {
+			cleanUpHandleAndFile(handle, downloadedFile, destinationDir)
+			DownloadResult.Failure(FailureCause.OVERSIZE)
 		} catch (e: InterruptedException) {
 			Thread.currentThread().interrupt()
-			cleanUpHandleAndFile(handle, downloadedFile)
+			cleanUpHandleAndFile(handle, downloadedFile, destinationDir)
 			DownloadResult.Failure(FailureCause.CANCELLED)
 		} catch (e: Exception) {
-			cleanUpHandleAndFile(handle, downloadedFile)
+			cleanUpHandleAndFile(handle, downloadedFile, destinationDir)
 			DownloadResult.Failure(FailureCause.NETWORK_ERROR)
 		} finally {
 			closeQuietly(handle)
@@ -1870,6 +1879,15 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 					throw DownloadLoggedOutException()
 				}
 			}
+			val writtenBytes = runCatching {
+				destinationDir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+			}.getOrDefault(0L)
+			if (writtenBytes > ConnectorFileDownloader.MAX_FILE_BYTES) {
+				if (claimed.compareAndSet(false, true)) {
+					cleanUpHandle(outcome.get()?.getOrNull())
+					throw DownloadOversizeException()
+				}
+			}
 			if (latch.await(pollIntervalMs, TimeUnit.MILLISECONDS)) {
 				break
 			}
@@ -1897,11 +1915,24 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		destroyQuietly(handle)
 	}
 
-	private fun cleanUpHandleAndFile(handle: Any?, file: File?) {
+	private fun cleanUpHandleAndFile(handle: Any?, file: File?, destinationDir: File? = null) {
 		try {
 			if (file != null && file.exists()) file.delete()
 		} catch (ignored: Exception) {}
+		if (destinationDir != null) {
+			cleanUpDestinationDir(destinationDir)
+		}
 		cleanUpHandle(handle)
+	}
+
+	private fun cleanUpDestinationDir(dir: File) {
+		try {
+			dir.listFiles()?.forEach { child ->
+				if (child.isDirectory && child.name.startsWith("tempdir_")) {
+					child.deleteRecursively()
+				}
+			}
+		} catch (ignored: Exception) {}
 	}
 
 	private fun createMediaSource(mediaSourceClass: Class<*>, json: String?, url: String?): Any? {
@@ -1910,28 +1941,29 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		} catch (e: Exception) {
 			null
 		}
-		val target = companion ?: mediaSourceClass
+		val methods = if (companion != null) companion.javaClass.methods else mediaSourceClass.methods
+		val receiver = companion
 		if (!json.isNullOrBlank()) {
-			val fromJson = target.javaClass.methods.firstOrNull {
+			val fromJson = methods.firstOrNull {
 				it.name == "fromJson" &&
 					it.parameterTypes.size == 1 &&
 					it.parameterTypes[0] == String::class.java
 			}
 			if (fromJson != null) {
 				try {
-					return fromJson.invoke(target, json)
+					return fromJson.invoke(receiver, json)
 				} catch (ignored: Exception) {}
 			}
 		}
 		if (!url.isNullOrBlank()) {
-			val fromUrl = target.javaClass.methods.firstOrNull {
+			val fromUrl = methods.firstOrNull {
 				it.name == "fromUrl" &&
 					it.parameterTypes.size == 1 &&
 					it.parameterTypes[0] == String::class.java
 			}
 			if (fromUrl != null) {
 				try {
-					return fromUrl.invoke(target, url)
+					return fromUrl.invoke(receiver, url)
 				} catch (ignored: Exception) {}
 			}
 		}
@@ -1950,6 +1982,16 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		}
 		cancelRoomSubscriptions(detached)
 		cancelTypingSubscriptions(detachedTyping)
+		val downloadDirsToClear = synchronized(activeDownloadDirs) {
+			val copy = ArrayList(activeDownloadDirs)
+			activeDownloadDirs.clear()
+			copy
+		}
+		for (dir in downloadDirsToClear) {
+			try {
+				dir.deleteRecursively()
+			} catch (ignored: Exception) {}
+		}
 		activeStore = null
 		val client = loginClient ?: return
 		loginClient = null
@@ -1973,6 +2015,16 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		}
 		cancelRoomSubscriptions(detached)
 		cancelTypingSubscriptions(detachedTyping)
+		val downloadDirsToClear = synchronized(activeDownloadDirs) {
+			val copy = ArrayList(activeDownloadDirs)
+			activeDownloadDirs.clear()
+			copy
+		}
+		for (dir in downloadDirsToClear) {
+			try {
+				dir.deleteRecursively()
+			} catch (ignored: Exception) {}
+		}
 		val client = loginClient
 		loginClient = null
 		activeStore = null
@@ -2160,6 +2212,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 	private class SnapshotAdapterFailure : Exception()
 	private class DownloadCancelledException : Exception()
 	private class DownloadLoggedOutException : Exception()
+	private class DownloadOversizeException : Exception()
 
 	/**
 	 * [claimStore] found its directory already in [openedStores]. Kept distinct from a

@@ -460,7 +460,9 @@ class MediaSource(val url: String = "", val json: String = "") {
 	fun toJson(): String = json.ifEmpty { url }
 
 	companion object {
+		@JvmStatic
 		fun fromJson(json: String): MediaSource = MediaSource(url = json, json = json)
+		@JvmStatic
 		fun fromUrl(url: String): MediaSource = MediaSource(url = url, json = url)
 	}
 }
