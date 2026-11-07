@@ -219,12 +219,14 @@ class Timeline {
 		FakeMatrixSdkState.toggleReactionFailureToThrow?.let { throw it }
 		FakeMatrixSdkState.onToggleReaction?.invoke()
 		val eventId = (eventOrTransactionId as? EventOrTransactionId.EventId)?.eventId
+		var added = true
 		if (eventId != null && FakeMatrixSdkState.eventItemsById.containsKey(eventId)) {
 			val existingSpec = FakeMatrixSdkState.eventItemsById[eventId]!!
 			val currentUserId = FakeMatrixSdkState.currentUserId ?: "@alice:matrix.example.org"
 			val existingReaction = existingSpec.reactions.firstOrNull { it.key == key }
 			val hasOwn = existingReaction?.senders?.any { it.senderId == currentUserId } == true
 			val newReactions = if (hasOwn) {
+				added = false
 				val updatedSenders = existingReaction!!.senders.filter { it.senderId != currentUserId }
 				if (updatedSenders.isEmpty()) {
 					existingSpec.reactions.filter { it.key != key }
@@ -234,6 +236,7 @@ class Timeline {
 					}
 				}
 			} else {
+				added = true
 				if (existingReaction != null) {
 					existingSpec.reactions.map {
 						if (it.key == key) it.copy(senders = it.senders + ReactionSenderData(currentUserId)) else it
@@ -251,15 +254,23 @@ class Timeline {
 					continuation.invokeOnCancellation {
 						FakeMatrixSdkState.toggleReactionCancelled = true
 					}
-					FakeMatrixSdkState.onToggleReactionContinuation?.invoke(continuation)
+					if (FakeMatrixSdkState.onToggleReactionContinuation != null) {
+						FakeMatrixSdkState.onToggleReactionContinuation?.invoke(continuation)
+					} else {
+						continuation.resume(added)
+					}
 				}
 			} else {
 				return kotlin.coroutines.suspendCoroutine { continuation ->
-					FakeMatrixSdkState.onToggleReactionContinuation?.invoke(continuation)
+					if (FakeMatrixSdkState.onToggleReactionContinuation != null) {
+						FakeMatrixSdkState.onToggleReactionContinuation?.invoke(continuation)
+					} else {
+						continuation.resume(added)
+					}
 				}
 			}
 		}
-		return true
+		return added
 	}
 
 	fun sendFile(params: UploadParameters, info: FileInfo): SendAttachmentJoinHandle {

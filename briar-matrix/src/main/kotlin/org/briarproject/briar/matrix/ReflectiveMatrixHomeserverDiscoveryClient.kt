@@ -1112,15 +1112,18 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		if (reaction.isBlank() || eventId.isBlank()) return false
 		val flightKey = "$roomId:$eventId:$reaction"
 		if (!inFlightReactions.add(flightKey)) return false
-		return toggleReactionInternal(roomId, eventId, reaction, flightKey)
+		return toggleReactionInternal(roomId, eventId, reaction, flightKey) != null
 	}
 
 	/**
 	 * MX-060: removes the user's own [reaction] on [eventId] in [roomId].
 	 * Tracks SDK ownership to verify that the logged-in user actually added [reaction] to this
 	 * event before invoking the SDK's suspend `Timeline.toggleReaction(EventOrTransactionId, String)`.
-	 * If the event cannot be found, the user does not own the reaction, or the SDK call fails,
-	 * returns false -- never throwing.
+	 * Reuses the opened timeline to avoid closing and reopening before toggle. If the state changes
+	 * between lookup and toggle so that toggle adds the reaction (returning true) instead of
+	 * removing it (returning false), recovers by toggling again to remove the newly added reaction
+	 * and returns false without claiming success. If the event cannot be found, the user does not own
+	 * the reaction, or the SDK call fails, returns false -- never throwing.
 	 */
 	override fun removeReaction(roomId: String, eventId: String, reaction: String): Boolean {
 		if (reaction.isBlank() || eventId.isBlank() || roomId.isBlank()) return false
@@ -1144,7 +1147,6 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 
 		var room: Any? = null
 		var timeline: Any? = null
-		var item: Any? = null
 		val ownsReaction = try {
 			val loadedRoom =
 				client.javaClass.getMethod("getRoom", String::class.java).invoke(client, roomId)
@@ -1160,8 +1162,11 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 				arrayOf(eventId),
 				::destroyQuietly,
 			)
-			item = loadedItem
-			hasOwnReaction(loadedItem, reaction, currentUserId)
+			try {
+				hasOwnReaction(loadedItem, reaction, currentUserId)
+			} finally {
+				destroyQuietly(loadedItem)
+			}
 		} catch (e: InterruptedException) {
 			Thread.currentThread().interrupt()
 			false
@@ -1169,18 +1174,30 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			false
 		} catch (e: LinkageError) {
 			false
-		} finally {
-			destroyQuietly(item)
-			closeQuietly(timeline)
-			closeQuietly(room)
 		}
 
 		if (!ownsReaction) {
+			closeQuietly(timeline)
+			closeQuietly(room)
 			inFlightReactions.remove(flightKey)
 			return false
 		}
 
-		return toggleReactionInternal(roomId, eventId, reaction, flightKey)
+		// Reuse the open room and timeline directly to avoid closing and reopening.
+		val added = toggleReactionInternal(roomId, eventId, reaction, flightKey, room, timeline)
+		if (added == false) {
+			// According to pinned SDK (26.08.05), toggleReaction returns false when removed.
+			return true
+		}
+		if (added == true) {
+			// State changed between lookup and toggle: toggle added the reaction instead of removing it.
+			// Recover by toggling again to remove the newly added reaction, then report failure.
+			if (inFlightReactions.add(flightKey)) {
+				toggleReactionInternal(roomId, eventId, reaction, flightKey)
+			}
+			return false
+		}
+		return false
 	}
 
 	private fun hasOwnReaction(item: Any, reaction: String, currentUserId: String): Boolean {
@@ -1210,12 +1227,14 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		eventId: String,
 		reaction: String,
 		flightKey: String,
-	): Boolean {
+		existingRoom: Any? = null,
+		existingTimeline: Any? = null,
+	): Boolean? {
 		val completed = AtomicBoolean(false)
 		val outcome = AtomicReference<Result<Any?>>()
 		val latch = CountDownLatch(1)
-		val roomRef = AtomicReference<Any?>()
-		val timelineRef = AtomicReference<Any?>()
+		val roomRef = AtomicReference<Any?>(existingRoom)
+		val timelineRef = AtomicReference<Any?>(existingTimeline)
 
 		val job: Any? = try {
 			val jobKt = Class.forName("kotlinx.coroutines.JobKt")
@@ -1261,13 +1280,15 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		var suspended = false
 		return try {
 			synchronized(this) {
-				val client = loginClient ?: return false
-				val loadedRoom =
+				val client = loginClient ?: return null
+				val loadedRoom = existingRoom ?: (
 					client.javaClass.getMethod("getRoom", String::class.java).invoke(client, roomId)
 						?: throw SnapshotAdapterFailure()
+				)
 				roomRef.set(loadedRoom)
-				val loadedTimeline =
+				val loadedTimeline = existingTimeline ?: (
 					invokeCloseableValue(loadedRoom, "timeline", emptyArray(), emptyArray(), ::closeQuietly)
+				)
 				timelineRef.set(loadedTimeline)
 
 				val eventIdClass = Class.forName(EVENT_ID_CLASS_NAME)
@@ -1290,8 +1311,9 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 				if (invokeResult === COROUTINE_SUSPENDED) {
 					suspended = true
 				} else {
-					complete(Result.success(invokeResult))
-					return true
+					val added = invokeResult as? Boolean ?: true
+					complete(Result.success(added))
+					return added
 				}
 			}
 
@@ -1300,24 +1322,25 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			} catch (e: InterruptedException) {
 				Thread.currentThread().interrupt()
 				cancelJob()
-				return false
+				return null
 			}
 
 			if (!completedInTime) {
 				cancelJob()
-				return false
+				return null
 			}
 
-			val result = outcome.get() ?: return false
-			result.isSuccess
+			val result = outcome.get() ?: return null
+			if (result.isFailure) return null
+			result.getOrNull() as? Boolean
 		} catch (e: InterruptedException) {
 			Thread.currentThread().interrupt()
 			cancelJob()
-			false
+			null
 		} catch (e: Exception) {
-			false
+			null
 		} catch (e: LinkageError) {
-			false
+			null
 		} finally {
 			if (!suspended) {
 				complete(null)

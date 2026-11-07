@@ -369,6 +369,69 @@ class ReflectiveMatrixHomeserverDiscoveryClientReactionTest {
 		assertFalse("Bob's reaction must have isOwn=false for Alice", heart.isOwn)
 	}
 
+	@Test
+	fun `removeReaction recovers and returns false when reaction state changes before toggle`() {
+		val client = loggedInClient()
+		val alice = "@alice:matrix.example.org"
+		val bob = "@bob:matrix.example.org"
+
+		FakeMatrixSdkState.eventItemsById = mapOf(
+			EVENT to FakeTimelineEventSpec(
+				identifier = EventOrTransactionId.EventId(EVENT),
+				sender = bob,
+				body = "Hello",
+				timestamp = 1000uL,
+				reactions = listOf(
+					Reaction("👍", listOf(ReactionSenderData(alice))),
+				),
+			),
+		)
+
+		// Simulate another session removing alice's reaction between lookup and toggle
+		FakeMatrixSdkState.onToggleReaction = {
+			FakeMatrixSdkState.onToggleReaction = null
+			val spec = FakeMatrixSdkState.eventItemsById[EVENT]!!
+			FakeMatrixSdkState.eventItemsById = mapOf(
+				EVENT to spec.copy(reactions = emptyList()),
+			)
+		}
+
+		// When toggle executes, reaction is missing, so toggle adds it (returning true).
+		// removeReaction must detect added outcome, recover by toggling again, and report false.
+		assertFalse(client.removeReaction(ROOM, EVENT, "👍"))
+		// Initial toggle (which added) + recovery toggle (which removed)
+		assertEquals(2, FakeMatrixSdkState.toggleReactionCallCount)
+
+		// Final state must not retain alice's reaction
+		val updatedEvent = FakeMatrixSdkState.eventItemsById[EVENT]!!
+		val thumbsUp = updatedEvent.reactions.firstOrNull { it.key == "👍" }
+		org.junit.Assert.assertNull("Alice's reaction must be cleaned up by recovery toggle", thumbsUp)
+	}
+
+	@Test
+	fun `removeReaction reports failure when SDK toggle fails`() {
+		val client = loggedInClient()
+		val alice = "@alice:matrix.example.org"
+
+		FakeMatrixSdkState.eventItemsById = mapOf(
+			EVENT to FakeTimelineEventSpec(
+				identifier = EventOrTransactionId.EventId(EVENT),
+				sender = "@bob:matrix.example.org",
+				body = "Hello",
+				timestamp = 1000uL,
+				reactions = listOf(
+					Reaction("👍", listOf(ReactionSenderData(alice))),
+				),
+			),
+		)
+
+		FakeMatrixSdkState.toggleReactionFailureToThrow =
+			org.matrix.rustcomponents.sdk.ClientException.Generic("sdk failure", "error")
+
+		assertFalse(client.removeReaction(ROOM, EVENT, "👍"))
+		assertEquals(1, FakeMatrixSdkState.toggleReactionCallCount)
+	}
+
 	private fun loggedInClient() = ReflectiveMatrixHomeserverDiscoveryClient().also {
 		FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec(ROOM))
 		assertEquals(NONE, it.login("https://matrix.example.org", "alice", "swordfish"))

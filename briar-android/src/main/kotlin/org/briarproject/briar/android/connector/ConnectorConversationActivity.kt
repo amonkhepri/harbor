@@ -1505,16 +1505,14 @@ class ConnectorConversationActivity : BriarActivity() {
 		val sender = reactionSender
 		val remover = reactionRemover
 		if (reaction.isBlank() || connectorMessageId.isBlank()) return
-		if (isRemove && remover == null && sender == null) return
+		if (isRemove && remover == null) return
 		if (!isRemove && sender == null) return
 		val flightKey = "$targetThreadId:$connectorMessageId:$reaction"
 		if (!inFlightReactions.add(flightKey)) return
 		ioExecutor.execute {
 			val success = try {
 				if (isRemove) {
-					remover?.removeReaction(targetThreadId, connectorMessageId, reaction)
-						?: sender?.sendReaction(targetThreadId, connectorMessageId, reaction)
-						?: false
+					remover?.removeReaction(targetThreadId, connectorMessageId, reaction) ?: false
 				} else {
 					sender?.sendReaction(targetThreadId, connectorMessageId, reaction) ?: false
 				}
