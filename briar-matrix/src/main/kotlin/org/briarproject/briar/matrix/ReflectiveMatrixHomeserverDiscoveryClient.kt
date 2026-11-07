@@ -1104,51 +1104,126 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 	 * duplicate in-flight submissions for the same (room, event, reaction) are rejected so
 	 * rapid taps do not double-toggle or race. Duplicate registration is recorded before
 	 * acquiring the client monitor so overlapping calls reject immediately rather than
-	 * serializing. Unknown events and SDK failures return false, never throwing.
+	 * serializing. On timeout or cancellation, duplicate protection is retained until the
+	 * native operation completes or cancels. Unknown events and SDK failures return false,
+	 * never throwing.
 	 */
 	override fun sendReaction(roomId: String, eventId: String, reaction: String): Boolean {
 		if (reaction.isBlank() || eventId.isBlank()) return false
 		val flightKey = "$roomId:$eventId:$reaction"
 		if (!inFlightReactions.add(flightKey)) return false
+
+		val completed = AtomicBoolean(false)
+		val outcome = AtomicReference<Result<Any?>>()
+		val latch = CountDownLatch(1)
+		val roomRef = AtomicReference<Any?>()
+		val timelineRef = AtomicReference<Any?>()
+
+		val job: Any? = try {
+			val jobKt = Class.forName("kotlinx.coroutines.JobKt")
+			val jobMethod = jobKt.getMethod("Job", Class.forName("kotlinx.coroutines.Job"))
+			jobMethod.invoke(null, null)
+		} catch (e: Exception) {
+			null
+		}
+		val coroutineContext: CoroutineContext = if (job is CoroutineContext) {
+			job
+		} else {
+			EmptyCoroutineContext
+		}
+		fun cancelJob() {
+			if (job != null) {
+				try {
+					val cancelMethod = job.javaClass.methods.firstOrNull {
+						it.name == "cancel" &&
+							it.parameterTypes.size == 1 &&
+							CancellationException::class.java.isAssignableFrom(it.parameterTypes[0])
+					}
+					cancelMethod?.invoke(job, CancellationException("Reaction cancelled"))
+				} catch (ignored: Exception) {}
+			}
+		}
+
+		fun complete(result: Result<Any?>?) {
+			if (!completed.compareAndSet(false, true)) return
+			if (result != null) outcome.set(result)
+			latch.countDown()
+			inFlightReactions.remove(flightKey)
+			closeQuietly(timelineRef.get())
+			closeQuietly(roomRef.get())
+		}
+
+		val continuation = object : Continuation<Any?> {
+			override val context: CoroutineContext = coroutineContext
+			override fun resumeWith(result: Result<Any?>) {
+				complete(result)
+			}
+		}
+
+		var suspended = false
 		return try {
 			synchronized(this) {
 				val client = loginClient ?: return false
-				var room: Any? = null
-				var timeline: Any? = null
-				try {
-					room = client.javaClass.getMethod("getRoom", String::class.java).invoke(client, roomId)
+				val loadedRoom =
+					client.javaClass.getMethod("getRoom", String::class.java).invoke(client, roomId)
 						?: throw SnapshotAdapterFailure()
-					val loadedTimeline =
-						invokeCloseableValue(room, "timeline", emptyArray(), emptyArray(), ::closeQuietly)
-					timeline = loadedTimeline
+				roomRef.set(loadedRoom)
+				val loadedTimeline =
+					invokeCloseableValue(loadedRoom, "timeline", emptyArray(), emptyArray(), ::closeQuietly)
+				timelineRef.set(loadedTimeline)
 
-					val eventIdClass = Class.forName(EVENT_ID_CLASS_NAME)
-					val eventIdObj = eventIdClass.getConstructor(String::class.java).newInstance(eventId)
+				val eventIdClass = Class.forName(EVENT_ID_CLASS_NAME)
+				val eventIdObj = eventIdClass.getConstructor(String::class.java).newInstance(eventId)
 
-					invokeUnit(
-						loadedTimeline,
-						"toggleReaction",
-						arrayOf(
-							Class.forName(EVENT_OR_TRANSACTION_ID_CLASS_NAME),
-							String::class.java,
-						),
-						arrayOf(eventIdObj, reaction),
-					)
-					true
-				} catch (e: InterruptedException) {
-					Thread.currentThread().interrupt()
-					false
-				} catch (e: Exception) {
-					false
-				} catch (e: LinkageError) {
-					false
-				} finally {
-					closeQuietly(timeline)
-					closeQuietly(room)
+				val toggleReactionMethod = loadedTimeline.javaClass.getMethod(
+					"toggleReaction",
+					Class.forName(EVENT_OR_TRANSACTION_ID_CLASS_NAME),
+					String::class.java,
+					Continuation::class.java,
+				)
+
+				val invokeResult = toggleReactionMethod.invoke(
+					loadedTimeline,
+					eventIdObj,
+					reaction,
+					continuation,
+				)
+
+				if (invokeResult === COROUTINE_SUSPENDED) {
+					suspended = true
+				} else {
+					complete(Result.success(invokeResult))
+					return true
 				}
 			}
+
+			val completedInTime = try {
+				latch.await(discoveryTimeoutMs, TimeUnit.MILLISECONDS)
+			} catch (e: InterruptedException) {
+				Thread.currentThread().interrupt()
+				cancelJob()
+				return false
+			}
+
+			if (!completedInTime) {
+				cancelJob()
+				return false
+			}
+
+			val result = outcome.get() ?: return false
+			result.isSuccess
+		} catch (e: InterruptedException) {
+			Thread.currentThread().interrupt()
+			cancelJob()
+			false
+		} catch (e: Exception) {
+			false
+		} catch (e: LinkageError) {
+			false
 		} finally {
-			inFlightReactions.remove(flightKey)
+			if (!suspended) {
+				complete(null)
+			}
 		}
 	}
 

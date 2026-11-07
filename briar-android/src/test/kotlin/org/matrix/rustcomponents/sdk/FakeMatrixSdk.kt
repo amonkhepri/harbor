@@ -218,6 +218,20 @@ class Timeline {
 		FakeMatrixSdkState.lastReactionKey = key
 		FakeMatrixSdkState.toggleReactionFailureToThrow?.let { throw it }
 		FakeMatrixSdkState.onToggleReaction?.invoke()
+		if (FakeMatrixSdkState.toggleReactionSuspendAsynchronously) {
+			if (FakeMatrixSdkState.toggleReactionCancellable) {
+				return kotlinx.coroutines.suspendCancellableCoroutine { continuation ->
+					continuation.invokeOnCancellation {
+						FakeMatrixSdkState.toggleReactionCancelled = true
+					}
+					FakeMatrixSdkState.onToggleReactionContinuation?.invoke(continuation)
+				}
+			} else {
+				return kotlin.coroutines.suspendCoroutine { continuation ->
+					FakeMatrixSdkState.onToggleReactionContinuation?.invoke(continuation)
+				}
+			}
+		}
 		return true
 	}
 
@@ -1051,6 +1065,10 @@ object FakeMatrixSdkState {
 	var lastReactionKey: String? = null
 	var toggleReactionFailureToThrow: ClientException? = null
 	var onToggleReaction: (() -> Unit)? = null
+	var toggleReactionSuspendAsynchronously = false
+	var toggleReactionCancellable = true
+	var toggleReactionCancelled = false
+	var onToggleReactionContinuation: ((kotlin.coroutines.Continuation<Boolean>) -> Unit)? = null
 	var sendSuspendAsynchronously = false
 	var sendDelayMs = 0L
 	var roomMessageEventContentCloseCount = 0
@@ -1192,6 +1210,10 @@ object FakeMatrixSdkState {
 		lastReactionKey = null
 		toggleReactionFailureToThrow = null
 		onToggleReaction = null
+		toggleReactionSuspendAsynchronously = false
+		toggleReactionCancellable = true
+		toggleReactionCancelled = false
+		onToggleReactionContinuation = null
 		sendSuspendAsynchronously = false
 		sendDelayMs = 0L
 		roomMessageEventContentCloseCount = 0

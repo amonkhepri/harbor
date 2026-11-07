@@ -4,6 +4,7 @@ import org.briarproject.briar.api.matrix.MatrixAuthSession.RecoverableErrorDetai
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.matrix.rustcomponents.sdk.ClientException
@@ -14,6 +15,8 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
+import kotlin.coroutines.resume
 
 /** Simulated SDK proof for MX-059; real two-account delivery needs network/device proof. */
 class ReflectiveMatrixHomeserverDiscoveryClientReactionTest {
@@ -113,6 +116,83 @@ class ReflectiveMatrixHomeserverDiscoveryClientReactionTest {
 		val client = loggedInClient()
 		assertTrue(client.sendReaction(ROOM, EVENT, "👍"))
 		assertTrue(client.sendReaction(ROOM, EVENT, "👍"))
+		assertEquals(2, FakeMatrixSdkState.toggleReactionCallCount)
+	}
+
+	@Test
+	fun `retains duplicate protection after timeout until native operation completes`() {
+		val client = ReflectiveMatrixHomeserverDiscoveryClient(discoveryTimeoutMs = 50L).also {
+			FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec(ROOM))
+			assertEquals(NONE, it.login("https://matrix.example.org", "alice", "swordfish"))
+		}
+
+		FakeMatrixSdkState.toggleReactionSuspendAsynchronously = true
+		FakeMatrixSdkState.toggleReactionCancellable = false
+		val nativeContinuation = AtomicReference<kotlin.coroutines.Continuation<Boolean>>()
+		val nativeStarted = CountDownLatch(1)
+
+		FakeMatrixSdkState.onToggleReactionContinuation = { cont ->
+			nativeContinuation.set(cont)
+			nativeStarted.countDown()
+		}
+
+		val firstCallSuccess = client.sendReaction(ROOM, EVENT, "👍")
+		assertFalse("First call must report false on timeout", firstCallSuccess)
+		assertEquals(1, FakeMatrixSdkState.toggleReactionCallCount)
+
+		// Second call (immediate retry) must be rejected because native operation is still unresolved
+		assertFalse(
+			"Retry while native operation is still running after timeout must be rejected",
+			client.sendReaction(ROOM, EVENT, "👍"),
+		)
+		assertEquals(
+			"SDK must not have received second call",
+			1,
+			FakeMatrixSdkState.toggleReactionCallCount,
+		)
+
+		// Now simulate native operation finishing late
+		val cont = nativeContinuation.get()
+		assertNotNull("Native continuation must be captured", cont)
+		cont.resume(true)
+
+		// Third call (retry after native completion) must now be permitted
+		FakeMatrixSdkState.toggleReactionSuspendAsynchronously = false
+		assertTrue(
+			"Subsequent call after native completion must succeed",
+			client.sendReaction(ROOM, EVENT, "👍"),
+		)
+		assertEquals("SDK should receive subsequent call", 2, FakeMatrixSdkState.toggleReactionCallCount)
+	}
+
+	@Test
+	fun `cancels suspended SDK operation on timeout`() {
+		val client = ReflectiveMatrixHomeserverDiscoveryClient(discoveryTimeoutMs = 50L).also {
+			FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec(ROOM))
+			assertEquals(NONE, it.login("https://matrix.example.org", "alice", "swordfish"))
+		}
+
+		FakeMatrixSdkState.toggleReactionSuspendAsynchronously = true
+		FakeMatrixSdkState.toggleReactionCancellable = true
+		val nativeStarted = CountDownLatch(1)
+
+		FakeMatrixSdkState.onToggleReactionContinuation = { _ ->
+			nativeStarted.countDown()
+		}
+
+		val success = client.sendReaction(ROOM, EVENT, "👍")
+		assertFalse("Call must report false on timeout", success)
+		assertTrue(
+			"SDK operation must be cancelled on timeout",
+			FakeMatrixSdkState.toggleReactionCancelled,
+		)
+
+		// Cancellation resumes and cleans up duplicate protection, permitting subsequent call
+		FakeMatrixSdkState.toggleReactionSuspendAsynchronously = false
+		assertTrue(
+			"Subsequent call after cancelled operation must succeed",
+			client.sendReaction(ROOM, EVENT, "👍"),
+		)
 		assertEquals(2, FakeMatrixSdkState.toggleReactionCallCount)
 	}
 
