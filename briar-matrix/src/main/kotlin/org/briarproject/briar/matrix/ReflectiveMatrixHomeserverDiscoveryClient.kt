@@ -1122,8 +1122,10 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 	 * Reuses the opened timeline to avoid closing and reopening before toggle. If the state changes
 	 * between lookup and toggle so that toggle adds the reaction (returning true) instead of
 	 * removing it (returning false), recovers by toggling again to remove the newly added reaction
-	 * and returns false without claiming success. Retains operation ownership (inFlightReactions guard)
-	 * across the initial toggle and recovery so concurrent calls are rejected and cleanup is not skipped.
+	 * and returns false without claiming success. Recovery is owned by the completion path and
+	 * retains operation ownership (inFlightReactions guard) across the initial toggle and recovery
+	 * even if the waiting caller times out or is interrupted, ensuring late additions are cleaned up
+	 * and the guard is never leaked.
 	 * If the event cannot be found, the user does not own
 	 * the reaction, or the SDK call fails, returns false -- never throwing.
 	 */
@@ -1193,25 +1195,9 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			flightKey,
 			room,
 			timeline,
-			retainFlightGuardOnAdded = true,
+			recoverOnAdded = true,
 		)
-		if (added == false) {
-			// According to pinned SDK (26.08.05), toggleReaction returns false when removed.
-			return true
-		}
-		if (added == true) {
-			// State changed between lookup and toggle: toggle added the reaction instead of removing it.
-			// Recover by toggling again to remove the newly added reaction, then report failure.
-			// Operation ownership (inFlightReactions guard) was retained across the initial toggle.
-			try {
-				toggleReactionInternal(roomId, eventId, reaction, flightKey)
-			} catch (t: Throwable) {
-				inFlightReactions.remove(flightKey)
-				throw t
-			}
-			return false
-		}
-		return false
+		return added == false
 	}
 
 	private fun hasOwnReaction(item: Any, reaction: String, currentUserId: String): Boolean {
@@ -1243,14 +1229,13 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		flightKey: String,
 		existingRoom: Any? = null,
 		existingTimeline: Any? = null,
-		retainFlightGuardOnAdded: Boolean = false,
+		recoverOnAdded: Boolean = false,
 	): Boolean? {
 		val completed = AtomicBoolean(false)
 		val outcome = AtomicReference<Result<Any?>>()
 		val latch = CountDownLatch(1)
 		val roomRef = AtomicReference<Any?>(existingRoom)
 		val timelineRef = AtomicReference<Any?>(existingTimeline)
-		val timedOut = AtomicBoolean(false)
 
 		val job: Any? = try {
 			val jobKt = Class.forName("kotlinx.coroutines.JobKt")
@@ -1277,16 +1262,68 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			}
 		}
 
+		fun performRecovery() {
+			val recoveryDone = AtomicBoolean(false)
+			fun finishRecovery() {
+				if (!recoveryDone.compareAndSet(false, true)) return
+				try {
+					inFlightReactions.remove(flightKey)
+					closeQuietly(timelineRef.get())
+					closeQuietly(roomRef.get())
+				} finally {
+					outcome.set(Result.success(true))
+					latch.countDown()
+				}
+			}
+
+			try {
+				val loadedTimeline = timelineRef.get()
+				if (loadedTimeline == null) {
+					finishRecovery()
+					return
+				}
+				val eventIdClass = Class.forName(EVENT_ID_CLASS_NAME)
+				val eventIdObj = eventIdClass.getConstructor(String::class.java).newInstance(eventId)
+				val toggleReactionMethod = loadedTimeline.javaClass.getMethod(
+					"toggleReaction",
+					Class.forName(EVENT_OR_TRANSACTION_ID_CLASS_NAME),
+					String::class.java,
+					Continuation::class.java,
+				)
+				val recoveryContinuation = object : Continuation<Any?> {
+					override val context: CoroutineContext = EmptyCoroutineContext
+					override fun resumeWith(result: Result<Any?>) {
+						finishRecovery()
+					}
+				}
+				val recoveryInvokeResult = toggleReactionMethod.invoke(
+					loadedTimeline,
+					eventIdObj,
+					reaction,
+					recoveryContinuation,
+				)
+				if (recoveryInvokeResult !== COROUTINE_SUSPENDED) {
+					finishRecovery()
+				}
+			} catch (t: Throwable) {
+				finishRecovery()
+			}
+		}
+
 		fun complete(result: Result<Any?>?) {
 			if (!completed.compareAndSet(false, true)) return
-			if (result != null) outcome.set(result)
-			val retain = !timedOut.get() && retainFlightGuardOnAdded && (result?.getOrNull() == true)
-			if (!retain) {
-				inFlightReactions.remove(flightKey)
+			if (recoverOnAdded && result?.getOrNull() == true) {
+				performRecovery()
+			} else {
+				try {
+					inFlightReactions.remove(flightKey)
+					closeQuietly(timelineRef.get())
+					closeQuietly(roomRef.get())
+				} finally {
+					if (result != null) outcome.set(result)
+					latch.countDown()
+				}
 			}
-			latch.countDown()
-			closeQuietly(timelineRef.get())
-			closeQuietly(roomRef.get())
 		}
 
 		val continuation = object : Continuation<Any?> {
@@ -1332,21 +1369,22 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 				} else {
 					val added = invokeResult as? Boolean ?: true
 					complete(Result.success(added))
-					return added
+					if (!recoverOnAdded || !added) {
+						return added
+					}
+					suspended = true
 				}
 			}
 
 			val completedInTime = try {
 				latch.await(discoveryTimeoutMs, TimeUnit.MILLISECONDS)
 			} catch (e: InterruptedException) {
-				timedOut.set(true)
 				Thread.currentThread().interrupt()
 				cancelJob()
 				return null
 			}
 
 			if (!completedInTime) {
-				timedOut.set(true)
 				cancelJob()
 				return null
 			}

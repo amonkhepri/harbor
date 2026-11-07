@@ -534,6 +534,191 @@ class ReflectiveMatrixHomeserverDiscoveryClientReactionTest {
 		assertEquals(1, FakeMatrixSdkState.toggleReactionCallCount)
 	}
 
+	@Test
+	fun `removeReaction recovers unintended addition when completion arrives after timeout`() {
+		// P2 finding regression: verify recovery runs in completion path even if caller timed out
+		val client = ReflectiveMatrixHomeserverDiscoveryClient(discoveryTimeoutMs = 100L).also {
+			FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec(ROOM))
+			assertEquals(NONE, it.login("https://matrix.example.org", "alice", "swordfish"))
+		}
+		val alice = "@alice:matrix.example.org"
+		val bob = "@bob:matrix.example.org"
+
+		FakeMatrixSdkState.eventItemsById = mapOf(
+			EVENT to FakeTimelineEventSpec(
+				identifier = EventOrTransactionId.EventId(EVENT),
+				sender = bob,
+				body = "Hello",
+				timestamp = 1000uL,
+				reactions = listOf(
+					Reaction("👍", listOf(ReactionSenderData(alice))),
+				),
+			),
+		)
+
+		// State changes remotely between lookup and toggle
+		FakeMatrixSdkState.onToggleReaction = {
+			FakeMatrixSdkState.onToggleReaction = null
+			val spec = FakeMatrixSdkState.eventItemsById[EVENT]!!
+			FakeMatrixSdkState.eventItemsById = mapOf(
+				EVENT to spec.copy(reactions = emptyList()),
+			)
+		}
+
+		FakeMatrixSdkState.toggleReactionSuspendAsynchronously = true
+		FakeMatrixSdkState.toggleReactionCancellable = false
+		val initialContinuation = AtomicReference<kotlin.coroutines.Continuation<Boolean>>()
+		val initialSuspended = CountDownLatch(1)
+		val recoveryContinuation = AtomicReference<kotlin.coroutines.Continuation<Boolean>>()
+		val recoverySuspended = CountDownLatch(1)
+
+		var callIndex = 0
+		FakeMatrixSdkState.onToggleReactionContinuation = { cont ->
+			if (callIndex++ == 0) {
+				initialContinuation.set(cont)
+				initialSuspended.countDown()
+			} else {
+				recoveryContinuation.set(cont)
+				recoverySuspended.countDown()
+			}
+		}
+
+		val executor = Executors.newFixedThreadPool(2)
+		try {
+			val removeResult = AtomicReference<Boolean>()
+			val removeFinished = CountDownLatch(1)
+			executor.execute {
+				removeResult.set(client.removeReaction(ROOM, EVENT, "👍"))
+				removeFinished.countDown()
+			}
+
+			// Wait for initial toggle to suspend
+			assertTrue("Initial toggle must suspend", initialSuspended.await(5, TimeUnit.SECONDS))
+			val firstCont = initialContinuation.get()
+			assertNotNull("Initial continuation must be captured", firstCont)
+
+			// Wait for caller to time out (discoveryTimeoutMs is 100ms)
+			assertTrue("removeReaction must time out and finish", removeFinished.await(5, TimeUnit.SECONDS))
+			assertFalse("removeReaction must report false on timeout", removeResult.get())
+
+			// While initial toggle has not completed, flight guard is still retained
+			assertFalse(
+				"Flight guard must be retained after caller timeout while toggle is pending",
+				client.sendReaction(ROOM, EVENT, "👍"),
+			)
+
+			// Now resume initial toggle after timeout with true (indicating reaction was added)
+			executor.execute {
+				firstCont.resume(true)
+			}
+
+			// Completion path must initiate recovery even though caller timed out
+			assertTrue("Recovery toggle must be invoked after late completion", recoverySuspended.await(5, TimeUnit.SECONDS))
+			val secondCont = recoveryContinuation.get()
+			assertNotNull("Recovery continuation must be captured", secondCont)
+
+			// Resume recovery toggle
+			executor.execute {
+				secondCont.resume(false)
+			}
+
+			// Wait briefly for recovery completion path to finish
+			org.junit.Assert.assertNull(
+				"Alice's reaction must be cleaned up by recovery toggle",
+				eventually(5, TimeUnit.SECONDS) {
+					FakeMatrixSdkState.eventItemsById[EVENT]?.reactions?.firstOrNull { it.key == "👍" }
+				},
+			)
+			assertEquals("SDK should receive initial toggle + recovery toggle", 2, FakeMatrixSdkState.toggleReactionCallCount)
+
+			// Guard must now be released so subsequent calls succeed
+			FakeMatrixSdkState.toggleReactionSuspendAsynchronously = false
+			FakeMatrixSdkState.onToggleReactionContinuation = null
+			assertTrue(
+				"Subsequent reaction must succeed once recovery finishes and releases guard",
+				client.sendReaction(ROOM, EVENT, "👍"),
+			)
+		} finally {
+			executor.shutdownNow()
+		}
+	}
+
+	@Test
+	fun `removeReaction timeout racing with completion does not leak flight guard`() {
+		// P2 finding regression: verify atomic transfer / guard release when completion races timeout
+		val client = ReflectiveMatrixHomeserverDiscoveryClient(discoveryTimeoutMs = 150L).also {
+			FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec(ROOM))
+			assertEquals(NONE, it.login("https://matrix.example.org", "alice", "swordfish"))
+		}
+		val alice = "@alice:matrix.example.org"
+
+		FakeMatrixSdkState.eventItemsById = mapOf(
+			EVENT to FakeTimelineEventSpec(
+				identifier = EventOrTransactionId.EventId(EVENT),
+				sender = "@bob:matrix.example.org",
+				body = "Hello",
+				timestamp = 1000uL,
+				reactions = listOf(
+					Reaction("👍", listOf(ReactionSenderData(alice))),
+				),
+			),
+		)
+
+		FakeMatrixSdkState.toggleReactionSuspendAsynchronously = true
+		FakeMatrixSdkState.toggleReactionCancellable = false
+		val initialContinuation = AtomicReference<kotlin.coroutines.Continuation<Boolean>>()
+		val initialSuspended = CountDownLatch(1)
+
+		FakeMatrixSdkState.onToggleReactionContinuation = { cont ->
+			initialContinuation.set(cont)
+			initialSuspended.countDown()
+		}
+
+		val executor = Executors.newFixedThreadPool(2)
+		try {
+			val removeResult = AtomicReference<Boolean>()
+			val removeFinished = CountDownLatch(1)
+			executor.execute {
+				removeResult.set(client.removeReaction(ROOM, EVENT, "👍"))
+				removeFinished.countDown()
+			}
+
+			assertTrue("Initial toggle must suspend", initialSuspended.await(5, TimeUnit.SECONDS))
+			val firstCont = initialContinuation.get()
+			assertNotNull("Initial continuation must be captured", firstCont)
+
+			// Resume initial toggle with false (removed) around timeout
+			executor.execute {
+				firstCont.resume(false)
+			}
+
+			assertTrue("removeReaction must finish", removeFinished.await(5, TimeUnit.SECONDS))
+
+			// Once completion has run, guard must be released regardless of whether it completed before or after timeout
+			FakeMatrixSdkState.toggleReactionSuspendAsynchronously = false
+			FakeMatrixSdkState.onToggleReactionContinuation = null
+			assertTrue(
+				"Subsequent reaction must succeed and not be blocked by a leaked flight guard",
+				eventually(5, TimeUnit.SECONDS) {
+					client.sendReaction(ROOM, EVENT, "👍")
+				},
+			)
+		} finally {
+			executor.shutdownNow()
+		}
+	}
+
+	private fun <T> eventually(timeout: Long, unit: TimeUnit, block: () -> T): T {
+		val deadline = System.currentTimeMillis() + unit.toMillis(timeout)
+		var lastResult: T = block()
+		while (System.currentTimeMillis() < deadline) {
+			if (lastResult == null || lastResult == true) return lastResult
+			Thread.sleep(20)
+			lastResult = block()
+		}
+		return lastResult
+	}
+
 	private fun loggedInClient() = ReflectiveMatrixHomeserverDiscoveryClient().also {
 		FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec(ROOM))
 		assertEquals(NONE, it.login("https://matrix.example.org", "alice", "swordfish"))
