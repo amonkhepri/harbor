@@ -181,6 +181,14 @@
 	<string name="connector_conversation_edit">Edit message</string>
 	<string name="connector_conversation_edit_save">Save</string>
 	<string name="connector_conversation_edit_failed">Message could not be edited</string>
+	<string name="connector_conversation_react">React</string>
+	<string name="connector_conversation_reaction_failed">Reaction could not be added</string>
+	<string name="connector_reaction_thumbs_up">👍 Thumbs up</string>
+	<string name="connector_reaction_heart">❤️ Heart</string>
+	<string name="connector_reaction_joy">😂 Joy</string>
+	<string name="connector_reaction_surprised">😮 Surprised</string>
+	<string name="connector_reaction_sad">😢 Sad</string>
+	<string name="connector_reaction_celebrate">🎉 Celebrate</string>
 	<string name="connector_conversation_find">Search loaded messages</string>
 	<string name="connector_conversation_find_hint">Search loaded messages</string>
 	<string name="connector_conversation_find_count">%1$d/%2$d</string>

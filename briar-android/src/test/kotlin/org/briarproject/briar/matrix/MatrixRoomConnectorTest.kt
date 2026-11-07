@@ -821,6 +821,22 @@ class MatrixRoomConnectorTest {
 		assertFalse(failing.editTextMessage("!room:example.org", "\$event", "fixed"))
 	}
 
+	@Test
+	fun `sendReaction forwards only authorized non-blank reactions and reports failure`() {
+		val client = FakeMessageSendClient(true)
+		val auth = FakeMatrixAuthSession(MatrixAuthState.CREDENTIAL_ENTRY)
+		val connector = connector(authSession = auth, messageSendClient = client)
+		assertFalse(connector.sendReaction("!room:example.org", "\$event", "👍"))
+		auth.state = MatrixAuthState.READY
+		assertFalse(connector.sendReaction("!room:example.org", "\$event", "  "))
+		assertNull(client.lastReactionKey)
+
+		assertTrue(connector.sendReaction("!room:example.org", "\$event", "👍"))
+		assertEquals(listOf("!room:example.org", "\$event", "👍"), client.lastReaction)
+		val failing = connector(authSession = auth, messageSendClient = FakeMessageSendClient(false))
+		assertFalse(failing.sendReaction("!room:example.org", "\$event", "👍"))
+	}
+
 	private class FakeMessageSendClient(private val result: Boolean) : MatrixMessageSendClient {
 		var lastRequestedRoomId: String? = null
 			private set
@@ -840,6 +856,14 @@ class MatrixRoomConnectorTest {
 		var lastEdit: List<String>? = null
 			private set
 		val lastEditedText get() = lastEdit?.get(2)
+		var lastReaction: List<String>? = null
+			private set
+		val lastReactionKey get() = lastReaction?.get(2)
+
+		override fun sendReaction(roomId: String, eventId: String, reaction: String): Boolean {
+			lastReaction = listOf(roomId, eventId, reaction)
+			return result
+		}
 
 		override fun editTextMessage(roomId: String, eventId: String, text: String): Boolean {
 			lastEdit = listOf(roomId, eventId, text)

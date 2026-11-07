@@ -22,6 +22,7 @@ internal class ConnectorConversationAdapter(
 	var onReplyClicked: ((ConnectorConversationMessageItem) -> Unit)? = null,
 	/** True when the own-message action opens the edit dialog for text rows (MX-058). */
 	var editsOwnText: Boolean = false,
+	var onReactClicked: ((ConnectorConversationMessageItem) -> Unit)? = null,
 ) : ListAdapter<
 	ConnectorConversationMessageItem,
 	ConnectorConversationAdapter.MessageViewHolder,
@@ -41,6 +42,7 @@ internal class ConnectorConversationAdapter(
 			thumbnailManager,
 			onReplyClicked,
 			editsOwnText,
+			onReactClicked,
 		)
 	}
 
@@ -61,9 +63,10 @@ internal class ConnectorConversationAdapter(
 		private val thumbnailManager: ConnectorThumbnailManager? = null,
 		private val onReplyClicked: ((ConnectorConversationMessageItem) -> Unit)? = null,
 		private val editsOwnText: Boolean = false,
+		private val onReactClicked: ((ConnectorConversationMessageItem) -> Unit)? = null,
 	) : RecyclerView.ViewHolder(itemView) {
 		constructor(itemView: View, onDeleteClicked: ((ConnectorConversationMessageItem) -> Unit)?) :
-			this(itemView, onDeleteClicked, null, null, null)
+			this(itemView, onDeleteClicked, null, null, null, null, false, null)
 		private val text: TextView =
 			itemView.findViewById(R.id.connectorMessageText)
 		private val thumbnail: ImageView =
@@ -281,29 +284,48 @@ internal class ConnectorConversationAdapter(
 					item.type != ConnectorMessageType.DELETED &&
 					onDeleteClicked != null
 				val canReply = onReplyClicked != null && ConnectorReplyTarget.canReplyTo(item)
+				val canReact = onReactClicked != null &&
+					item.localEchoStatus == null &&
+					item.type != ConnectorMessageType.DELETED &&
+					item.connectorMessageId.isNotBlank()
+				val actionCount =
+					(if (canDelete) 1 else 0) + (if (canReply) 1 else 0) + (if (canReact) 1 else 0)
 				when {
-					canDelete && canReply -> showMessageActions(item)
+					actionCount > 1 -> showMessageActions(item, canDelete, canReply, canReact)
 					canDelete -> onDeleteClicked?.invoke(item)
 					canReply -> onReplyClicked?.invoke(item)
+					canReact -> onReactClicked?.invoke(item)
 				}
-				canDelete || canReply
+				actionCount > 0
 			}
 		}
 
-		private fun showMessageActions(item: ConnectorConversationMessageItem) {
+		private fun showMessageActions(
+			item: ConnectorConversationMessageItem,
+			canDelete: Boolean,
+			canReply: Boolean,
+			canReact: Boolean,
+		) {
 			val popup = PopupMenu(itemView.context, itemView)
-			val ownAction = if (editsOwnText && item.type == ConnectorMessageType.TEXT) {
-				R.string.connector_conversation_edit
-			} else {
-				R.string.delete
+			if (canReact) {
+				popup.menu.add(Menu.NONE, ACTION_REACT, 0, R.string.connector_conversation_react)
 			}
-			popup.menu.add(Menu.NONE, ACTION_REPLY, 0, R.string.connector_conversation_reply)
-			popup.menu.add(Menu.NONE, ACTION_OWN, 1, ownAction)
-			popup.setOnMenuItemClickListener { menuItem ->
-				if (menuItem.itemId == ACTION_OWN) {
-					onDeleteClicked?.invoke(item)
+			if (canReply) {
+				popup.menu.add(Menu.NONE, ACTION_REPLY, 1, R.string.connector_conversation_reply)
+			}
+			if (canDelete) {
+				val ownAction = if (editsOwnText && item.type == ConnectorMessageType.TEXT) {
+					R.string.connector_conversation_edit
 				} else {
-					onReplyClicked?.invoke(item)
+					R.string.delete
+				}
+				popup.menu.add(Menu.NONE, ACTION_OWN, 2, ownAction)
+			}
+			popup.setOnMenuItemClickListener { menuItem ->
+				when (menuItem.itemId) {
+					ACTION_REACT -> onReactClicked?.invoke(item)
+					ACTION_REPLY -> onReplyClicked?.invoke(item)
+					ACTION_OWN -> onDeleteClicked?.invoke(item)
 				}
 				true
 			}
@@ -313,6 +335,7 @@ internal class ConnectorConversationAdapter(
 		private companion object {
 			const val ACTION_REPLY = 1
 			const val ACTION_OWN = 2
+			const val ACTION_REACT = 3
 		}
 	}
 

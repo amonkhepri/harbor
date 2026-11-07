@@ -211,6 +211,15 @@ class Timeline {
 		FakeMatrixSdkState.editFailureToThrow?.let { throw it }
 	}
 
+	suspend fun toggleReaction(eventOrTransactionId: EventOrTransactionId, key: String): Boolean {
+		FakeMatrixSdkState.toggleReactionCallCount++
+		FakeMatrixSdkState.lastReactionEventId =
+			(eventOrTransactionId as? EventOrTransactionId.EventId)?.eventId
+		FakeMatrixSdkState.lastReactionKey = key
+		FakeMatrixSdkState.toggleReactionFailureToThrow?.let { throw it }
+		return true
+	}
+
 	fun sendFile(params: UploadParameters, info: FileInfo): SendAttachmentJoinHandle {
 		FakeMatrixSdkState.sendFileCallCount++
 		FakeMatrixSdkState.lastSendFileParams = params
@@ -1036,6 +1045,10 @@ object FakeMatrixSdkState {
 	var lastEditedEventId: String? = null
 	var lastEditedContent: EditedContent? = null
 	var editFailureToThrow: ClientException? = null
+	var toggleReactionCallCount = 0
+	var lastReactionEventId: String? = null
+	var lastReactionKey: String? = null
+	var toggleReactionFailureToThrow: ClientException? = null
 	var sendSuspendAsynchronously = false
 	var sendDelayMs = 0L
 	var roomMessageEventContentCloseCount = 0
@@ -1172,6 +1185,10 @@ object FakeMatrixSdkState {
 		lastEditedEventId = null
 		lastEditedContent = null
 		editFailureToThrow = null
+		toggleReactionCallCount = 0
+		lastReactionEventId = null
+		lastReactionKey = null
+		toggleReactionFailureToThrow = null
 		sendSuspendAsynchronously = false
 		sendDelayMs = 0L
 		roomMessageEventContentCloseCount = 0

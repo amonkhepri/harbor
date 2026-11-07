@@ -55,6 +55,7 @@ import java.util.zip.ZipFile
 import org.briarproject.briar.api.connector.ConnectorImageSender
 import org.briarproject.briar.api.connector.ConnectorMessageDeleter
 import org.briarproject.briar.api.connector.ConnectorMessageEditor
+import org.briarproject.briar.api.connector.ConnectorReactionSender
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult
 import org.briarproject.briar.api.connector.ConnectorMessageType
 import org.briarproject.briar.api.connector.ConnectorReadMarker
@@ -394,6 +395,8 @@ class ConnectorConversationActivity : BriarActivity() {
 	private var connector: ReadOnlyConnector? = null
 	private var textSender: ConnectorTextSender? = null
 	private var replySender: ConnectorReplySender? = null
+	private var reactionSender: ConnectorReactionSender? = null
+	private val inFlightReactions = Collections.synchronizedSet(mutableSetOf<String>())
 	private var replyBar: View? = null
 	private var replyPreview: TextView? = null
 	private var replyTarget: ConnectorReplyTarget? = null
@@ -478,6 +481,8 @@ class ConnectorConversationActivity : BriarActivity() {
 		textSender = connector as? ConnectorTextSender
 		replySender = (connector as? ConnectorReplySender)?.takeIf { textSender != null }
 		if (replySender != null) adapter.onReplyClicked = ::onReplyClicked
+		reactionSender = connector as? ConnectorReactionSender
+		if (reactionSender != null) adapter.onReactClicked = ::onReactClicked
 		adapter.editsOwnText = connector is ConnectorMessageEditor
 		imageSender = connector as? ConnectorImageSender
 		fileSender = connector as? ConnectorFileSender
@@ -1477,6 +1482,43 @@ class ConnectorConversationActivity : BriarActivity() {
 		}
 	}
 
+	private fun onReactClicked(item: ConnectorConversationMessageItem) {
+		if (threadId.isEmpty()) return
+		if (reactionSender == null) return
+		ConnectorReactionDialogFragment.newInstance(
+			item.connectorThreadId,
+			item.connectorMessageId,
+		).show(supportFragmentManager, ConnectorReactionDialogFragment.TAG)
+	}
+
+	internal fun confirmReaction(
+		targetThreadId: String,
+		connectorMessageId: String,
+		reaction: String,
+	) {
+		val sender = reactionSender ?: return
+		if (reaction.isBlank() || connectorMessageId.isBlank()) return
+		val flightKey = "$targetThreadId:$connectorMessageId:$reaction"
+		if (!inFlightReactions.add(flightKey)) return
+		ioExecutor.execute {
+			val success = try {
+				sender.sendReaction(targetThreadId, connectorMessageId, reaction)
+			} finally {
+				inFlightReactions.remove(flightKey)
+			}
+			runOnUiThread {
+				if (isFinishing || isDestroyed) return@runOnUiThread
+				if (!success) {
+					Snackbar.make(
+						list,
+						R.string.connector_conversation_reaction_failed,
+						Snackbar.LENGTH_LONG,
+					).show()
+				}
+			}
+		}
+	}
+
 	internal fun canDeleteMessages() = connector is ConnectorMessageDeleter
 
 	internal fun showDeleteConfirmation(targetThreadId: String, connectorMessageId: String) {
@@ -1903,3 +1945,53 @@ internal fun markMessageEdited(
 		}
 	},
 )
+
+class ConnectorReactionDialogFragment : DialogFragment() {
+	companion object {
+		const val TAG = "ConnectorReactionDialogFragment"
+		private const val ARG_THREAD_ID = "threadId"
+		private const val ARG_MESSAGE_ID = "messageId"
+
+		val DEFAULT_REACTIONS = listOf(
+			"👍",
+			"❤️",
+			"😂",
+			"😮",
+			"😢",
+			"🎉",
+		)
+
+		fun newInstance(threadId: String, messageId: String): ConnectorReactionDialogFragment =
+			ConnectorReactionDialogFragment().apply {
+				arguments = Bundle().apply {
+					putString(ARG_THREAD_ID, threadId)
+					putString(ARG_MESSAGE_ID, messageId)
+				}
+			}
+	}
+
+	override fun onCreateDialog(savedInstanceState: Bundle?): Dialog {
+		val activity = requireActivity() as ConnectorConversationActivity
+		val threadId = requireArguments().getString(ARG_THREAD_ID)!!
+		val messageId = requireArguments().getString(ARG_MESSAGE_ID)!!
+		val choices = arrayOf(
+			getString(R.string.connector_reaction_thumbs_up),
+			getString(R.string.connector_reaction_heart),
+			getString(R.string.connector_reaction_joy),
+			getString(R.string.connector_reaction_surprised),
+			getString(R.string.connector_reaction_sad),
+			getString(R.string.connector_reaction_celebrate),
+		)
+		var submitted = false
+		return AlertDialog.Builder(activity, R.style.BriarDialogTheme)
+			.setTitle(R.string.connector_conversation_react)
+			.setItems(choices) { dialog, which ->
+				if (submitted) return@setItems
+				submitted = true
+				activity.confirmReaction(threadId, messageId, DEFAULT_REACTIONS[which])
+				dialog.dismiss()
+			}
+			.setNegativeButton(R.string.cancel, null)
+			.create()
+	}
+}

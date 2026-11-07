@@ -107,6 +107,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 	private val typingLanes = mutableMapOf<String, TypingLane>()
 	private val activeRoomSubscriptions = mutableSetOf<RoomSubscription>()
 	private val activeTypingSubscriptions = mutableSetOf<TypingSubscription>()
+	private val inFlightReactions = java.util.Collections.synchronizedSet(mutableSetOf<String>())
 
 	// Unlike invokeUnit, this lane waits for real native completion, not a timeout. A hung
 	// operation cannot release a later stop/start out of order or block message sending.
@@ -1093,6 +1094,54 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		} catch (e: LinkageError) {
 			false
 		} finally {
+			closeQuietly(timeline)
+			closeQuietly(room)
+		}
+	}
+
+	/**
+	 * MX-059: suspend `Timeline.toggleReaction(EventOrTransactionId, String)` (26.08.05);
+	 * duplicate in-flight submissions for the same (room, event, reaction) are rejected so
+	 * rapid taps do not double-toggle or race. Unknown events and SDK failures return false,
+	 * never throwing.
+	 */
+	@Synchronized
+	override fun sendReaction(roomId: String, eventId: String, reaction: String): Boolean {
+		if (reaction.isBlank() || eventId.isBlank()) return false
+		val client = loginClient ?: return false
+		val flightKey = "$roomId:$eventId:$reaction"
+		if (!inFlightReactions.add(flightKey)) return false
+		var room: Any? = null
+		var timeline: Any? = null
+		return try {
+			room = client.javaClass.getMethod("getRoom", String::class.java).invoke(client, roomId)
+				?: throw SnapshotAdapterFailure()
+			val loadedTimeline =
+				invokeCloseableValue(room, "timeline", emptyArray(), emptyArray(), ::closeQuietly)
+			timeline = loadedTimeline
+
+			val eventIdClass = Class.forName(EVENT_ID_CLASS_NAME)
+			val eventIdObj = eventIdClass.getConstructor(String::class.java).newInstance(eventId)
+
+			invokeUnit(
+				loadedTimeline,
+				"toggleReaction",
+				arrayOf(
+					Class.forName(EVENT_OR_TRANSACTION_ID_CLASS_NAME),
+					String::class.java,
+				),
+				arrayOf(eventIdObj, reaction),
+			)
+			true
+		} catch (e: InterruptedException) {
+			Thread.currentThread().interrupt()
+			false
+		} catch (e: Exception) {
+			false
+		} catch (e: LinkageError) {
+			false
+		} finally {
+			inFlightReactions.remove(flightKey)
 			closeQuietly(timeline)
 			closeQuietly(room)
 		}

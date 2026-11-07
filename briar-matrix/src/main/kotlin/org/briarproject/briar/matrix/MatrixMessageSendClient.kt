@@ -80,4 +80,12 @@ interface MatrixMessageSendClient {
 	 * the SDK call fails. Unsupported clients fail closed.
 	 */
 	fun editTextMessage(roomId: String, eventId: String, text: String): Boolean = false
+
+	/**
+	 * Adds [reaction] to [eventId] in [roomId] (MX-059) via the pinned SDK's
+	 * suspend `Timeline.toggleReaction(EventOrTransactionId, String)`. Returns false
+	 * -- never throwing -- under the same conditions as [sendTextMessage]; unsupported clients
+	 * fail closed.
+	 */
+	fun sendReaction(roomId: String, eventId: String, reaction: String): Boolean = false
 }

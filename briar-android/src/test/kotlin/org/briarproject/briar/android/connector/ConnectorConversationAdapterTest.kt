@@ -3,6 +3,7 @@ package org.briarproject.briar.android.connector
 import android.app.Application
 import android.view.LayoutInflater
 import android.view.View
+import android.widget.FrameLayout
 import android.widget.TextView
 import org.briarproject.briar.R
 import org.briarproject.briar.android.connector.ConnectorLocalEchoStatus.FAILED
@@ -178,6 +179,53 @@ class ConnectorConversationAdapterTest {
 		val holderNoDeleter = ConnectorConversationAdapter.MessageViewHolder(view, null)
 		holderNoDeleter.bind(sent)
 		assertEquals(false, view.performLongClick())
+	}
+
+	@Test
+	fun testReactAffordanceOnConfirmedMessagesWhenSupported() {
+		val parent = FrameLayout(RuntimeEnvironment.getApplication())
+		val view = LayoutInflater.from(RuntimeEnvironment.getApplication())
+			.inflate(R.layout.list_item_connector_message, parent, false)
+		parent.addView(view)
+
+		var reactedItem: ConnectorConversationMessageItem? = null
+		val holder = ConnectorConversationAdapter.MessageViewHolder(
+			view,
+			onDeleteClicked = null,
+			onRetrySendClicked = null,
+			onFileClicked = null,
+			thumbnailManager = null,
+			onReplyClicked = null,
+			editsOwnText = false,
+			onReactClicked = { reactedItem = it },
+		)
+
+		val received = ConnectorConversationMessageItem(
+			connectorSource = ConnectorSources.MATRIX,
+			connectorThreadId = "!room",
+			connectorMessageId = "\$1",
+			dateMillis = 1000L,
+			isOutgoing = false,
+			text = "hello",
+			type = ConnectorMessageType.TEXT,
+		)
+		holder.bind(received)
+		assertEquals(true, view.performLongClick())
+		assertEquals(received, reactedItem)
+
+		// Pending local echo: no react action
+		val pending = received.copy(isOutgoing = true, localEchoStatus = ConnectorLocalEchoStatus.PENDING)
+		holder.bind(pending)
+		reactedItem = null
+		assertEquals(false, view.performLongClick())
+		assertNull(reactedItem)
+
+		// Deleted message placeholder: no react action
+		val deleted = received.copy(type = ConnectorMessageType.DELETED)
+		holder.bind(deleted)
+		reactedItem = null
+		assertEquals(false, view.performLongClick())
+		assertNull(reactedItem)
 	}
 
 	@Test
