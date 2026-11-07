@@ -55,6 +55,7 @@ import java.util.zip.ZipFile
 import org.briarproject.briar.api.connector.ConnectorImageSender
 import org.briarproject.briar.api.connector.ConnectorMessageDeleter
 import org.briarproject.briar.api.connector.ConnectorMessageEditor
+import org.briarproject.briar.api.connector.ConnectorReactionRemover
 import org.briarproject.briar.api.connector.ConnectorReactionSender
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult
 import org.briarproject.briar.api.connector.ConnectorMessageType
@@ -396,6 +397,7 @@ class ConnectorConversationActivity : BriarActivity() {
 	private var textSender: ConnectorTextSender? = null
 	private var replySender: ConnectorReplySender? = null
 	private var reactionSender: ConnectorReactionSender? = null
+	private var reactionRemover: ConnectorReactionRemover? = null
 	private val inFlightReactions = Collections.synchronizedSet(mutableSetOf<String>())
 	private var replyBar: View? = null
 	private var replyPreview: TextView? = null
@@ -482,7 +484,8 @@ class ConnectorConversationActivity : BriarActivity() {
 		replySender = (connector as? ConnectorReplySender)?.takeIf { textSender != null }
 		if (replySender != null) adapter.onReplyClicked = ::onReplyClicked
 		reactionSender = connector as? ConnectorReactionSender
-		if (reactionSender != null) adapter.onReactClicked = ::onReactClicked
+		reactionRemover = connector as? ConnectorReactionRemover
+		if (reactionSender != null || reactionRemover != null) adapter.onReactClicked = ::onReactClicked
 		adapter.editsOwnText = connector is ConnectorMessageEditor
 		imageSender = connector as? ConnectorImageSender
 		fileSender = connector as? ConnectorFileSender
@@ -1484,10 +1487,12 @@ class ConnectorConversationActivity : BriarActivity() {
 
 	private fun onReactClicked(item: ConnectorConversationMessageItem) {
 		if (threadId.isEmpty()) return
-		if (reactionSender == null) return
+		if (reactionSender == null && reactionRemover == null) return
+		val ownReactions = ArrayList(item.reactions.filter { it.isOwn }.map { it.key })
 		ConnectorReactionDialogFragment.newInstance(
 			item.connectorThreadId,
 			item.connectorMessageId,
+			ownReactions,
 		).show(supportFragmentManager, ConnectorReactionDialogFragment.TAG)
 	}
 
@@ -1495,23 +1500,38 @@ class ConnectorConversationActivity : BriarActivity() {
 		targetThreadId: String,
 		connectorMessageId: String,
 		reaction: String,
+		isRemove: Boolean = false,
 	) {
-		val sender = reactionSender ?: return
+		val sender = reactionSender
+		val remover = reactionRemover
 		if (reaction.isBlank() || connectorMessageId.isBlank()) return
+		if (isRemove && remover == null && sender == null) return
+		if (!isRemove && sender == null) return
 		val flightKey = "$targetThreadId:$connectorMessageId:$reaction"
 		if (!inFlightReactions.add(flightKey)) return
 		ioExecutor.execute {
 			val success = try {
-				sender.sendReaction(targetThreadId, connectorMessageId, reaction)
+				if (isRemove) {
+					remover?.removeReaction(targetThreadId, connectorMessageId, reaction)
+						?: sender?.sendReaction(targetThreadId, connectorMessageId, reaction)
+						?: false
+				} else {
+					sender?.sendReaction(targetThreadId, connectorMessageId, reaction) ?: false
+				}
 			} finally {
 				inFlightReactions.remove(flightKey)
 			}
 			runOnUiThread {
 				if (isFinishing || isDestroyed) return@runOnUiThread
 				if (!success) {
+					val errorRes = if (isRemove) {
+						R.string.connector_conversation_reaction_remove_failed
+					} else {
+						R.string.connector_conversation_reaction_failed
+					}
 					Snackbar.make(
 						list,
-						R.string.connector_conversation_reaction_failed,
+						errorRes,
 						Snackbar.LENGTH_LONG,
 					).show()
 				}
@@ -1951,6 +1971,7 @@ class ConnectorReactionDialogFragment : DialogFragment() {
 		const val TAG = "ConnectorReactionDialogFragment"
 		private const val ARG_THREAD_ID = "threadId"
 		private const val ARG_MESSAGE_ID = "messageId"
+		private const val ARG_OWN_REACTIONS = "ownReactions"
 
 		val DEFAULT_REACTIONS = listOf(
 			"👍",
@@ -1961,20 +1982,26 @@ class ConnectorReactionDialogFragment : DialogFragment() {
 			"🎉",
 		)
 
-		fun newInstance(threadId: String, messageId: String): ConnectorReactionDialogFragment =
-			ConnectorReactionDialogFragment().apply {
-				arguments = Bundle().apply {
-					putString(ARG_THREAD_ID, threadId)
-					putString(ARG_MESSAGE_ID, messageId)
-				}
+		fun newInstance(
+			threadId: String,
+			messageId: String,
+			ownReactions: ArrayList<String> = arrayListOf(),
+		): ConnectorReactionDialogFragment = ConnectorReactionDialogFragment().apply {
+			arguments = Bundle().apply {
+				putString(ARG_THREAD_ID, threadId)
+				putString(ARG_MESSAGE_ID, messageId)
+				putStringArrayList(ARG_OWN_REACTIONS, ownReactions)
 			}
+		}
 	}
 
 	override fun onCreateDialog(savedInstanceState: Bundle?): Dialog {
 		val activity = requireActivity() as ConnectorConversationActivity
 		val threadId = requireArguments().getString(ARG_THREAD_ID)!!
 		val messageId = requireArguments().getString(ARG_MESSAGE_ID)!!
-		val choices = arrayOf(
+		val ownReactions = requireArguments().getStringArrayList(ARG_OWN_REACTIONS) ?: emptyList<String>()
+
+		val defaultLabels = listOf(
 			getString(R.string.connector_reaction_thumbs_up),
 			getString(R.string.connector_reaction_heart),
 			getString(R.string.connector_reaction_joy),
@@ -1982,13 +2009,38 @@ class ConnectorReactionDialogFragment : DialogFragment() {
 			getString(R.string.connector_reaction_sad),
 			getString(R.string.connector_reaction_celebrate),
 		)
+
+		val choiceKeys = mutableListOf<String>()
+		val choiceLabels = mutableListOf<String>()
+		val isRemoveList = mutableListOf<Boolean>()
+
+		for (i in DEFAULT_REACTIONS.indices) {
+			val key = DEFAULT_REACTIONS[i]
+			val isOwn = ownReactions.contains(key)
+			choiceKeys.add(key)
+			isRemoveList.add(isOwn)
+			if (isOwn) {
+				choiceLabels.add(getString(R.string.connector_reaction_remove, defaultLabels[i]))
+			} else {
+				choiceLabels.add(defaultLabels[i])
+			}
+		}
+
+		for (ownKey in ownReactions) {
+			if (!DEFAULT_REACTIONS.contains(ownKey)) {
+				choiceKeys.add(ownKey)
+				isRemoveList.add(true)
+				choiceLabels.add(getString(R.string.connector_reaction_remove, ownKey))
+			}
+		}
+
 		var submitted = false
 		return AlertDialog.Builder(activity, R.style.BriarDialogTheme)
 			.setTitle(R.string.connector_conversation_react)
-			.setItems(choices) { dialog, which ->
+			.setItems(choiceLabels.toTypedArray()) { dialog, which ->
 				if (submitted) return@setItems
 				submitted = true
-				activity.confirmReaction(threadId, messageId, DEFAULT_REACTIONS[which])
+				activity.confirmReaction(threadId, messageId, choiceKeys[which], isRemoveList[which])
 				dialog.dismiss()
 			}
 			.setNegativeButton(R.string.cancel, null)

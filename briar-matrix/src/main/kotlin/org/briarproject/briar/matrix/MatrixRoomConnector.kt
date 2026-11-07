@@ -9,6 +9,7 @@ import org.briarproject.briar.api.connector.ConnectorImageSender
 import org.briarproject.briar.api.connector.ConnectorMessage
 import org.briarproject.briar.api.connector.ConnectorMessageDeleter
 import org.briarproject.briar.api.connector.ConnectorMessageEditor
+import org.briarproject.briar.api.connector.ConnectorReactionRemover
 import org.briarproject.briar.api.connector.ConnectorReactionSender
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult.LoadFailed
@@ -74,6 +75,7 @@ class MatrixRoomConnector @JvmOverloads constructor(
 	ConnectorMessageDeleter,
 	ConnectorMessageEditor,
 	ConnectorReactionSender,
+	ConnectorReactionRemover,
 	ConnectorRoomObserver,
 	ConnectorTypingObserver,
 	ConnectorThumbnailLoader {
@@ -206,6 +208,11 @@ class MatrixRoomConnector @JvmOverloads constructor(
 	override fun sendReaction(threadId: String, messageId: String, reaction: String): Boolean {
 		if (!isAuthorized() || reaction.isBlank()) return false
 		return messageSendClient.sendReaction(threadId, messageId, reaction)
+	}
+
+	override fun removeReaction(threadId: String, messageId: String, reaction: String): Boolean {
+		if (!isAuthorized() || reaction.isBlank()) return false
+		return messageSendClient.removeReaction(threadId, messageId, reaction)
 	}
 
 	override fun observeRoom(

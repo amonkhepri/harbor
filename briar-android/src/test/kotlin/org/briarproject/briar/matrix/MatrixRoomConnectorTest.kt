@@ -837,6 +837,22 @@ class MatrixRoomConnectorTest {
 		assertFalse(failing.sendReaction("!room:example.org", "\$event", "👍"))
 	}
 
+	@Test
+	fun `removeReaction forwards only authorized non-blank reactions and reports failure`() {
+		val client = FakeMessageSendClient(true)
+		val auth = FakeMatrixAuthSession(MatrixAuthState.CREDENTIAL_ENTRY)
+		val connector = connector(authSession = auth, messageSendClient = client)
+		assertFalse(connector.removeReaction("!room:example.org", "\$event", "👍"))
+		auth.state = MatrixAuthState.READY
+		assertFalse(connector.removeReaction("!room:example.org", "\$event", "  "))
+		assertNull(client.lastRemovedReactionKey)
+
+		assertTrue(connector.removeReaction("!room:example.org", "\$event", "👍"))
+		assertEquals(listOf("!room:example.org", "\$event", "👍"), client.lastRemovedReaction)
+		val failing = connector(authSession = auth, messageSendClient = FakeMessageSendClient(false))
+		assertFalse(failing.removeReaction("!room:example.org", "\$event", "👍"))
+	}
+
 	private class FakeMessageSendClient(private val result: Boolean) : MatrixMessageSendClient {
 		var lastRequestedRoomId: String? = null
 			private set
@@ -859,9 +875,17 @@ class MatrixRoomConnectorTest {
 		var lastReaction: List<String>? = null
 			private set
 		val lastReactionKey get() = lastReaction?.get(2)
+		var lastRemovedReaction: List<String>? = null
+			private set
+		val lastRemovedReactionKey get() = lastRemovedReaction?.get(2)
 
 		override fun sendReaction(roomId: String, eventId: String, reaction: String): Boolean {
 			lastReaction = listOf(roomId, eventId, reaction)
+			return result
+		}
+
+		override fun removeReaction(roomId: String, eventId: String, reaction: String): Boolean {
+			lastRemovedReaction = listOf(roomId, eventId, reaction)
 			return result
 		}
 

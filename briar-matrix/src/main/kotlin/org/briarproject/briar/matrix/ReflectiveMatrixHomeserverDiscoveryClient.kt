@@ -1112,7 +1112,105 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		if (reaction.isBlank() || eventId.isBlank()) return false
 		val flightKey = "$roomId:$eventId:$reaction"
 		if (!inFlightReactions.add(flightKey)) return false
+		return toggleReactionInternal(roomId, eventId, reaction, flightKey)
+	}
 
+	/**
+	 * MX-060: removes the user's own [reaction] on [eventId] in [roomId].
+	 * Tracks SDK ownership to verify that the logged-in user actually added [reaction] to this
+	 * event before invoking the SDK's suspend `Timeline.toggleReaction(EventOrTransactionId, String)`.
+	 * If the event cannot be found, the user does not own the reaction, or the SDK call fails,
+	 * returns false -- never throwing.
+	 */
+	override fun removeReaction(roomId: String, eventId: String, reaction: String): Boolean {
+		if (reaction.isBlank() || eventId.isBlank() || roomId.isBlank()) return false
+		val flightKey = "$roomId:$eventId:$reaction"
+		if (!inFlightReactions.add(flightKey)) return false
+
+		val client = loginClient
+		if (client == null) {
+			inFlightReactions.remove(flightKey)
+			return false
+		}
+		val currentUserId = try {
+			client.javaClass.getMethod("userId").invoke(client) as? String
+		} catch (e: Exception) {
+			null
+		}
+		if (currentUserId.isNullOrBlank()) {
+			inFlightReactions.remove(flightKey)
+			return false
+		}
+
+		var room: Any? = null
+		var timeline: Any? = null
+		var item: Any? = null
+		val ownsReaction = try {
+			val loadedRoom =
+				client.javaClass.getMethod("getRoom", String::class.java).invoke(client, roomId)
+					?: throw SnapshotAdapterFailure()
+			room = loadedRoom
+			val loadedTimeline =
+				invokeCloseableValue(loadedRoom, "timeline", emptyArray(), emptyArray(), ::closeQuietly)
+			timeline = loadedTimeline
+			val loadedItem = invokeCloseableValue(
+				loadedTimeline,
+				"getEventTimelineItemByEventId",
+				arrayOf(String::class.java),
+				arrayOf(eventId),
+				::destroyQuietly,
+			)
+			item = loadedItem
+			hasOwnReaction(loadedItem, reaction, currentUserId)
+		} catch (e: InterruptedException) {
+			Thread.currentThread().interrupt()
+			false
+		} catch (e: Exception) {
+			false
+		} catch (e: LinkageError) {
+			false
+		} finally {
+			destroyQuietly(item)
+			closeQuietly(timeline)
+			closeQuietly(room)
+		}
+
+		if (!ownsReaction) {
+			inFlightReactions.remove(flightKey)
+			return false
+		}
+
+		return toggleReactionInternal(roomId, eventId, reaction, flightKey)
+	}
+
+	private fun hasOwnReaction(item: Any, reaction: String, currentUserId: String): Boolean {
+		val eventClass = item.javaClass
+		val content = eventClass.getMethod("getContent").invoke(item) ?: return false
+		if (content.javaClass.simpleName != "MsgLike") return false
+		val msgLike = content.javaClass.getMethod("getContent").invoke(content) ?: return false
+		val reactions =
+			msgLike.javaClass.getMethod("getReactions").invoke(msgLike) as? List<*> ?: return false
+		return reactions.any { r ->
+			if (r == null) return@any false
+			val key = r.javaClass.getMethod("getKey").invoke(r) as? String
+			if (key != reaction) return@any false
+			val senders = r.javaClass.getMethod("getSenders").invoke(r) as? List<*> ?: return@any false
+			senders.any { s ->
+				try {
+					s?.javaClass?.getMethod("getSenderId")?.invoke(s) == currentUserId
+				} catch (e: Exception) {
+					false
+				}
+			}
+		}
+	}
+
+	private fun toggleReactionInternal(
+		roomId: String,
+		eventId: String,
+		reaction: String,
+		flightKey: String,
+	): Boolean {
 		val completed = AtomicBoolean(false)
 		val outcome = AtomicReference<Result<Any?>>()
 		val latch = CountDownLatch(1)
@@ -1816,7 +1914,10 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 	private fun List<Any>.firstIndexOrFailure(): Int =
 		if (isEmpty()) throw SnapshotAdapterFailure() else 0
 
-	private fun readReactionSummaries(msgLike: Any): List<ConnectorReactionSummary> {
+	private fun readReactionSummaries(
+		msgLike: Any,
+		currentUserId: String? = null,
+	): List<ConnectorReactionSummary> {
 		val reactions = msgLike.javaClass.getMethod("getReactions").invoke(msgLike) as? List<*>
 			?: throw SnapshotAdapterFailure()
 		return reactions.mapNotNull { reaction ->
@@ -1828,7 +1929,18 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			if (key.isEmpty() || senders.isEmpty()) {
 				null
 			} else {
-				ConnectorReactionSummary(key, senders.size)
+				val isOwn = if (!currentUserId.isNullOrBlank()) {
+					senders.any { sender ->
+						try {
+							sender?.javaClass?.getMethod("getSenderId")?.invoke(sender) == currentUserId
+						} catch (ignored: Exception) {
+							false
+						}
+					}
+				} else {
+					false
+				}
+				ConnectorReactionSummary(key, senders.size, isOwn)
 			}
 		}
 	}
@@ -1864,7 +1976,12 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			// mx007_m3_item2_timeline_scoping.md), so no separate destroy call is needed here,
 			// consistent with message/kind/msgLike/content also being left undestroyed.
 			val inReplyTo = msgLike.javaClass.getMethod("getInReplyTo").invoke(msgLike)
-			val reactions = readReactionSummaries(msgLike)
+			val currentUserId = try {
+				loginClient?.let { it.javaClass.getMethod("userId").invoke(it) as? String }
+			} catch (ignored: Exception) {
+				null
+			}
+			val reactions = readReactionSummaries(msgLike, currentUserId)
 			val rawTypeName = messageType.javaClass.simpleName
 			val typeName = if (rawTypeName == "Companion") {
 				messageType.javaClass.enclosingClass?.simpleName ?: rawTypeName

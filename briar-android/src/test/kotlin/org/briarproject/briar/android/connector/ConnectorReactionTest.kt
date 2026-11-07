@@ -2,6 +2,7 @@ package org.briarproject.briar.android.connector
 
 import android.app.Application
 import org.briarproject.briar.android.Localizer
+import org.briarproject.briar.api.connector.ConnectorReactionRemover
 import org.briarproject.briar.api.connector.ConnectorReactionSender
 import org.briarproject.briar.api.connector.ReadOnlyConnector
 import org.junit.Assert.assertEquals
@@ -68,5 +69,58 @@ class ConnectorReactionTest {
 		verify(sender).sendReaction("room", "a", "👍")
 		verify(sender).sendReaction("room", "a", "❤️")
 		verifyNoMoreInteractions(sender)
+	}
+
+	@Test
+	fun reactionDialogIncludesOwnReactionsAndAppendsCustomReactions() {
+		val dialog = ConnectorReactionDialogFragment.newInstance(
+			"room",
+			"a",
+			arrayListOf("👍", "🚀"),
+		)
+		val args = dialog.requireArguments()
+		assertEquals(arrayListOf("👍", "🚀"), args.getStringArrayList("ownReactions"))
+	}
+
+	@Test
+	fun confirmReactionWithRemoveDelegatesToRemoverAndProtectsAgainstDuplicateSubmissions() {
+		Localizer.initialize(RuntimeEnvironment.getApplication().getSharedPreferences("test", 0))
+		val activity = Robolectric.buildActivity(ConnectorConversationActivity::class.java).get()
+		val connector = mock(
+			ReadOnlyConnector::class.java,
+			withSettings().extraInterfaces(
+				ConnectorReactionSender::class.java,
+				ConnectorReactionRemover::class.java,
+			),
+		)
+		ConnectorConversationActivity::class.java.getDeclaredField("reactionSender").apply {
+			isAccessible = true
+			set(activity, connector)
+		}
+		ConnectorConversationActivity::class.java.getDeclaredField("reactionRemover").apply {
+			isAccessible = true
+			set(activity, connector)
+		}
+		val pending = mutableListOf<Runnable>()
+		activity.ioExecutor = Executor { pending.add(it) }
+
+		// Blank reaction is ignored
+		activity.confirmReaction("room", "a", " ", isRemove = true)
+		activity.confirmReaction("room", "", "👍", isRemove = true)
+
+		// First valid removal schedules execution
+		activity.confirmReaction("room", "a", "👍", isRemove = true)
+		assertEquals(1, pending.size)
+
+		// Duplicate in-flight removal for same (room, message, reaction) is blocked
+		activity.confirmReaction("room", "a", "👍", isRemove = true)
+		assertEquals(1, pending.size)
+
+		activity.finish()
+		pending.forEach { it.run() }
+
+		val remover = connector as ConnectorReactionRemover
+		verify(remover).removeReaction("room", "a", "👍")
+		verifyNoMoreInteractions(remover)
 	}
 }

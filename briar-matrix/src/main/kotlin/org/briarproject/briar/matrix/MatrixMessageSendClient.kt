@@ -88,4 +88,12 @@ interface MatrixMessageSendClient {
 	 * fail closed.
 	 */
 	fun sendReaction(roomId: String, eventId: String, reaction: String): Boolean = false
+
+	/**
+	 * Removes the user's own [reaction] from [eventId] in [roomId] (MX-060) via the pinned SDK's
+	 * suspend `Timeline.toggleReaction(EventOrTransactionId, String)`. Returns false
+	 * -- never throwing -- under the same conditions as [sendTextMessage]; unsupported clients
+	 * fail closed.
+	 */
+	fun removeReaction(roomId: String, eventId: String, reaction: String): Boolean = false
 }

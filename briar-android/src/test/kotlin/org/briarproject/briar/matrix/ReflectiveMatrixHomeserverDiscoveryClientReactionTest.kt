@@ -8,6 +8,12 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.matrix.rustcomponents.sdk.ClientException
+import org.matrix.rustcomponents.sdk.EventOrTransactionId
+import org.matrix.rustcomponents.sdk.FakeTimelineEventSpec
+import org.matrix.rustcomponents.sdk.Reaction
+import org.matrix.rustcomponents.sdk.ReactionSenderData
+import org.matrix.rustcomponents.sdk.TimelineDiff
+import org.matrix.rustcomponents.sdk.TimelineItem
 import org.matrix.rustcomponents.sdk.FakeMatrixSdkState
 import org.matrix.rustcomponents.sdk.FakeRoomSpec
 import java.util.concurrent.Callable
@@ -194,6 +200,173 @@ class ReflectiveMatrixHomeserverDiscoveryClientReactionTest {
 			client.sendReaction(ROOM, EVENT, "👍"),
 		)
 		assertEquals(2, FakeMatrixSdkState.toggleReactionCallCount)
+	}
+
+	@Test
+	fun `removeReaction removes own reaction and leaves others intact`() {
+		val client = loggedInClient()
+		val alice = "@alice:matrix.example.org"
+		val bob = "@bob:matrix.example.org"
+
+		// Event has reactions: 👍 from alice and bob, ❤️ only from bob
+		FakeMatrixSdkState.eventItemsById = mapOf(
+			EVENT to FakeTimelineEventSpec(
+				identifier = EventOrTransactionId.EventId(EVENT),
+				sender = bob,
+				body = "Hello",
+				timestamp = 1000uL,
+				reactions = listOf(
+					Reaction("👍", listOf(ReactionSenderData(alice), ReactionSenderData(bob))),
+					Reaction("❤️", listOf(ReactionSenderData(bob))),
+				),
+			),
+		)
+
+		// Removing alice's 👍 succeeds
+		assertTrue(client.removeReaction(ROOM, EVENT, "👍"))
+		assertEquals(1, FakeMatrixSdkState.toggleReactionCallCount)
+
+		// Aggregate count reconciles with remote state: 👍 count is now 1 (only bob), ❤️ intact
+		val updatedEvent = FakeMatrixSdkState.eventItemsById[EVENT]!!
+		val thumbsUp = updatedEvent.reactions.first { it.key == "👍" }
+		assertEquals(1, thumbsUp.senders.size)
+		assertEquals(bob, thumbsUp.senders[0].senderId)
+		val heart = updatedEvent.reactions.first { it.key == "❤️" }
+		assertEquals(1, heart.senders.size)
+		assertEquals(bob, heart.senders[0].senderId)
+	}
+
+	@Test
+	fun `removeReaction fails when user does not own the reaction without calling SDK`() {
+		val client = loggedInClient()
+		val bob = "@bob:matrix.example.org"
+
+		// Event has reaction from bob only
+		FakeMatrixSdkState.eventItemsById = mapOf(
+			EVENT to FakeTimelineEventSpec(
+				identifier = EventOrTransactionId.EventId(EVENT),
+				sender = bob,
+				body = "Hello",
+				timestamp = 1000uL,
+				reactions = listOf(
+					Reaction("👍", listOf(ReactionSenderData(bob))),
+				),
+			),
+		)
+
+		// Alice attempting to remove 👍 is rejected without calling SDK toggleReaction
+		assertFalse(client.removeReaction(ROOM, EVENT, "👍"))
+		assertEquals(0, FakeMatrixSdkState.toggleReactionCallCount)
+
+		// Alice attempting to remove unreacted emoji is rejected
+		assertFalse(client.removeReaction(ROOM, EVENT, "❤️"))
+		assertEquals(0, FakeMatrixSdkState.toggleReactionCallCount)
+	}
+
+	@Test
+	fun `removeReaction rejects blank inputs and unknown events`() {
+		val client = loggedInClient()
+
+		assertFalse(client.removeReaction(ROOM, EVENT, ""))
+		assertFalse(client.removeReaction(ROOM, EVENT, "   "))
+		assertFalse(client.removeReaction(ROOM, "", "👍"))
+		assertFalse(client.removeReaction("", EVENT, "👍"))
+		assertFalse(client.removeReaction(ROOM, "unknown-event", "👍"))
+		assertEquals(0, FakeMatrixSdkState.toggleReactionCallCount)
+	}
+
+	@Test
+	fun `removeReaction protects against concurrent duplicate in-flight removals`() {
+		val client = loggedInClient()
+		val alice = "@alice:matrix.example.org"
+		FakeMatrixSdkState.eventItemsById = mapOf(
+			EVENT to FakeTimelineEventSpec(
+				identifier = EventOrTransactionId.EventId(EVENT),
+				sender = "@bob:matrix.example.org",
+				body = "Hello",
+				timestamp = 1000uL,
+				reactions = listOf(
+					Reaction("👍", listOf(ReactionSenderData(alice))),
+				),
+			),
+		)
+
+		val firstCallStarted = CountDownLatch(1)
+		val letFirstCallProceed = CountDownLatch(1)
+		val secondCallResult = AtomicBoolean(true)
+		val secondCallDone = CountDownLatch(1)
+
+		FakeMatrixSdkState.onToggleReaction = {
+			firstCallStarted.countDown()
+			letFirstCallProceed.await(5, TimeUnit.SECONDS)
+		}
+
+		val executor = Executors.newFixedThreadPool(2)
+		try {
+			val firstCallFuture = executor.submit(
+				Callable {
+					client.removeReaction(ROOM, EVENT, "👍")
+				},
+			)
+
+			assertTrue("First call should reach SDK", firstCallStarted.await(5, TimeUnit.SECONDS))
+
+			// Second overlapping call for the exact same (room, event, reaction)
+			executor.submit {
+				secondCallResult.set(client.removeReaction(ROOM, EVENT, "👍"))
+				secondCallDone.countDown()
+			}
+
+			assertTrue("Second call should finish promptly", secondCallDone.await(5, TimeUnit.SECONDS))
+			assertFalse("Duplicate removal while in flight must be rejected", secondCallResult.get())
+
+			letFirstCallProceed.countDown()
+			assertTrue("First call must succeed", firstCallFuture.get(5, TimeUnit.SECONDS))
+		} finally {
+			executor.shutdownNow()
+		}
+	}
+
+	@Test
+	fun `tracks SDK ownership for own and peer reactions when reading timeline`() {
+		val alice = "@alice:matrix.example.org"
+		val bob = "@bob:matrix.example.org"
+		val client = ReflectiveMatrixHomeserverDiscoveryClient().also {
+			FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec(ROOM))
+			FakeMatrixSdkState.timelineDiffsToReturn = listOf(
+				TimelineDiff.Reset(
+					listOf(
+						TimelineItem(
+							FakeTimelineEventSpec(
+								identifier = EventOrTransactionId.EventId(EVENT),
+								sender = bob,
+								body = "Hello",
+								timestamp = 1000uL,
+								reactions = listOf(
+									Reaction("👍", listOf(ReactionSenderData(alice), ReactionSenderData(bob))),
+									Reaction("❤️", listOf(ReactionSenderData(bob))),
+								),
+							),
+						),
+					),
+				),
+			)
+			assertEquals(NONE, it.login("https://matrix.example.org", "alice", "swordfish"))
+		}
+
+		val items = client.getRecentMessages(ROOM, 50)
+		assertNotNull(items)
+		assertEquals(1, items!!.size)
+		val msg = items[0]
+		assertEquals(2, msg.reactions.size)
+
+		val thumbsUp = msg.reactions.first { it.key == "👍" }
+		assertEquals(2, thumbsUp.count)
+		assertTrue("Alice's reaction must have isOwn=true", thumbsUp.isOwn)
+
+		val heart = msg.reactions.first { it.key == "❤️" }
+		assertEquals(1, heart.count)
+		assertFalse("Bob's reaction must have isOwn=false for Alice", heart.isOwn)
 	}
 
 	private fun loggedInClient() = ReflectiveMatrixHomeserverDiscoveryClient().also {

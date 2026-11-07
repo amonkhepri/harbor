@@ -218,6 +218,33 @@ class Timeline {
 		FakeMatrixSdkState.lastReactionKey = key
 		FakeMatrixSdkState.toggleReactionFailureToThrow?.let { throw it }
 		FakeMatrixSdkState.onToggleReaction?.invoke()
+		val eventId = (eventOrTransactionId as? EventOrTransactionId.EventId)?.eventId
+		if (eventId != null && FakeMatrixSdkState.eventItemsById.containsKey(eventId)) {
+			val existingSpec = FakeMatrixSdkState.eventItemsById[eventId]!!
+			val currentUserId = FakeMatrixSdkState.currentUserId ?: "@alice:matrix.example.org"
+			val existingReaction = existingSpec.reactions.firstOrNull { it.key == key }
+			val hasOwn = existingReaction?.senders?.any { it.senderId == currentUserId } == true
+			val newReactions = if (hasOwn) {
+				val updatedSenders = existingReaction!!.senders.filter { it.senderId != currentUserId }
+				if (updatedSenders.isEmpty()) {
+					existingSpec.reactions.filter { it.key != key }
+				} else {
+					existingSpec.reactions.map {
+						if (it.key == key) it.copy(senders = updatedSenders) else it
+					}
+				}
+			} else {
+				if (existingReaction != null) {
+					existingSpec.reactions.map {
+						if (it.key == key) it.copy(senders = it.senders + ReactionSenderData(currentUserId)) else it
+					}
+				} else {
+					existingSpec.reactions + Reaction(key, listOf(ReactionSenderData(currentUserId)))
+				}
+			}
+			FakeMatrixSdkState.eventItemsById =
+				FakeMatrixSdkState.eventItemsById + (eventId to existingSpec.copy(reactions = newReactions))
+		}
 		if (FakeMatrixSdkState.toggleReactionSuspendAsynchronously) {
 			if (FakeMatrixSdkState.toggleReactionCancellable) {
 				return kotlinx.coroutines.suspendCancellableCoroutine { continuation ->
@@ -382,7 +409,7 @@ class MsgLikeContent(
 
 data class Reaction(val key: String, val senders: List<ReactionSenderData>)
 
-class ReactionSenderData
+data class ReactionSenderData(val senderId: String = "", val timestamp: ULong = 0uL)
 
 class InReplyToDetails {
 	fun destroy() {
@@ -767,6 +794,7 @@ class Client internal constructor(
 			slidingSyncVersion = SlidingSyncVersion.NATIVE,
 		)
 		sessionDelegate?.saveSessionInKeychain(session!!)
+		FakeMatrixSdkState.currentUserId = session?.userId
 		FakeMatrixSdkState.onLogin?.invoke()
 	}
 
@@ -774,6 +802,7 @@ class Client internal constructor(
 		FakeMatrixSdkState.restoreSessionCallCount++
 		FakeMatrixSdkState.restoreSessionException?.let { throw it }
 		this.session = session
+		FakeMatrixSdkState.currentUserId = session.userId
 	}
 
 	fun userId(): String = session?.userId ?: throw ClientException.Generic("no session", "no session")
@@ -782,6 +811,7 @@ class Client internal constructor(
 		FakeMatrixSdkState.onDispose?.invoke()
 		FakeMatrixSdkState.logoutCallCount++
 		session = null
+		FakeMatrixSdkState.currentUserId = null
 	}
 
 	fun close() {
@@ -1060,6 +1090,7 @@ object FakeMatrixSdkState {
 	var lastEditedEventId: String? = null
 	var lastEditedContent: EditedContent? = null
 	var editFailureToThrow: ClientException? = null
+	var currentUserId: String? = null
 	var toggleReactionCallCount = 0
 	var lastReactionEventId: String? = null
 	var lastReactionKey: String? = null
@@ -1205,6 +1236,7 @@ object FakeMatrixSdkState {
 		lastEditedEventId = null
 		lastEditedContent = null
 		editFailureToThrow = null
+		currentUserId = null
 		toggleReactionCallCount = 0
 		lastReactionEventId = null
 		lastReactionKey = null

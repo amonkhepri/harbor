@@ -183,6 +183,8 @@
 	<string name="connector_conversation_edit_failed">Message could not be edited</string>
 	<string name="connector_conversation_react">React</string>
 	<string name="connector_conversation_reaction_failed">Reaction could not be added</string>
+	<string name="connector_conversation_reaction_remove_failed">Reaction could not be removed</string>
+	<string name="connector_reaction_remove">Remove %1$s</string>
 	<string name="connector_reaction_thumbs_up">👍 Thumbs up</string>
 	<string name="connector_reaction_heart">❤️ Heart</string>
 	<string name="connector_reaction_joy">😂 Joy</string>
