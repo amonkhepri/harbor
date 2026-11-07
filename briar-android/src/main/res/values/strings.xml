@@ -204,6 +204,8 @@
 	<string name="connector_image_failed">Image could not be sent. Retry or choose another image (up to 10 MB).</string>
 	<string name="connector_message_sending">Sending…</string>
 	<string name="connector_message_sent">Sent</string>
+	<string name="connector_message_read">Read</string>
+	<string name="connector_message_unread">Unread</string>
 	<string name="connector_inbox_refresh">Refresh connector inbox</string>
 	<string name="inbox_filter_title">Filter conversations</string>
 	<string name="inbox_filter_all">All</string>

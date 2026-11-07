@@ -10,6 +10,7 @@ import org.briarproject.briar.android.connector.ConnectorLocalEchoStatus.FAILED
 import org.briarproject.briar.android.connector.ConnectorLocalEchoStatus.PENDING
 import org.briarproject.briar.android.connector.ConnectorLocalEchoStatus.SENT
 import org.briarproject.briar.api.connector.ConnectorAttachmentMetadata
+import org.briarproject.briar.api.connector.ConnectorMessageReceiptState
 import org.briarproject.briar.api.connector.ConnectorMessageType
 import org.briarproject.briar.api.connector.ConnectorReactionSummary
 import org.briarproject.briar.api.connector.ConnectorSources
@@ -722,5 +723,44 @@ class ConnectorConversationAdapterTest {
 		val failedText = context.getString(R.string.connector_file_download_failed)
 		assertTrue(fileDetails.text.toString().contains(failedText))
 		assertTrue(fileLayout.contentDescription.toString().contains(failedText))
+	}
+
+	@Test
+	fun testOutgoingMessageRendersReadReceiptState() {
+		val context = RuntimeEnvironment.getApplication()
+		val view = LayoutInflater.from(context)
+			.inflate(R.layout.list_item_connector_message, null)
+		val holder = ConnectorConversationAdapter.MessageViewHolder(view)
+		val direction = view.findViewById<TextView>(R.id.connectorMessageDirection)
+
+		val baseItem = ConnectorConversationMessageItem(
+			connectorSource = ConnectorSources.MATRIX,
+			connectorThreadId = "!room:example.org",
+			connectorMessageId = "\$msg:example.org",
+			dateMillis = 1_000L,
+			isOutgoing = true,
+			text = "hello",
+			type = ConnectorMessageType.TEXT,
+		)
+
+		// 1. Unknown receipt state renders Outgoing
+		holder.bind(baseItem.copy(receiptState = ConnectorMessageReceiptState.UNKNOWN))
+		assertEquals(context.getString(R.string.connector_conversation_direction_outgoing), direction.text.toString())
+
+		// 2. Unread receipt state renders Unread
+		holder.bind(baseItem.copy(receiptState = ConnectorMessageReceiptState.UNREAD))
+		assertEquals(context.getString(R.string.connector_message_unread), direction.text.toString())
+
+		// 3. Read receipt state renders Read
+		holder.bind(baseItem.copy(receiptState = ConnectorMessageReceiptState.READ))
+		assertEquals(context.getString(R.string.connector_message_read), direction.text.toString())
+
+		// 4. Incoming message always renders Incoming
+		holder.bind(baseItem.copy(isOutgoing = false, receiptState = ConnectorMessageReceiptState.READ))
+		assertEquals(context.getString(R.string.connector_conversation_direction_incoming), direction.text.toString())
+
+		// 5. Local echo status takes priority over receipt state
+		holder.bind(baseItem.copy(localEchoStatus = PENDING, receiptState = ConnectorMessageReceiptState.READ))
+		assertEquals(context.getString(R.string.connector_message_sending), direction.text.toString())
 	}
 }

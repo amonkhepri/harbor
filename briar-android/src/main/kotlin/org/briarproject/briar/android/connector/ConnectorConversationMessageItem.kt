@@ -2,6 +2,7 @@ package org.briarproject.briar.android.connector
 
 import org.briarproject.briar.api.connector.ConnectorAttachmentMetadata
 import org.briarproject.briar.api.connector.ConnectorMessage
+import org.briarproject.briar.api.connector.ConnectorMessageReceiptState
 import org.briarproject.briar.api.connector.ConnectorMessageType
 import org.briarproject.briar.api.connector.ConnectorReactionSummary
 import org.briarproject.briar.api.connector.ConnectorSource
@@ -26,6 +27,7 @@ data class ConnectorConversationMessageItem(
 	val attachment: ConnectorAttachmentMetadata? = null,
 	val downloadState: ConnectorDownloadState? = null,
 	val downloadedFile: File? = null,
+	val receiptState: ConnectorMessageReceiptState = ConnectorMessageReceiptState.UNKNOWN,
 ) {
 	val stableId: String
 		get() = "${connectorSource.id}:$connectorThreadId:$connectorMessageId" +
@@ -76,6 +78,15 @@ data class ConnectorConversationMessageItem(
 			first: ConnectorConversationMessageItem,
 			second: ConnectorConversationMessageItem,
 		): ConnectorConversationMessageItem {
+			val receiptState = when {
+				second.receiptState == ConnectorMessageReceiptState.READ ||
+					first.receiptState == ConnectorMessageReceiptState.READ ->
+					ConnectorMessageReceiptState.READ
+				second.receiptState == ConnectorMessageReceiptState.UNREAD ||
+					first.receiptState == ConnectorMessageReceiptState.UNREAD ->
+					ConnectorMessageReceiptState.UNREAD
+				else -> ConnectorMessageReceiptState.UNKNOWN
+			}
 			if (first.type == ConnectorMessageType.DELETED ||
 				second.type == ConnectorMessageType.DELETED
 			) {
@@ -88,6 +99,7 @@ data class ConnectorConversationMessageItem(
 					reactions = emptyList(),
 					downloadState = null,
 					downloadedFile = null,
+					receiptState = receiptState,
 				)
 			}
 			val base = when {
@@ -109,6 +121,7 @@ data class ConnectorConversationMessageItem(
 				isReply = isReply,
 				downloadState = downloadState,
 				downloadedFile = downloadedFile,
+				receiptState = receiptState,
 			)
 		}
 
@@ -125,6 +138,7 @@ data class ConnectorConversationMessageItem(
 				message.isReply,
 				message.reactions,
 				attachment = message.attachment,
+				receiptState = message.receiptState,
 			)
 	}
 }

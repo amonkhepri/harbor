@@ -13,6 +13,7 @@ import org.briarproject.briar.api.connector.ConnectorFileDownloader.DownloadResu
 import org.briarproject.briar.api.connector.ConnectorFileDownloader.FailureCause
 import org.briarproject.briar.api.connector.ConnectorFileSender
 import org.briarproject.briar.api.connector.ConnectorImageSender
+import org.briarproject.briar.api.connector.ConnectorMessageReceiptState
 import org.briarproject.briar.api.connector.ConnectorMessageType
 import org.briarproject.briar.api.connector.ConnectorReactionSummary
 import org.briarproject.briar.api.connector.ConnectorUnreadMarker.PreparedMarkUnread
@@ -1591,7 +1592,8 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 				return null
 			}
 			val result = try {
-				Result.success(reduceTimelineDiffs(diffs).mapNotNull(::toMessageSnapshot))
+				val rawSnapshots = reduceTimelineDiffs(diffs).mapNotNull(::toMessageSnapshot)
+				Result.success(applyReceiptStates(rawSnapshots))
 			} catch (e: Exception) {
 				Result.failure(e)
 			} catch (e: LinkageError) {
@@ -1618,6 +1620,28 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		}
 	}
 
+	private fun applyReceiptStates(
+		snapshots: List<MatrixMessageSnapshot>,
+	): List<MatrixMessageSnapshot> {
+		if (snapshots.isEmpty()) return emptyList()
+		val latestPeerReadIndex = snapshots.indexOfLast { it.hasPeerReceipt }
+		if (latestPeerReadIndex == -1) {
+			return snapshots
+		}
+		return snapshots.mapIndexed { index, snapshot ->
+			if (snapshot.isOutgoing) {
+				val state = if (index <= latestPeerReadIndex) {
+					ConnectorMessageReceiptState.READ
+				} else {
+					ConnectorMessageReceiptState.UNREAD
+				}
+				snapshot.copy(receiptState = state)
+			} else {
+				snapshot
+			}
+		}
+	}
+
 	private fun deduplicateSnapshots(
 		snapshots: List<MatrixMessageSnapshot>,
 	): List<MatrixMessageSnapshot> {
@@ -1631,13 +1655,23 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 				mergeSnapshots(existing, snapshot)
 			}
 		}
-		return deduplicated.values.toList()
+		return applyReceiptStates(deduplicated.values.toList())
 	}
 
 	private fun mergeSnapshots(
 		first: MatrixMessageSnapshot,
 		second: MatrixMessageSnapshot,
 	): MatrixMessageSnapshot {
+		val hasPeerReceipt = first.hasPeerReceipt || second.hasPeerReceipt
+		val receiptState = when {
+			second.receiptState == ConnectorMessageReceiptState.READ ||
+				first.receiptState == ConnectorMessageReceiptState.READ ->
+				ConnectorMessageReceiptState.READ
+			second.receiptState == ConnectorMessageReceiptState.UNREAD ||
+				first.receiptState == ConnectorMessageReceiptState.UNREAD ->
+				ConnectorMessageReceiptState.UNREAD
+			else -> ConnectorMessageReceiptState.UNKNOWN
+		}
 		if (first.type == ConnectorMessageType.DELETED ||
 			second.type == ConnectorMessageType.DELETED
 		) {
@@ -1648,6 +1682,8 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 				isEdited = false,
 				attachment = null,
 				reactions = emptyList(),
+				receiptState = receiptState,
+				hasPeerReceipt = hasPeerReceipt,
 			)
 		}
 		val base = when {
@@ -1665,6 +1701,8 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			reactions = base.reactions,
 			attachment = attachment,
 			isReply = isReply,
+			receiptState = receiptState,
+			hasPeerReceipt = hasPeerReceipt,
 		)
 	}
 
@@ -2027,6 +2065,19 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		}
 	}
 
+	private fun hasPeerReadReceipt(event: Any, currentUserId: String?): Boolean {
+		if (currentUserId.isNullOrBlank()) return false
+		return try {
+			val receipts = event.javaClass.getMethod("getReadReceipts").invoke(event) as? Map<*, *>
+				?: return false
+			receipts.keys.any { key ->
+				key is String && key.isNotBlank() && key != currentUserId
+			}
+		} catch (ignored: Exception) {
+			false
+		}
+	}
+
 	private fun toMessageSnapshot(timelineItem: Any): MatrixMessageSnapshot? {
 		val event = timelineItem.javaClass.getMethod("asEvent").invoke(timelineItem) ?: return null
 		return try {
@@ -2037,6 +2088,12 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			if (content.javaClass.simpleName != "MsgLike") return null
 			val msgLike = content.javaClass.getMethod("getContent").invoke(content)
 			val kind = msgLike.javaClass.getMethod("getKind").invoke(msgLike)
+			val currentUserId = try {
+				loginClient?.let { it.javaClass.getMethod("userId").invoke(it) as? String }
+			} catch (ignored: Exception) {
+				null
+			}
+			val hasPeerReceipt = hasPeerReadReceipt(event, currentUserId)
 			// sdk-android:26.08.05 exposes Redacted as a payload-free singleton.
 			if (kind.javaClass.simpleName == "Redacted") {
 				val timestamp = eventClass.getMethod(TIMESTAMP_GETTER_NAME).invoke(event) as Long
@@ -2047,6 +2104,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 					originServerTimestampSeconds = (timestamp.toULong() / 1_000uL).toLong(),
 					isOutgoing = eventClass.getMethod("isOwn").invoke(event) as Boolean,
 					type = ConnectorMessageType.DELETED,
+					hasPeerReceipt = hasPeerReceipt,
 				)
 			}
 			if (kind.javaClass.simpleName != "Message") return null
@@ -2058,11 +2116,6 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			// mx007_m3_item2_timeline_scoping.md), so no separate destroy call is needed here,
 			// consistent with message/kind/msgLike/content also being left undestroyed.
 			val inReplyTo = msgLike.javaClass.getMethod("getInReplyTo").invoke(msgLike)
-			val currentUserId = try {
-				loginClient?.let { it.javaClass.getMethod("userId").invoke(it) as? String }
-			} catch (ignored: Exception) {
-				null
-			}
 			val reactions = readReactionSummaries(msgLike, currentUserId)
 			val rawTypeName = messageType.javaClass.simpleName
 			val typeName = if (rawTypeName == "Companion") {
@@ -2086,6 +2139,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 				isReply = inReplyTo != null,
 				reactions = reactions,
 				attachment = attachment,
+				hasPeerReceipt = hasPeerReceipt,
 			)
 		} finally {
 			destroyQuietly(event)

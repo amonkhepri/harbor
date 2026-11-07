@@ -6,6 +6,7 @@ import org.briarproject.briar.api.connector.ConnectorAttachmentMetadata
 import org.briarproject.briar.api.connector.ConnectorMessage
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult.LoadFailed
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult.Success
+import org.briarproject.briar.api.connector.ConnectorMessageReceiptState
 import org.briarproject.briar.api.connector.ConnectorMessageType
 import org.briarproject.briar.api.connector.ConnectorReactionSummary
 import org.briarproject.briar.api.connector.ConnectorSources
@@ -367,6 +368,31 @@ class MatrixRoomConnectorTest {
 		val result = connector.getRecentMessageReadResult("!a:example.org", 10)
 
 		assertEquals(LoadFailed, result)
+	}
+
+	@Test
+	fun `getRecentMessageReadResult maps receiptState from snapshot`() {
+		val messageSnapshotClient = FakeMessageSnapshotClient(
+			listOf(
+				MatrixMessageSnapshot(
+					eventId = "\$read:example.org",
+					senderId = "@alice:example.org",
+					bodyText = "read message",
+					originServerTimestampSeconds = 42L,
+					isOutgoing = true,
+					receiptState = ConnectorMessageReceiptState.READ,
+				),
+			),
+		)
+		val connector = connector(
+			messageSnapshotClient = messageSnapshotClient,
+			authSession = FakeMatrixAuthSession(MatrixAuthState.READY),
+		)
+
+		val result = connector.getRecentMessageReadResult("!a:example.org", 10)
+
+		val message = (result as Success).messages.single()
+		assertEquals(ConnectorMessageReceiptState.READ, message.receiptState)
 	}
 
 	@Test

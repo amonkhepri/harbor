@@ -47,6 +47,8 @@ enum class Membership { INVITED, JOINED, LEFT, KNOCKED, BANNED }
 
 enum class ReceiptType { READ, READ_PRIVATE, FULLY_READ }
 
+data class Receipt(val timestamp: ULong = 0uL)
+
 class RoomInfo(val numUnreadMessages: ULong = 0uL, val isMarkedUnread: Boolean = false) {
 	fun destroy() {
 		FakeMatrixSdkState.roomInfoDestroyCount++
@@ -350,6 +352,7 @@ data class FakeTimelineEventSpec(
 	val reactions: List<Reaction> = emptyList(),
 	val redacted: Boolean = false,
 	val editable: Boolean = own,
+	val readReceipts: Map<String, Receipt> = emptyMap(),
 ) {
 	fun toEventTimelineItem(): EventTimelineItem {
 		val content = if (redacted) {
@@ -365,7 +368,7 @@ data class FakeTimelineEventSpec(
 				),
 			)
 		}
-		return EventTimelineItem(identifier, sender, own, content, timestamp, editable)
+		return EventTimelineItem(identifier, sender, own, content, timestamp, editable, readReceipts)
 	}
 }
 
@@ -381,6 +384,7 @@ class EventTimelineItem(
 	val content: TimelineItemContent,
 	val timestamp: ULong,
 	private val editable: Boolean = own,
+	val readReceipts: Map<String, Receipt> = emptyMap(),
 ) {
 	fun isOwn(): Boolean = own
 	fun isEditable(): Boolean = editable

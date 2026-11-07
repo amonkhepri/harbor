@@ -12,6 +12,7 @@ import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
 import org.briarproject.briar.R
 import org.briarproject.briar.android.util.UiUtils.formatDate
+import org.briarproject.briar.api.connector.ConnectorMessageReceiptState
 import org.briarproject.briar.api.connector.ConnectorMessageType
 
 internal class ConnectorConversationAdapter(
@@ -253,7 +254,12 @@ internal class ConnectorConversationAdapter(
 					ConnectorLocalEchoStatus.SENT -> R.string.connector_message_sent
 					ConnectorLocalEchoStatus.FAILED -> R.string.connector_conversation_send_failed
 					null -> if (item.isOutgoing) {
-						R.string.connector_conversation_direction_outgoing
+						when (item.receiptState) {
+							ConnectorMessageReceiptState.READ -> R.string.connector_message_read
+							ConnectorMessageReceiptState.UNREAD -> R.string.connector_message_unread
+							ConnectorMessageReceiptState.UNKNOWN ->
+								R.string.connector_conversation_direction_outgoing
+						}
 					} else {
 						R.string.connector_conversation_direction_incoming
 					}
@@ -359,6 +365,7 @@ internal class ConnectorConversationAdapter(
 			i1.localEchoStatus == i2.localEchoStatus &&
 			i1.attachment == i2.attachment &&
 			i1.downloadState == i2.downloadState &&
-			i1.downloadedFile == i2.downloadedFile
+			i1.downloadedFile == i2.downloadedFile &&
+			i1.receiptState == i2.receiptState
 	}
 }

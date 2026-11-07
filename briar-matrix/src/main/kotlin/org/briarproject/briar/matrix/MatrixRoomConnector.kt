@@ -141,6 +141,7 @@ class MatrixRoomConnector @JvmOverloads constructor(
 					isReply = snapshot.isReply,
 					reactions = snapshot.reactions,
 					attachment = snapshot.attachment,
+					receiptState = snapshot.receiptState,
 				)
 			},
 		)

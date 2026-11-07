@@ -13,6 +13,7 @@ data class ConnectorMessage(
 	val isReply: Boolean = false,
 	val reactions: List<ConnectorReactionSummary> = emptyList(),
 	val attachment: ConnectorAttachmentMetadata? = null,
+	val receiptState: ConnectorMessageReceiptState = ConnectorMessageReceiptState.UNKNOWN,
 )
 
 data class ConnectorReactionSummary(val key: String, val count: Int, val isOwn: Boolean = false)
@@ -22,4 +23,10 @@ enum class ConnectorMessageType {
 	PHOTO,
 	FILE,
 	DELETED,
+}
+
+enum class ConnectorMessageReceiptState {
+	UNKNOWN,
+	UNREAD,
+	READ,
 }
