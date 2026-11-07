@@ -409,6 +409,108 @@ class ReflectiveMatrixHomeserverDiscoveryClientReactionTest {
 	}
 
 	@Test
+	fun `removeReaction recovers asynchronously and retains operation ownership across recovery when state changes`() {
+		val client = loggedInClient()
+		val alice = "@alice:matrix.example.org"
+		val bob = "@bob:matrix.example.org"
+
+		FakeMatrixSdkState.eventItemsById = mapOf(
+			EVENT to FakeTimelineEventSpec(
+				identifier = EventOrTransactionId.EventId(EVENT),
+				sender = bob,
+				body = "Hello",
+				timestamp = 1000uL,
+				reactions = listOf(
+					Reaction("👍", listOf(ReactionSenderData(alice))),
+				),
+			),
+		)
+
+		// Simulate another session removing alice's reaction between lookup and toggle
+		FakeMatrixSdkState.onToggleReaction = {
+			FakeMatrixSdkState.onToggleReaction = null
+			val spec = FakeMatrixSdkState.eventItemsById[EVENT]!!
+			FakeMatrixSdkState.eventItemsById = mapOf(
+				EVENT to spec.copy(reactions = emptyList()),
+			)
+		}
+
+		FakeMatrixSdkState.toggleReactionSuspendAsynchronously = true
+		FakeMatrixSdkState.toggleReactionCancellable = false
+		val initialContinuation = AtomicReference<kotlin.coroutines.Continuation<Boolean>>()
+		val initialSuspended = CountDownLatch(1)
+		val recoveryContinuation = AtomicReference<kotlin.coroutines.Continuation<Boolean>>()
+		val recoverySuspended = CountDownLatch(1)
+
+		var callIndex = 0
+		FakeMatrixSdkState.onToggleReactionContinuation = { cont ->
+			if (callIndex++ == 0) {
+				initialContinuation.set(cont)
+				initialSuspended.countDown()
+			} else {
+				recoveryContinuation.set(cont)
+				recoverySuspended.countDown()
+			}
+		}
+
+		val executor = Executors.newFixedThreadPool(2)
+		try {
+			val removeResult = AtomicReference<Boolean>()
+			val removeFinished = CountDownLatch(1)
+			executor.execute {
+				removeResult.set(client.removeReaction(ROOM, EVENT, "👍"))
+				removeFinished.countDown()
+			}
+
+			// Wait for initial toggle to suspend
+			assertTrue("Initial toggle must suspend", initialSuspended.await(5, TimeUnit.SECONDS))
+			val firstCont = initialContinuation.get()
+			assertNotNull("Initial continuation must be captured", firstCont)
+
+			// Resume initial toggle asynchronously with true (indicating reaction was added)
+			executor.execute {
+				firstCont.resume(true)
+			}
+
+			// Wait for recovery toggle to be invoked and suspend
+			assertTrue("Recovery toggle must be invoked and suspend", recoverySuspended.await(5, TimeUnit.SECONDS))
+			val secondCont = recoveryContinuation.get()
+			assertNotNull("Recovery continuation must be captured", secondCont)
+
+			// While recovery toggle is in-flight, concurrent calls must be rejected (operation ownership retained)
+			assertFalse(
+				"Concurrent sendReaction must be rejected while recovery is in flight",
+				client.sendReaction(ROOM, EVENT, "👍"),
+			)
+
+			// Resume recovery toggle asynchronously with false (indicating reaction was removed)
+			executor.execute {
+				secondCont.resume(false)
+			}
+
+			// Wait for removeReaction to complete
+			assertTrue("removeReaction must finish", removeFinished.await(5, TimeUnit.SECONDS))
+			assertFalse("removeReaction must report false because reaction state changed", removeResult.get())
+			assertEquals("SDK should receive initial toggle + recovery toggle", 2, FakeMatrixSdkState.toggleReactionCallCount)
+
+			// Final state must not retain alice's reaction
+			val updatedEvent = FakeMatrixSdkState.eventItemsById[EVENT]!!
+			val thumbsUp = updatedEvent.reactions.firstOrNull { it.key == "👍" }
+			org.junit.Assert.assertNull("Alice's reaction must be cleaned up by recovery toggle", thumbsUp)
+
+			// Subsequent reaction should now be permitted once recovery finishes and releases guard
+			FakeMatrixSdkState.toggleReactionSuspendAsynchronously = false
+			FakeMatrixSdkState.onToggleReactionContinuation = null
+			assertTrue(
+				"Subsequent reaction must succeed after recovery releases guard",
+				client.sendReaction(ROOM, EVENT, "👍"),
+			)
+		} finally {
+			executor.shutdownNow()
+		}
+	}
+
+	@Test
 	fun `removeReaction reports failure when SDK toggle fails`() {
 		val client = loggedInClient()
 		val alice = "@alice:matrix.example.org"

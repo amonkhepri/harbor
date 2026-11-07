@@ -1122,7 +1122,9 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 	 * Reuses the opened timeline to avoid closing and reopening before toggle. If the state changes
 	 * between lookup and toggle so that toggle adds the reaction (returning true) instead of
 	 * removing it (returning false), recovers by toggling again to remove the newly added reaction
-	 * and returns false without claiming success. If the event cannot be found, the user does not own
+	 * and returns false without claiming success. Retains operation ownership (inFlightReactions guard)
+	 * across the initial toggle and recovery so concurrent calls are rejected and cleanup is not skipped.
+	 * If the event cannot be found, the user does not own
 	 * the reaction, or the SDK call fails, returns false -- never throwing.
 	 */
 	override fun removeReaction(roomId: String, eventId: String, reaction: String): Boolean {
@@ -1184,7 +1186,15 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		}
 
 		// Reuse the open room and timeline directly to avoid closing and reopening.
-		val added = toggleReactionInternal(roomId, eventId, reaction, flightKey, room, timeline)
+		val added = toggleReactionInternal(
+			roomId,
+			eventId,
+			reaction,
+			flightKey,
+			room,
+			timeline,
+			retainFlightGuardOnAdded = true,
+		)
 		if (added == false) {
 			// According to pinned SDK (26.08.05), toggleReaction returns false when removed.
 			return true
@@ -1192,8 +1202,12 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		if (added == true) {
 			// State changed between lookup and toggle: toggle added the reaction instead of removing it.
 			// Recover by toggling again to remove the newly added reaction, then report failure.
-			if (inFlightReactions.add(flightKey)) {
+			// Operation ownership (inFlightReactions guard) was retained across the initial toggle.
+			try {
 				toggleReactionInternal(roomId, eventId, reaction, flightKey)
+			} catch (t: Throwable) {
+				inFlightReactions.remove(flightKey)
+				throw t
 			}
 			return false
 		}
@@ -1229,12 +1243,14 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		flightKey: String,
 		existingRoom: Any? = null,
 		existingTimeline: Any? = null,
+		retainFlightGuardOnAdded: Boolean = false,
 	): Boolean? {
 		val completed = AtomicBoolean(false)
 		val outcome = AtomicReference<Result<Any?>>()
 		val latch = CountDownLatch(1)
 		val roomRef = AtomicReference<Any?>(existingRoom)
 		val timelineRef = AtomicReference<Any?>(existingTimeline)
+		val timedOut = AtomicBoolean(false)
 
 		val job: Any? = try {
 			val jobKt = Class.forName("kotlinx.coroutines.JobKt")
@@ -1264,8 +1280,11 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		fun complete(result: Result<Any?>?) {
 			if (!completed.compareAndSet(false, true)) return
 			if (result != null) outcome.set(result)
+			val retain = !timedOut.get() && retainFlightGuardOnAdded && (result?.getOrNull() == true)
+			if (!retain) {
+				inFlightReactions.remove(flightKey)
+			}
 			latch.countDown()
-			inFlightReactions.remove(flightKey)
 			closeQuietly(timelineRef.get())
 			closeQuietly(roomRef.get())
 		}
@@ -1320,12 +1339,14 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			val completedInTime = try {
 				latch.await(discoveryTimeoutMs, TimeUnit.MILLISECONDS)
 			} catch (e: InterruptedException) {
+				timedOut.set(true)
 				Thread.currentThread().interrupt()
 				cancelJob()
 				return null
 			}
 
 			if (!completedInTime) {
+				timedOut.set(true)
 				cancelJob()
 				return null
 			}
