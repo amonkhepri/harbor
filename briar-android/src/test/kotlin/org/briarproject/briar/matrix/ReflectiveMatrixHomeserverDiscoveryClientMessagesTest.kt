@@ -1,9 +1,11 @@
 package org.briarproject.briar.matrix
 
+import org.briarproject.briar.api.connector.ConnectorAttachmentMetadata
 import org.briarproject.briar.api.connector.ConnectorMessageType
 import org.briarproject.briar.api.connector.ConnectorReactionSummary
 import org.briarproject.briar.api.matrix.MatrixAuthSession.RecoverableErrorDetail.NONE
 import org.junit.After
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -16,6 +18,7 @@ import org.matrix.rustcomponents.sdk.FileInfo
 import org.matrix.rustcomponents.sdk.FileMessageContent
 import org.matrix.rustcomponents.sdk.ImageInfo
 import org.matrix.rustcomponents.sdk.ImageMessageContent
+import org.matrix.rustcomponents.sdk.MediaSource
 import org.matrix.rustcomponents.sdk.MessageType
 import org.matrix.rustcomponents.sdk.Reaction
 import org.matrix.rustcomponents.sdk.ReactionSenderData
@@ -109,6 +112,159 @@ class ReflectiveMatrixHomeserverDiscoveryClientMessagesTest {
 		assertEquals(ConnectorMessageType.PHOTO, result?.single()?.type)
 		assertEquals(1, FakeMatrixSdkState.messageContentDestroyCount)
 		assertEquals(1, FakeMatrixSdkState.eventTimelineItemDestroyCount)
+	}
+
+	@Test
+	fun `getRecentMessages preserves Matrix Image attachment uri`() {
+		val client = loggedInClient()
+		FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec("!room:example.org"))
+		FakeMatrixSdkState.timelineDiffsToReturn = listOf(
+			TimelineDiff.Reset(
+				listOf(
+					remoteEvent(
+						"\$photo:example.org",
+						"image.jpg",
+						2_000uL,
+						messageType = MessageType.Image(
+							ImageMessageContent(
+								filename = "image.jpg",
+								source = MediaSource("mxc://example.org/img123"),
+							),
+						),
+					),
+				),
+			),
+		)
+
+		val result = client.getRecentMessages("!room:example.org", 1)
+
+		assertEquals(ConnectorMessageType.PHOTO, result?.single()?.type)
+		assertEquals("mxc://example.org/img123", result?.single()?.attachment?.uri)
+	}
+
+	@Test
+	fun `getMediaThumbnail returns SDK bytes when available`() {
+		val client = loggedInClient()
+		val expected = byteArrayOf(1, 2, 3, 4)
+		FakeMatrixSdkState.mediaThumbnailToReturn = expected
+
+		val result = client.getMediaThumbnail("mxc://example.org/test", 240, 240)
+
+		assertArrayEquals(expected, result)
+		assertEquals(1, FakeMatrixSdkState.getMediaThumbnailCallCount)
+		assertEquals("mxc://example.org/test", FakeMatrixSdkState.lastMediaThumbnailSource?.url())
+		assertEquals(240uL, FakeMatrixSdkState.lastMediaThumbnailWidth)
+		assertEquals(240uL, FakeMatrixSdkState.lastMediaThumbnailHeight)
+		assertEquals(1, FakeMatrixSdkState.mediaSourceDestroyCount)
+	}
+
+	@Test
+	fun `getMediaThumbnail returns null when SDK throws`() {
+		val client = loggedInClient()
+		FakeMatrixSdkState.mediaThumbnailFailureToThrow = RuntimeException("boom")
+
+		val result = client.getMediaThumbnail("mxc://example.org/test", 240, 240)
+
+		assertNull(result)
+		assertEquals(1, FakeMatrixSdkState.mediaSourceDestroyCount)
+	}
+
+	@Test
+	fun `getMediaThumbnail returns null when logged out`() {
+		val client = loggedInClient()
+		client.logout()
+
+		val result = client.getMediaThumbnail("mxc://example.org/test", 240, 240)
+
+		assertNull(result)
+		assertEquals(0, FakeMatrixSdkState.getMediaThumbnailCallCount)
+	}
+
+	@Test
+	fun `getMediaThumbnail returns null when logout occurs during fetch`() {
+		val client = loggedInClient()
+		FakeMatrixSdkState.mediaThumbnailToReturn = byteArrayOf(1, 2)
+		FakeMatrixSdkState.onGetMediaThumbnail = {
+			client.logout()
+		}
+
+		val result = client.getMediaThumbnail("mxc://example.org/test", 240, 240)
+
+		assertNull(result)
+		assertEquals(1, FakeMatrixSdkState.getMediaThumbnailCallCount)
+	}
+
+	@Test
+	fun `getMediaThumbnail skips encrypted original without thumbnail source`() {
+		val client = loggedInClient()
+		FakeMatrixSdkState.mediaThumbnailToReturn = byteArrayOf(9, 8, 7)
+		val attachment = ConnectorAttachmentMetadata(
+			uri = "mxc://example.org/encrypted_img",
+			mediaSourceJson = "{\"url\":\"mxc://example.org/encrypted_img\",\"key\":\"k\"}",
+		)
+
+		val result = client.getMediaThumbnail(attachment, 240, 240)
+
+		assertNull(result)
+		assertEquals(0, FakeMatrixSdkState.getMediaThumbnailCallCount)
+	}
+
+	@Test
+	fun `getMediaThumbnail uses plain mediaSourceJson when no thumbnail source`() {
+		val client = loggedInClient()
+		val expected = byteArrayOf(4, 3, 2)
+		FakeMatrixSdkState.mediaThumbnailToReturn = expected
+		val attachment = ConnectorAttachmentMetadata(
+			uri = "mxc://example.org/plain_img",
+			mediaSourceJson = "{\"url\":\"mxc://example.org/plain_img\"}",
+		)
+
+		val result = client.getMediaThumbnail(attachment, 240, 240)
+
+		assertArrayEquals(expected, result)
+		assertEquals(
+			"{\"url\":\"mxc://example.org/plain_img\"}",
+			FakeMatrixSdkState.lastMediaThumbnailSource?.toJson(),
+		)
+	}
+
+	@Test
+	fun `getMediaThumbnail uses encrypted thumbnail source when present`() {
+		val client = loggedInClient()
+		val expected = byteArrayOf(1, 1, 2)
+		FakeMatrixSdkState.mediaThumbnailToReturn = expected
+		val thumbJson = "{\"url\":\"mxc://example.org/enc_thumb\",\"key\":\"k\"}"
+		val attachment = ConnectorAttachmentMetadata(
+			uri = "mxc://example.org/enc_orig",
+			mediaSourceJson = "{\"url\":\"mxc://example.org/enc_orig\",\"key\":\"k\"}",
+			thumbnailSourceJson = thumbJson,
+		)
+
+		val result = client.getMediaThumbnail(attachment, 240, 240)
+
+		assertArrayEquals(expected, result)
+		assertEquals(thumbJson, FakeMatrixSdkState.lastMediaThumbnailSource?.toJson())
+	}
+
+	@Test
+	fun `getMediaThumbnail prefers thumbnailSourceJson from attachment when present`() {
+		val client = loggedInClient()
+		val expected = byteArrayOf(5, 6, 7)
+		FakeMatrixSdkState.mediaThumbnailToReturn = expected
+		val attachment = ConnectorAttachmentMetadata(
+			uri = "mxc://example.org/orig_img",
+			mediaSourceJson = "{\"url\":\"mxc://example.org/orig_img\"}",
+			thumbnailUri = "mxc://example.org/thumb_img",
+			thumbnailSourceJson = "{\"url\":\"mxc://example.org/thumb_img\"}",
+		)
+
+		val result = client.getMediaThumbnail(attachment, 240, 240)
+
+		assertArrayEquals(expected, result)
+		assertEquals(
+			"{\"url\":\"mxc://example.org/thumb_img\"}",
+			FakeMatrixSdkState.lastMediaThumbnailSource?.toJson(),
+		)
 	}
 
 	@Test
@@ -495,6 +651,477 @@ class ReflectiveMatrixHomeserverDiscoveryClientMessagesTest {
 		assertEquals(3, FakeMatrixSdkState.timelineItemCloseCount)
 		assertEquals(3, FakeMatrixSdkState.eventTimelineItemDestroyCount)
 		assertEquals(3, FakeMatrixSdkState.messageContentDestroyCount)
+	}
+
+	@Test
+	fun `getRecentMessages deduplicates overlapping timeline events across pagination`() {
+		val client = loggedInClient()
+		FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec("!room:example.org"))
+		FakeMatrixSdkState.timelineDiffsToReturn = listOf(
+			TimelineDiff.Reset(
+				listOf(
+					remoteEvent("\$event2:example.org", "message 2", 2_000uL),
+					remoteEvent("\$event3:example.org", "message 3", 3_000uL),
+				),
+			),
+		)
+		FakeMatrixSdkState.timelineDiffsAfterPagination = listOf(
+			TimelineDiff.Reset(
+				listOf(
+					remoteEvent("\$event1:example.org", "message 1", 1_000uL),
+					remoteEvent("\$event2:example.org", "message 2 (updated)", 2_000uL),
+					remoteEvent("\$event2:example.org", "message 2 (updated)", 2_000uL),
+					remoteEvent("\$event3:example.org", "message 3", 3_000uL),
+				),
+			),
+		)
+
+		val result = client.getRecentMessages("!room:example.org", 3)
+
+		assertEquals(
+			listOf(
+				MatrixMessageSnapshot("\$event1:example.org", "@alice:example.org", "message 1", 1L, false),
+				MatrixMessageSnapshot(
+					"\$event2:example.org",
+					"@alice:example.org",
+					"message 2 (updated)",
+					2L,
+					false,
+				),
+				MatrixMessageSnapshot(
+					"\$event3:example.org",
+					"@alice:example.org",
+					"message 3",
+					3L,
+					false,
+				),
+			),
+			result,
+		)
+	}
+
+	@Test
+	fun `getRecentMessages preserves edited state across pagination duplicates`() {
+		val client = loggedInClient()
+		FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec("!room:example.org"))
+		FakeMatrixSdkState.timelineDiffsToReturn = listOf(
+			TimelineDiff.Reset(
+				listOf(
+					remoteEvent(
+						"\$event2:example.org",
+						"message 2 (edited)",
+						2_000uL,
+						edited = true,
+					),
+					remoteEvent("\$event3:example.org", "message 3", 3_000uL),
+				),
+			),
+		)
+		FakeMatrixSdkState.timelineDiffsAfterPagination = listOf(
+			TimelineDiff.Reset(
+				listOf(
+					// Unedited followed by edited
+					remoteEvent(
+						"\$event1:example.org",
+						"message 1 (original)",
+						1_000uL,
+						edited = false,
+					),
+					remoteEvent(
+						"\$event1:example.org",
+						"message 1 (edited)",
+						1_000uL,
+						edited = true,
+					),
+					// Edited followed by unedited stale original
+					remoteEvent(
+						"\$event2:example.org",
+						"message 2 (edited)",
+						2_000uL,
+						edited = true,
+					),
+					remoteEvent(
+						"\$event2:example.org",
+						"message 2 (original)",
+						2_000uL,
+						edited = false,
+					),
+					remoteEvent("\$event3:example.org", "message 3", 3_000uL),
+				),
+			),
+		)
+
+		val result = client.getRecentMessages("!room:example.org", 3)
+
+		assertEquals(
+			listOf(
+				MatrixMessageSnapshot(
+					"\$event1:example.org",
+					"@alice:example.org",
+					"message 1 (edited)",
+					1L,
+					false,
+					isEdited = true,
+				),
+				MatrixMessageSnapshot(
+					"\$event2:example.org",
+					"@alice:example.org",
+					"message 2 (edited)",
+					2L,
+					false,
+					isEdited = true,
+				),
+				MatrixMessageSnapshot(
+					"\$event3:example.org",
+					"@alice:example.org",
+					"message 3",
+					3L,
+					false,
+				),
+			),
+			result,
+		)
+	}
+
+	@Test
+	fun `getRecentMessages preserves edited state across initial snapshot duplicates`() {
+		val client = loggedInClient()
+		FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec("!room:example.org"))
+		FakeMatrixSdkState.timelineDiffsToReturn = listOf(
+			TimelineDiff.Reset(
+				listOf(
+					remoteEvent(
+						"\$event1:example.org",
+						"message 1 (original)",
+						1_000uL,
+						edited = false,
+					),
+					remoteEvent(
+						"\$event1:example.org",
+						"message 1 (edited)",
+						1_000uL,
+						edited = true,
+					),
+					remoteEvent(
+						"\$event2:example.org",
+						"message 2 (edited)",
+						2_000uL,
+						edited = true,
+					),
+					remoteEvent(
+						"\$event2:example.org",
+						"message 2 (original)",
+						2_000uL,
+						edited = false,
+					),
+				),
+			),
+		)
+
+		val result = client.getRecentMessages("!room:example.org", 2)
+
+		assertEquals(
+			listOf(
+				MatrixMessageSnapshot(
+					"\$event1:example.org",
+					"@alice:example.org",
+					"message 1 (edited)",
+					1L,
+					false,
+					isEdited = true,
+				),
+				MatrixMessageSnapshot(
+					"\$event2:example.org",
+					"@alice:example.org",
+					"message 2 (edited)",
+					2L,
+					false,
+					isEdited = true,
+				),
+			),
+			result,
+		)
+	}
+
+	@Test
+	fun `getRecentMessages preserves deleted state across initial snapshot duplicates`() {
+		val client = loggedInClient()
+		FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec("!room:example.org"))
+		val deleted1 = TimelineItem(
+			FakeTimelineEventSpec(
+				EventOrTransactionId.EventId("\$event1:example.org"),
+				"@alice:example.org",
+				null,
+				1_000uL,
+				own = false,
+				redacted = true,
+			),
+		)
+		val deleted2 = TimelineItem(
+			FakeTimelineEventSpec(
+				EventOrTransactionId.EventId("\$event2:example.org"),
+				"@alice:example.org",
+				null,
+				2_000uL,
+				own = false,
+				redacted = true,
+			),
+		)
+		FakeMatrixSdkState.timelineDiffsToReturn = listOf(
+			TimelineDiff.Reset(
+				listOf(
+					// Deleted followed by text
+					deleted1,
+					remoteEvent("\$event1:example.org", "text 1", 1_000uL),
+					// Text followed by deleted
+					remoteEvent("\$event2:example.org", "text 2", 2_000uL),
+					deleted2,
+				),
+			),
+		)
+
+		val result = client.getRecentMessages("!room:example.org", 2)
+
+		assertEquals(
+			listOf(
+				MatrixMessageSnapshot(
+					"\$event1:example.org",
+					"@alice:example.org",
+					"",
+					1L,
+					false,
+					type = ConnectorMessageType.DELETED,
+				),
+				MatrixMessageSnapshot(
+					"\$event2:example.org",
+					"@alice:example.org",
+					"",
+					2L,
+					false,
+					type = ConnectorMessageType.DELETED,
+				),
+			),
+			result,
+		)
+	}
+
+	@Test
+	fun `getRecentMessages preserves deleted state across pagination duplicates`() {
+		val client = loggedInClient()
+		FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec("!room:example.org"))
+		FakeMatrixSdkState.timelineDiffsToReturn = listOf(
+			TimelineDiff.Reset(
+				listOf(
+					remoteEvent("\$event2:example.org", "text 2", 2_000uL),
+				),
+			),
+		)
+		val deleted1 = TimelineItem(
+			FakeTimelineEventSpec(
+				EventOrTransactionId.EventId("\$event1:example.org"),
+				"@alice:example.org",
+				null,
+				1_000uL,
+				own = false,
+				redacted = true,
+			),
+		)
+		val deleted2 = TimelineItem(
+			FakeTimelineEventSpec(
+				EventOrTransactionId.EventId("\$event2:example.org"),
+				"@alice:example.org",
+				null,
+				2_000uL,
+				own = false,
+				redacted = true,
+			),
+		)
+		FakeMatrixSdkState.timelineDiffsAfterPagination = listOf(
+			TimelineDiff.Reset(
+				listOf(
+					// Deleted followed by text
+					deleted1,
+					remoteEvent("\$event1:example.org", "text 1", 1_000uL),
+					// Text followed by deleted
+					remoteEvent("\$event2:example.org", "text 2", 2_000uL),
+					deleted2,
+				),
+			),
+		)
+
+		val result = client.getRecentMessages("!room:example.org", 2)
+
+		assertEquals(
+			listOf(
+				MatrixMessageSnapshot(
+					"\$event1:example.org",
+					"@alice:example.org",
+					"",
+					1L,
+					false,
+					type = ConnectorMessageType.DELETED,
+				),
+				MatrixMessageSnapshot(
+					"\$event2:example.org",
+					"@alice:example.org",
+					"",
+					2L,
+					false,
+					type = ConnectorMessageType.DELETED,
+				),
+			),
+			result,
+		)
+	}
+
+	@Test
+	fun `getRecentMessages clears reactions when duplicate later state is empty in initial`() {
+		val client = loggedInClient()
+		FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec("!room:example.org"))
+		FakeMatrixSdkState.timelineDiffsToReturn = listOf(
+			TimelineDiff.Reset(
+				listOf(
+					remoteEvent(
+						"\$event1:example.org",
+						"message 1",
+						1_000uL,
+						reactions = listOf(Reaction("👍", listOf(ReactionSenderData()))),
+					),
+					remoteEvent(
+						"\$event1:example.org",
+						"message 1",
+						1_000uL,
+						reactions = emptyList(),
+					),
+				),
+			),
+		)
+
+		val result = client.getRecentMessages("!room:example.org", 1)
+
+		assertEquals(
+			listOf(
+				MatrixMessageSnapshot(
+					"\$event1:example.org",
+					"@alice:example.org",
+					"message 1",
+					1L,
+					false,
+					reactions = emptyList(),
+				),
+			),
+			result,
+		)
+	}
+
+	@Test
+	fun `getRecentMessages clears reactions when duplicate later state is empty in page`() {
+		val client = loggedInClient()
+		FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec("!room:example.org"))
+		FakeMatrixSdkState.timelineDiffsToReturn = listOf(
+			TimelineDiff.Reset(
+				listOf(
+					remoteEvent(
+						"\$event1:example.org",
+						"message 1",
+						1_000uL,
+						reactions = listOf(Reaction("👍", listOf(ReactionSenderData()))),
+					),
+				),
+			),
+		)
+		FakeMatrixSdkState.timelineDiffsAfterPagination = listOf(
+			TimelineDiff.Reset(
+				listOf(
+					remoteEvent(
+						"\$event1:example.org",
+						"message 1",
+						1_000uL,
+						reactions = emptyList(),
+					),
+					remoteEvent("\$event2:example.org", "message 2", 2_000uL),
+				),
+			),
+		)
+
+		val result = client.getRecentMessages("!room:example.org", 2)
+
+		assertEquals(
+			listOf(
+				MatrixMessageSnapshot(
+					"\$event1:example.org",
+					"@alice:example.org",
+					"message 1",
+					1L,
+					false,
+					reactions = emptyList(),
+				),
+				MatrixMessageSnapshot(
+					"\$event2:example.org",
+					"@alice:example.org",
+					"message 2",
+					2L,
+					false,
+				),
+			),
+			result,
+		)
+	}
+
+	@Test
+	fun `getRecentMessages preserves edited empty reactions against stale duplicate`() {
+		val client = loggedInClient()
+		FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec("!room:example.org"))
+		FakeMatrixSdkState.timelineDiffsToReturn = listOf(
+			TimelineDiff.Reset(
+				listOf(
+					remoteEvent(
+						"\$event1:example.org",
+						"message 1 (edited)",
+						1_000uL,
+						edited = true,
+						reactions = emptyList(),
+					),
+				),
+			),
+		)
+		FakeMatrixSdkState.timelineDiffsAfterPagination = listOf(
+			TimelineDiff.Reset(
+				listOf(
+					remoteEvent(
+						"\$event1:example.org",
+						"message 1 (stale original)",
+						1_000uL,
+						edited = false,
+						reactions = listOf(Reaction("👍", listOf(ReactionSenderData()))),
+					),
+					remoteEvent(
+						"\$event1:example.org",
+						"message 1 (edited)",
+						1_000uL,
+						edited = true,
+						reactions = emptyList(),
+					),
+				),
+			),
+		)
+
+		val result = client.getRecentMessages("!room:example.org", 1)
+
+		assertEquals(
+			listOf(
+				MatrixMessageSnapshot(
+					"\$event1:example.org",
+					"@alice:example.org",
+					"message 1 (edited)",
+					1L,
+					false,
+					isEdited = true,
+					reactions = emptyList(),
+				),
+			),
+			result,
+		)
 	}
 
 	@Test

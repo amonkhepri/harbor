@@ -2,6 +2,7 @@ package org.briarproject.briar.matrix
 
 import org.briarproject.bramble.api.system.Clock
 import org.briarproject.bramble.test.SettableClock
+import org.briarproject.briar.api.connector.ConnectorAttachmentMetadata
 import org.briarproject.briar.api.connector.ConnectorMessage
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult.LoadFailed
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult.Success
@@ -11,6 +12,7 @@ import org.briarproject.briar.api.connector.ConnectorSources
 import org.briarproject.briar.api.matrix.MatrixAuthSession
 import org.briarproject.briar.api.matrix.MatrixAuthSession.RecoverableErrorDetail.NONE
 import org.briarproject.briar.api.matrix.MatrixAuthState
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -465,6 +467,86 @@ class MatrixRoomConnectorTest {
 	}
 
 	@Test
+	fun `loadThumbnail fails closed without querying snapshot client when not authorized`() {
+		val snapshotClient = FakeMessageSnapshotClient(emptyList())
+		snapshotClient.thumbnailToReturn = byteArrayOf(1, 2)
+		val connector = connector(
+			messageSnapshotClient = snapshotClient,
+			authSession = FakeMatrixAuthSession(MatrixAuthState.HOMESERVER_ENTRY),
+		)
+		val attachment = ConnectorAttachmentMetadata(uri = "mxc://example.org/1")
+
+		val result = connector.loadThumbnail("!room:example.org", "\$1", attachment, 100, 100)
+
+		assertNull(result)
+		assertNull(snapshotClient.lastRequestedAttachment)
+	}
+
+	@Test
+	fun `loadThumbnail returns null when attachment is null`() {
+		val snapshotClient = FakeMessageSnapshotClient(emptyList())
+		snapshotClient.thumbnailToReturn = byteArrayOf(1, 2)
+		val connector = connector(
+			messageSnapshotClient = snapshotClient,
+			authSession = FakeMatrixAuthSession(MatrixAuthState.READY),
+		)
+
+		val result = connector.loadThumbnail(
+			"!room:example.org",
+			"\$1",
+			null as ConnectorAttachmentMetadata?,
+			100,
+			100,
+		)
+
+		assertNull(result)
+		assertNull(snapshotClient.lastRequestedAttachment)
+	}
+
+	@Test
+	fun `loadThumbnail delegates to snapshot client when authorized`() {
+		val snapshotClient = FakeMessageSnapshotClient(emptyList())
+		val expected = byteArrayOf(1, 2, 3)
+		snapshotClient.thumbnailToReturn = expected
+		val connector = connector(
+			messageSnapshotClient = snapshotClient,
+			authSession = FakeMatrixAuthSession(MatrixAuthState.READY),
+		)
+		val attachment = ConnectorAttachmentMetadata(uri = "mxc://example.org/1")
+
+		val result = connector.loadThumbnail("!room:example.org", "\$1", attachment, 100, 100)
+
+		assertArrayEquals(expected, result)
+		assertEquals(attachment, snapshotClient.lastRequestedAttachment)
+	}
+
+	@Test
+	fun `loadThumbnail passes attachment with thumbnail source json to snapshot client`() {
+		val snapshotClient = FakeMessageSnapshotClient(emptyList())
+		val expected = byteArrayOf(7, 8, 9)
+		snapshotClient.thumbnailToReturn = expected
+		val connector = connector(
+			messageSnapshotClient = snapshotClient,
+			authSession = FakeMatrixAuthSession(MatrixAuthState.READY),
+		)
+		val attachment = ConnectorAttachmentMetadata(
+			uri = "mxc://example.org/orig",
+			mediaSourceJson = "{\"url\":\"mxc://example.org/orig\",\"key\":\"orig_key\"}",
+			thumbnailUri = "mxc://example.org/thumb",
+			thumbnailSourceJson = "{\"url\":\"mxc://example.org/thumb\",\"key\":\"thumb_key\"}",
+		)
+
+		val result = connector.loadThumbnail("!room:example.org", "\$1", attachment, 150, 150)
+
+		assertArrayEquals(expected, result)
+		assertEquals(attachment, snapshotClient.lastRequestedAttachment)
+		assertEquals(
+			"{\"url\":\"mxc://example.org/thumb\",\"key\":\"thumb_key\"}",
+			snapshotClient.lastRequestedAttachment?.thumbnailSourceJson,
+		)
+	}
+
+	@Test
 	fun `sendImage reports the send client's failure`() {
 		val connector = connector(
 			messageSendClient = FakeMessageSendClient(false),
@@ -634,11 +716,31 @@ class MatrixRoomConnectorTest {
 			private set
 		var lastRequestedLimit: Int? = null
 			private set
+		var lastRequestedMediaUrl: String? = null
+			private set
+		var lastRequestedAttachment: ConnectorAttachmentMetadata? = null
+			private set
+		var thumbnailToReturn: ByteArray? = null
 
 		override fun getRecentMessages(roomId: String, limit: Int): List<MatrixMessageSnapshot>? {
 			lastRequestedRoomId = roomId
 			lastRequestedLimit = limit
 			return snapshots
+		}
+
+		override fun getMediaThumbnail(
+			attachment: ConnectorAttachmentMetadata,
+			width: Int,
+			height: Int,
+		): ByteArray? {
+			lastRequestedAttachment = attachment
+			lastRequestedMediaUrl = attachment.uri
+			return thumbnailToReturn
+		}
+
+		override fun getMediaThumbnail(mediaUrl: String, width: Int, height: Int): ByteArray? {
+			lastRequestedMediaUrl = mediaUrl
+			return thumbnailToReturn
 		}
 	}
 
@@ -703,6 +805,54 @@ class MatrixRoomConnectorTest {
 		assertFalse(connector.deleteMessage("!room:example.org", "\$event"))
 	}
 
+	@Test
+	fun `editTextMessage forwards only authorized non-blank edits and reports failure`() {
+		val client = FakeMessageSendClient(true)
+		val auth = FakeMatrixAuthSession(MatrixAuthState.CREDENTIAL_ENTRY)
+		val connector = connector(authSession = auth, messageSendClient = client)
+		assertFalse(connector.editTextMessage("!room:example.org", "\$event", "fixed"))
+		auth.state = MatrixAuthState.READY
+		assertFalse(connector.editTextMessage("!room:example.org", "\$event", "  "))
+		assertNull(client.lastEditedText)
+
+		assertTrue(connector.editTextMessage("!room:example.org", "\$event", "fixed"))
+		assertEquals(listOf("!room:example.org", "\$event", "fixed"), client.lastEdit)
+		val failing = connector(authSession = auth, messageSendClient = FakeMessageSendClient(false))
+		assertFalse(failing.editTextMessage("!room:example.org", "\$event", "fixed"))
+	}
+
+	@Test
+	fun `sendReaction forwards only authorized non-blank reactions and reports failure`() {
+		val client = FakeMessageSendClient(true)
+		val auth = FakeMatrixAuthSession(MatrixAuthState.CREDENTIAL_ENTRY)
+		val connector = connector(authSession = auth, messageSendClient = client)
+		assertFalse(connector.sendReaction("!room:example.org", "\$event", "👍"))
+		auth.state = MatrixAuthState.READY
+		assertFalse(connector.sendReaction("!room:example.org", "\$event", "  "))
+		assertNull(client.lastReactionKey)
+
+		assertTrue(connector.sendReaction("!room:example.org", "\$event", "👍"))
+		assertEquals(listOf("!room:example.org", "\$event", "👍"), client.lastReaction)
+		val failing = connector(authSession = auth, messageSendClient = FakeMessageSendClient(false))
+		assertFalse(failing.sendReaction("!room:example.org", "\$event", "👍"))
+	}
+
+	@Test
+	fun `removeReaction forwards only authorized non-blank reactions and reports failure`() {
+		val client = FakeMessageSendClient(true)
+		val auth = FakeMatrixAuthSession(MatrixAuthState.CREDENTIAL_ENTRY)
+		val connector = connector(authSession = auth, messageSendClient = client)
+		assertFalse(connector.removeReaction("!room:example.org", "\$event", "👍"))
+		auth.state = MatrixAuthState.READY
+		assertFalse(connector.removeReaction("!room:example.org", "\$event", "  "))
+		assertNull(client.lastRemovedReactionKey)
+
+		assertTrue(connector.removeReaction("!room:example.org", "\$event", "👍"))
+		assertEquals(listOf("!room:example.org", "\$event", "👍"), client.lastRemovedReaction)
+		val failing = connector(authSession = auth, messageSendClient = FakeMessageSendClient(false))
+		assertFalse(failing.removeReaction("!room:example.org", "\$event", "👍"))
+	}
+
 	private class FakeMessageSendClient(private val result: Boolean) : MatrixMessageSendClient {
 		var lastRequestedRoomId: String? = null
 			private set
@@ -719,6 +869,30 @@ class MatrixRoomConnectorTest {
 
 		var lastDeletedEventId: String? = null
 			private set
+		var lastEdit: List<String>? = null
+			private set
+		val lastEditedText get() = lastEdit?.get(2)
+		var lastReaction: List<String>? = null
+			private set
+		val lastReactionKey get() = lastReaction?.get(2)
+		var lastRemovedReaction: List<String>? = null
+			private set
+		val lastRemovedReactionKey get() = lastRemovedReaction?.get(2)
+
+		override fun sendReaction(roomId: String, eventId: String, reaction: String): Boolean {
+			lastReaction = listOf(roomId, eventId, reaction)
+			return result
+		}
+
+		override fun removeReaction(roomId: String, eventId: String, reaction: String): Boolean {
+			lastRemovedReaction = listOf(roomId, eventId, reaction)
+			return result
+		}
+
+		override fun editTextMessage(roomId: String, eventId: String, text: String): Boolean {
+			lastEdit = listOf(roomId, eventId, text)
+			return result
+		}
 
 		override fun sendTextMessage(roomId: String, text: String): Boolean {
 			lastRequestedRoomId = roomId

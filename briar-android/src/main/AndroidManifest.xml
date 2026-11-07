@@ -166,6 +166,11 @@
 			android:exported="false"
 			android:label="@string/matrix_setup_title" />
 		<activity
+			android:name="org.briarproject.briar.android.connector.ConnectorImageViewerActivity"
+			android:exported="false"
+			android:label="@string/connector_message_photo"
+			android:theme="@style/BriarTheme.ActionBarOverlay" />
+		<activity
 			android:name="org.briarproject.briar.android.connector.ConnectorConversationActivity"
 			android:exported="false"
 			android:label="@string/connector_conversation_label"
@@ -544,6 +549,16 @@
 				android:value="org.briarproject.briar.android.settings.SettingsActivity" />
 		</activity>
 
+		<provider
+			android:name="androidx.core.content.FileProvider"
+			android:authorities="${applicationId}.connector.fileprovider"
+			android:exported="false"
+			android:grantUriPermissions="true">
+			<meta-data
+				android:name="android.support.FILE_PROVIDER_PATHS"
+				android:resource="@xml/connector_file_paths" />
+		</provider>
+
 	</application>
 
 	<queries>
@@ -564,6 +579,10 @@
 		</intent>
 		<intent>
 			<action android:name="android.settings.CHANNEL_NOTIFICATION_SETTINGS" />
+		</intent>
+		<intent>
+			<action android:name="android.intent.action.VIEW" />
+			<data android:mimeType="*/*" />
 		</intent>
 	</queries>
 

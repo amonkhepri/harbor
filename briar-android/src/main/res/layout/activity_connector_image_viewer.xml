@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+	android:layout_width="match_parent"
+	android:layout_height="match_parent"
+	android:background="@android:color/black">
+
+	<com.github.chrisbanes.photoview.PhotoView
+		android:id="@+id/connectorImageView"
+		android:layout_width="match_parent"
+		android:layout_height="match_parent"
+		android:contentDescription="@string/connector_message_photo" />
+
+	<ProgressBar
+		android:id="@+id/connectorImageProgress"
+		android:layout_width="wrap_content"
+		android:layout_height="wrap_content"
+		android:layout_gravity="center"
+		android:visibility="gone" />
+
+	<TextView
+		android:id="@+id/connectorImageError"
+		android:layout_width="wrap_content"
+		android:layout_height="wrap_content"
+		android:layout_gravity="center"
+		android:padding="@dimen/margin_activity_horizontal"
+		android:text="@string/connector_image_open_failed"
+		android:textColor="@android:color/white"
+		android:visibility="gone" />
+
+	<com.google.android.material.appbar.MaterialToolbar
+		android:id="@+id/toolbar"
+		style="@style/BriarToolbar"
+		android:layout_width="match_parent"
+		android:layout_height="wrap_content"
+		android:layout_gravity="top"
+		android:background="@color/msg_status_bubble_background"
+		android:fitsSystemWindows="true" />
+
+</FrameLayout>

@@ -1,9 +1,12 @@
 package org.briarproject.briar.android.connector
 
 import android.view.LayoutInflater
+import android.view.Menu
 import android.view.View
 import android.view.ViewGroup
+import android.widget.ImageView
 import android.widget.TextView
+import androidx.appcompat.widget.PopupMenu
 import androidx.recyclerview.widget.DiffUtil.ItemCallback
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
@@ -14,6 +17,12 @@ import org.briarproject.briar.api.connector.ConnectorMessageType
 internal class ConnectorConversationAdapter(
 	private val onDeleteClicked: ((ConnectorConversationMessageItem) -> Unit)? = null,
 	private val onRetrySendClicked: ((ConnectorConversationMessageItem) -> Unit)? = null,
+	private val onFileClicked: ((ConnectorConversationMessageItem) -> Unit)? = null,
+	var thumbnailManager: ConnectorThumbnailManager? = null,
+	var onReplyClicked: ((ConnectorConversationMessageItem) -> Unit)? = null,
+	/** True when the own-message action opens the edit dialog for text rows (MX-058). */
+	var editsOwnText: Boolean = false,
+	var onReactClicked: ((ConnectorConversationMessageItem) -> Unit)? = null,
 ) : ListAdapter<
 	ConnectorConversationMessageItem,
 	ConnectorConversationAdapter.MessageViewHolder,
@@ -25,22 +34,43 @@ internal class ConnectorConversationAdapter(
 			parent,
 			false,
 		)
-		return MessageViewHolder(view, onDeleteClicked, onRetrySendClicked)
+		return MessageViewHolder(
+			view,
+			onDeleteClicked,
+			onRetrySendClicked,
+			onFileClicked,
+			thumbnailManager,
+			onReplyClicked,
+			editsOwnText,
+			onReactClicked,
+		)
 	}
 
 	override fun onBindViewHolder(holder: MessageViewHolder, position: Int) {
 		holder.bind(getItem(position))
 	}
 
+	override fun onViewRecycled(holder: MessageViewHolder) {
+		holder.recycle()
+		super.onViewRecycled(holder)
+	}
+
 	class MessageViewHolder(
 		itemView: View,
 		private val onDeleteClicked: ((ConnectorConversationMessageItem) -> Unit)? = null,
 		private val onRetrySendClicked: ((ConnectorConversationMessageItem) -> Unit)? = null,
+		private val onFileClicked: ((ConnectorConversationMessageItem) -> Unit)? = null,
+		private val thumbnailManager: ConnectorThumbnailManager? = null,
+		private val onReplyClicked: ((ConnectorConversationMessageItem) -> Unit)? = null,
+		private val editsOwnText: Boolean = false,
+		private val onReactClicked: ((ConnectorConversationMessageItem) -> Unit)? = null,
 	) : RecyclerView.ViewHolder(itemView) {
 		constructor(itemView: View, onDeleteClicked: ((ConnectorConversationMessageItem) -> Unit)?) :
-			this(itemView, onDeleteClicked, null)
+			this(itemView, onDeleteClicked, null, null, null, null, false, null)
 		private val text: TextView =
 			itemView.findViewById(R.id.connectorMessageText)
+		private val thumbnail: ImageView =
+			itemView.findViewById(R.id.connectorMessageThumbnail)
 		private val direction: TextView =
 			itemView.findViewById(R.id.connectorMessageDirection)
 		private val date: TextView =
@@ -52,7 +82,53 @@ internal class ConnectorConversationAdapter(
 		private val fileDetails: TextView =
 			itemView.findViewById(R.id.connectorFileDetails)
 
+		private var boundThreadId: String? = null
+		private var boundMessageId: String? = null
+		private var thumbnailCancellation: Cancellable? = null
+
+		fun recycle() {
+			thumbnailCancellation?.cancel()
+			thumbnailCancellation = null
+			boundThreadId = null
+			boundMessageId = null
+			thumbnail.setImageDrawable(null)
+			thumbnail.visibility = View.GONE
+		}
+
 		fun bind(item: ConnectorConversationMessageItem) {
+			thumbnailCancellation?.cancel()
+			thumbnailCancellation = null
+			boundThreadId = item.connectorThreadId
+			boundMessageId = item.connectorMessageId
+
+			if (item.type == ConnectorMessageType.PHOTO) {
+				thumbnail.visibility = View.VISIBLE
+				val manager = thumbnailManager
+				if (manager != null) {
+					val cached = manager.getCached(item.connectorThreadId, item.connectorMessageId)
+					if (cached != null) {
+						thumbnail.setImageBitmap(cached)
+					} else {
+						thumbnail.setImageDrawable(null)
+						thumbnailCancellation = manager.loadThumbnail(item) { bitmap ->
+							if (boundThreadId == item.connectorThreadId &&
+								boundMessageId == item.connectorMessageId
+							) {
+								if (bitmap != null) {
+									thumbnail.setImageBitmap(bitmap)
+								} else {
+									thumbnail.setImageResource(R.drawable.ic_image_broken)
+								}
+							}
+						}
+					}
+				} else {
+					thumbnail.setImageDrawable(null)
+				}
+			} else {
+				thumbnail.visibility = View.GONE
+				thumbnail.setImageDrawable(null)
+			}
 			val isFile = item.type == ConnectorMessageType.FILE
 			val fileFallbackName = text.resources.getString(R.string.connector_message_file)
 			val safeFileName = if (isFile) {
@@ -91,6 +167,15 @@ internal class ConnectorConversationAdapter(
 					)
 				}
 			}
+			val downloadStatus = when (item.downloadState) {
+				ConnectorDownloadState.DOWNLOADING ->
+					text.resources.getString(R.string.connector_file_downloading)
+				ConnectorDownloadState.DOWNLOADED ->
+					text.resources.getString(R.string.connector_file_downloaded)
+				ConnectorDownloadState.FAILED ->
+					text.resources.getString(R.string.connector_file_download_failed)
+				null, ConnectorDownloadState.IDLE -> null
+			}
 			if (isFile) {
 				val mimeType =
 					ConnectorFileMetadataFormatter.sanitizeMimeType(item.attachment?.mimeType)
@@ -99,11 +184,16 @@ internal class ConnectorConversationAdapter(
 					item.attachment?.size,
 				)
 				fileName.text = decoratedText
-				val details = ConnectorFileMetadataFormatter.formatFileDetails(
+				val baseDetails = ConnectorFileMetadataFormatter.formatFileDetails(
 					text.resources,
 					mimeType,
 					formattedSize,
 				)
+				val details = if (downloadStatus != null) {
+					if (baseDetails.isNotEmpty()) "$baseDetails • $downloadStatus" else downloadStatus
+				} else {
+					baseDetails
+				}
 				fileDetails.text = details
 				fileDetails.visibility = if (details.isNotEmpty()) View.VISIBLE else View.GONE
 				fileLayout.contentDescription =
@@ -113,11 +203,22 @@ internal class ConnectorConversationAdapter(
 						mimeType,
 						formattedSize,
 						reactionSummary,
+						downloadStatus,
 					)
 				fileLayout.visibility = View.VISIBLE
+				if (onFileClicked != null) {
+					fileLayout.setOnClickListener { onFileClicked.invoke(item) }
+					fileLayout.isClickable = true
+				} else {
+					fileLayout.setOnClickListener(null)
+					fileLayout.isClickable = false
+				}
 				if (reactionSummary != null) {
 					text.text = reactionSummary
 					text.visibility = View.VISIBLE
+				} else if (item.attachment == null) {
+					text.text = decoratedText
+					text.visibility = View.GONE
 				} else {
 					text.text = ""
 					text.visibility = View.GONE
@@ -125,15 +226,22 @@ internal class ConnectorConversationAdapter(
 			} else {
 				fileLayout.visibility = View.GONE
 				fileLayout.contentDescription = null
+				fileLayout.setOnClickListener(null)
+				fileLayout.isClickable = false
 				fileName.text = ""
 				fileDetails.text = ""
 				fileDetails.visibility = View.GONE
-				text.text = if (reactionSummary == null) {
+				val photoText = if (item.type == ConnectorMessageType.PHOTO && downloadStatus != null) {
+					"$decoratedText • $downloadStatus"
+				} else {
 					decoratedText
+				}
+				text.text = if (reactionSummary == null) {
+					photoText
 				} else {
 					text.resources.getString(
 						R.string.connector_message_with_reactions,
-						decoratedText,
+						photoText,
 						reactionSummary,
 					)
 				}
@@ -159,6 +267,11 @@ internal class ConnectorConversationAdapter(
 				onRetrySendClicked != null
 			) {
 				itemView.setOnClickListener { onRetrySendClicked.invoke(item) }
+			} else if (item.type == ConnectorMessageType.PHOTO &&
+				item.attachment != null &&
+				onFileClicked != null
+			) {
+				itemView.setOnClickListener { onFileClicked.invoke(item) }
 			} else {
 				itemView.setOnClickListener(null)
 				itemView.isClickable = false
@@ -166,17 +279,63 @@ internal class ConnectorConversationAdapter(
 			itemView.setOnLongClickListener {
 				// Delete affordance is connector-neutral: own sent messages without pending
 				// local echo and not already deleted trigger the callback when delete is supported.
-				if (item.isOutgoing &&
+				val canDelete = item.isOutgoing &&
 					item.localEchoStatus == null &&
 					item.type != ConnectorMessageType.DELETED &&
 					onDeleteClicked != null
-				) {
-					onDeleteClicked.invoke(item)
-					true
-				} else {
-					false
+				val canReply = onReplyClicked != null && ConnectorReplyTarget.canReplyTo(item)
+				val canReact = onReactClicked != null &&
+					item.localEchoStatus == null &&
+					item.type != ConnectorMessageType.DELETED &&
+					item.connectorMessageId.isNotBlank()
+				val actionCount =
+					(if (canDelete) 1 else 0) + (if (canReply) 1 else 0) + (if (canReact) 1 else 0)
+				when {
+					actionCount > 1 -> showMessageActions(item, canDelete, canReply, canReact)
+					canDelete -> onDeleteClicked?.invoke(item)
+					canReply -> onReplyClicked?.invoke(item)
+					canReact -> onReactClicked?.invoke(item)
 				}
+				actionCount > 0
 			}
+		}
+
+		private fun showMessageActions(
+			item: ConnectorConversationMessageItem,
+			canDelete: Boolean,
+			canReply: Boolean,
+			canReact: Boolean,
+		) {
+			val popup = PopupMenu(itemView.context, itemView)
+			if (canReact) {
+				popup.menu.add(Menu.NONE, ACTION_REACT, 0, R.string.connector_conversation_react)
+			}
+			if (canReply) {
+				popup.menu.add(Menu.NONE, ACTION_REPLY, 1, R.string.connector_conversation_reply)
+			}
+			if (canDelete) {
+				val ownAction = if (editsOwnText && item.type == ConnectorMessageType.TEXT) {
+					R.string.connector_conversation_edit
+				} else {
+					R.string.delete
+				}
+				popup.menu.add(Menu.NONE, ACTION_OWN, 2, ownAction)
+			}
+			popup.setOnMenuItemClickListener { menuItem ->
+				when (menuItem.itemId) {
+					ACTION_REACT -> onReactClicked?.invoke(item)
+					ACTION_REPLY -> onReplyClicked?.invoke(item)
+					ACTION_OWN -> onDeleteClicked?.invoke(item)
+				}
+				true
+			}
+			popup.show()
+		}
+
+		private companion object {
+			const val ACTION_REPLY = 1
+			const val ACTION_OWN = 2
+			const val ACTION_REACT = 3
 		}
 	}
 
@@ -198,6 +357,8 @@ internal class ConnectorConversationAdapter(
 			i1.isReply == i2.isReply &&
 			i1.reactions == i2.reactions &&
 			i1.localEchoStatus == i2.localEchoStatus &&
-			i1.attachment == i2.attachment
+			i1.attachment == i2.attachment &&
+			i1.downloadState == i2.downloadState &&
+			i1.downloadedFile == i2.downloadedFile
 	}
 }

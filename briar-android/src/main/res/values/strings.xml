@@ -173,8 +173,24 @@
 	<string name="connector_conversation_direction_outgoing">Outgoing</string>
 	<string name="connector_conversation_compose_hint">Message %1$s</string>
 	<string name="connector_conversation_send">Send</string>
+	<string name="connector_conversation_reply">Reply</string>
+	<string name="connector_conversation_replying_to">Replying to: %1$s</string>
+	<string name="connector_conversation_cancel_reply">Cancel reply</string>
 	<string name="connector_conversation_send_failed">Message could not be sent</string>
 	<string name="connector_conversation_delete_failed">Message could not be deleted</string>
+	<string name="connector_conversation_edit">Edit message</string>
+	<string name="connector_conversation_edit_save">Save</string>
+	<string name="connector_conversation_edit_failed">Message could not be edited</string>
+	<string name="connector_conversation_react">React</string>
+	<string name="connector_conversation_reaction_failed">Reaction could not be added</string>
+	<string name="connector_conversation_reaction_remove_failed">Reaction could not be removed</string>
+	<string name="connector_reaction_remove">Remove %1$s</string>
+	<string name="connector_reaction_thumbs_up">👍 Thumbs up</string>
+	<string name="connector_reaction_heart">❤️ Heart</string>
+	<string name="connector_reaction_joy">😂 Joy</string>
+	<string name="connector_reaction_surprised">😮 Surprised</string>
+	<string name="connector_reaction_sad">😢 Sad</string>
+	<string name="connector_reaction_celebrate">🎉 Celebrate</string>
 	<string name="connector_conversation_find">Search loaded messages</string>
 	<string name="connector_conversation_find_hint">Search loaded messages</string>
 	<string name="connector_conversation_find_count">%1$d/%2$d</string>
@@ -1031,5 +1047,9 @@
 	<string name="connector_file_details">%1$s • %2$s</string>
 	<string name="connector_file_accessibility">%1$s, %2$s</string>
 	<string name="connector_file_accessibility_with_details">%1$s, %2$s, %3$s</string>
+	<string name="connector_file_downloading">Downloading…</string>
+	<string name="connector_file_downloaded">Downloaded</string>
+	<string name="connector_file_download_failed">Download failed</string>
+	<string name="connector_image_open_failed">Could not display this image</string>
 	<string name="connector_typing_indicator">Typing…</string>
 </resources>

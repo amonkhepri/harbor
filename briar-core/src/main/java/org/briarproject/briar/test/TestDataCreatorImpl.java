@@ -200,7 +200,7 @@ public class TestDataCreatorImpl implements TestDataCreator {
 		LocalAuthor localAuthor = identityManager.getLocalAuthor();
 		for (int i = 0; i < numContacts; i++) {
 			LocalAuthor remote = getRandomAuthor();
-			boolean verified = i == 0 ? false : (i == 1 ? true : random.nextBoolean());
+			boolean verified = (i % 2 == 1);
 			Contact contact = addContact(localAuthor.getId(), remote,
 					random.nextBoolean(), avatarPercent, verified);
 			contacts.add(contact);

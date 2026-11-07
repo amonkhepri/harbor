@@ -15,7 +15,7 @@ data class ConnectorMessage(
 	val attachment: ConnectorAttachmentMetadata? = null,
 )
 
-data class ConnectorReactionSummary(val key: String, val count: Int)
+data class ConnectorReactionSummary(val key: String, val count: Int, val isOwn: Boolean = false)
 
 enum class ConnectorMessageType {
 	TEXT,

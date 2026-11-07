@@ -1,10 +1,16 @@
 package org.briarproject.briar.matrix
 
 import org.briarproject.bramble.api.system.Clock
+import org.briarproject.briar.api.connector.ConnectorAttachmentMetadata
+import org.briarproject.briar.api.connector.ConnectorFileDownloader
 import org.briarproject.briar.api.connector.ConnectorFileSender
+import java.io.File
 import org.briarproject.briar.api.connector.ConnectorImageSender
 import org.briarproject.briar.api.connector.ConnectorMessage
 import org.briarproject.briar.api.connector.ConnectorMessageDeleter
+import org.briarproject.briar.api.connector.ConnectorMessageEditor
+import org.briarproject.briar.api.connector.ConnectorReactionRemover
+import org.briarproject.briar.api.connector.ConnectorReactionSender
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult.LoadFailed
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult.Success
@@ -14,8 +20,10 @@ import org.briarproject.briar.api.connector.ConnectorRoomLeaver
 import org.briarproject.briar.api.connector.ConnectorRoomObserver
 import org.briarproject.briar.api.connector.ConnectorSource
 import org.briarproject.briar.api.connector.ConnectorSources
+import org.briarproject.briar.api.connector.ConnectorReplySender
 import org.briarproject.briar.api.connector.ConnectorTextSender
 import org.briarproject.briar.api.connector.ConnectorThread
+import org.briarproject.briar.api.connector.ConnectorThumbnailLoader
 import org.briarproject.briar.api.connector.ConnectorUnreadMarker
 import org.briarproject.briar.api.connector.ConnectorTypingSender
 import org.briarproject.briar.api.connector.ConnectorTypingObserver
@@ -46,24 +54,31 @@ import org.briarproject.briar.api.matrix.MatrixConnector
  * capability (MX-014), and the opt-in [ConnectorReadMarker] capability (MX-019): all three write
  * capabilities fail closed, the same as reading, when not authorized.
  */
-class MatrixRoomConnector(
+class MatrixRoomConnector @JvmOverloads constructor(
 	private val roomSnapshotClient: MatrixRoomSnapshotClient,
 	private val authSession: MatrixAuthSession,
 	private val messageSnapshotClient: MatrixMessageSnapshotClient,
 	private val messageSendClient: MatrixMessageSendClient,
 	private val clock: Clock,
 	private val recentThreadsBudgetMs: Long = DEFAULT_RECENT_THREADS_BUDGET_MS,
+	private val fileDownloadClient: MatrixFileDownloadClient? = null,
 ) : MatrixConnector,
 	ConnectorTextSender,
+	ConnectorReplySender,
 	ConnectorImageSender,
 	ConnectorFileSender,
+	ConnectorFileDownloader,
 	ConnectorReadMarker,
 	ConnectorUnreadMarker,
 	ConnectorRoomLeaver,
 	ConnectorTypingSender,
 	ConnectorMessageDeleter,
+	ConnectorMessageEditor,
+	ConnectorReactionSender,
+	ConnectorReactionRemover,
 	ConnectorRoomObserver,
-	ConnectorTypingObserver {
+	ConnectorTypingObserver,
+	ConnectorThumbnailLoader {
 	override val source: ConnectorSource = ConnectorSources.MATRIX
 
 	override fun isEnabled(): Boolean = true
@@ -136,6 +151,11 @@ class MatrixRoomConnector(
 		return messageSendClient.sendTextMessage(threadId, text)
 	}
 
+	override fun sendReply(threadId: String, replyToMessageId: String, text: String): Boolean {
+		if (!isAuthorized() || replyToMessageId.isBlank()) return false
+		return messageSendClient.sendReplyMessage(threadId, replyToMessageId, text)
+	}
+
 	override fun prepareTyping(threadId: String): ConnectorTypingSender.PreparedTyping? {
 		if (!isAuthorized()) return null
 		val prepared = messageSendClient.prepareTyping(threadId) ?: return null
@@ -180,6 +200,21 @@ class MatrixRoomConnector(
 		return messageSendClient.deleteMessage(threadId, messageId)
 	}
 
+	override fun editTextMessage(threadId: String, messageId: String, text: String): Boolean {
+		if (!isAuthorized() || text.isBlank()) return false
+		return messageSendClient.editTextMessage(threadId, messageId, text)
+	}
+
+	override fun sendReaction(threadId: String, messageId: String, reaction: String): Boolean {
+		if (!isAuthorized() || reaction.isBlank()) return false
+		return messageSendClient.sendReaction(threadId, messageId, reaction)
+	}
+
+	override fun removeReaction(threadId: String, messageId: String, reaction: String): Boolean {
+		if (!isAuthorized() || reaction.isBlank()) return false
+		return messageSendClient.removeReaction(threadId, messageId, reaction)
+	}
+
 	override fun observeRoom(
 		threadId: String,
 		onUpdate: () -> Unit,
@@ -191,6 +226,38 @@ class MatrixRoomConnector(
 		onTypingChanged: (isTyping: Boolean) -> Unit,
 	): ConnectorTypingObserver.TypingSubscription? =
 		if (isAuthorized()) messageSnapshotClient.observeTyping(threadId, onTypingChanged) else null
+
+	override fun loadThumbnail(
+		threadId: String,
+		messageId: String,
+		attachment: ConnectorAttachmentMetadata?,
+		maxWidth: Int,
+		maxHeight: Int,
+	): ByteArray? {
+		if (!isAuthorized() || attachment == null) return null
+		return messageSnapshotClient.getMediaThumbnail(attachment, maxWidth, maxHeight)
+	}
+
+	override fun downloadFile(
+		threadId: String,
+		messageId: String,
+		attachment: ConnectorAttachmentMetadata,
+		destinationDir: File,
+		isCancelled: () -> Boolean,
+	): ConnectorFileDownloader.DownloadResult {
+		if (!isAuthorized()) {
+			return ConnectorFileDownloader.DownloadResult.Failure(
+				ConnectorFileDownloader.FailureCause.LOGGED_OUT,
+			)
+		}
+		val client = fileDownloadClient
+			?: (messageSendClient as? MatrixFileDownloadClient)
+			?: (messageSnapshotClient as? MatrixFileDownloadClient)
+			?: return ConnectorFileDownloader.DownloadResult.Failure(
+				ConnectorFileDownloader.FailureCause.NOT_FOUND,
+			)
+		return client.downloadFile(attachment, destinationDir, isCancelled)
+	}
 
 	companion object {
 		/** Overall wall-clock budget for [getRecentThreads]'s per-room preview loop (MX-034). */

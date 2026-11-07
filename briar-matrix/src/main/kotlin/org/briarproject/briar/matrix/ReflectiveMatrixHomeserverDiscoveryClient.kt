@@ -8,6 +8,9 @@ import org.briarproject.briar.api.matrix.MatrixAuthSession.RecoverableErrorDetai
 import org.briarproject.briar.api.matrix.MatrixHomeserverDiscoveryClient
 import org.briarproject.briar.api.matrix.MatrixHomeserverDiscoveryClient.DiscoveryResult
 import org.briarproject.briar.api.connector.ConnectorAttachmentMetadata
+import org.briarproject.briar.api.connector.ConnectorFileDownloader
+import org.briarproject.briar.api.connector.ConnectorFileDownloader.DownloadResult
+import org.briarproject.briar.api.connector.ConnectorFileDownloader.FailureCause
 import org.briarproject.briar.api.connector.ConnectorFileSender
 import org.briarproject.briar.api.connector.ConnectorImageSender
 import org.briarproject.briar.api.connector.ConnectorMessageType
@@ -17,6 +20,8 @@ import org.briarproject.briar.api.connector.ConnectorRoomLeaver.PreparedLeave
 import org.briarproject.briar.api.connector.ConnectorRoomObserver.RoomSubscription
 import org.briarproject.briar.api.connector.ConnectorTypingObserver.TypingSubscription
 import org.briarproject.briar.api.connector.ConnectorTypingSender.PreparedTyping
+import java.util.UUID
+import java.util.concurrent.CancellationException
 import java.util.concurrent.Executor
 import java.util.concurrent.Executors
 import java.io.ByteArrayInputStream
@@ -82,12 +87,19 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 	MatrixLoginClient,
 	MatrixRoomSnapshotClient,
 	MatrixMessageSnapshotClient,
-	MatrixMessageSendClient {
+	MatrixMessageSendClient,
+	MatrixFileDownloadClient {
 
 	private var loginClient: Any? = null
 	private val lifecycleLock = Any()
 	private var activeGeneration: Any? = null
 	private var activeStore: MatrixStoreConfiguration? = null
+	private val activeDownloadDirs = java.util.Collections.newSetFromMap(
+		java.util.concurrent.ConcurrentHashMap<File, Boolean>(),
+	)
+	private val activeAttachmentRoots = java.util.Collections.newSetFromMap(
+		java.util.concurrent.ConcurrentHashMap<File, Boolean>(),
+	)
 	private class TypingLane {
 		val queue = java.util.ArrayDeque<() -> Unit>()
 		var busy = false
@@ -95,6 +107,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 	private val typingLanes = mutableMapOf<String, TypingLane>()
 	private val activeRoomSubscriptions = mutableSetOf<RoomSubscription>()
 	private val activeTypingSubscriptions = mutableSetOf<TypingSubscription>()
+	private val inFlightReactions = java.util.Collections.synchronizedSet(mutableSetOf<String>())
 
 	// Unlike invokeUnit, this lane waits for real native completion, not a timeout. A hung
 	// operation cannot release a later stop/start out of order or block message sending.
@@ -776,16 +789,21 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 				invokeCloseableValue(room, "timeline", emptyArray(), emptyArray(), ::closeQuietly)
 			timeline = loadedTimeline
 			val listenerClass = Class.forName(TIMELINE_LISTENER_CLASS_NAME)
-			initialSnapshot = readTimelineSnapshot(loadedTimeline, listenerClass)
-			if (initialSnapshot.size >= limit) return initialSnapshot.takeLast(limit)
-			val remaining = (limit - initialSnapshot.size).coerceAtMost(MAX_UNSIGNED_SHORT)
+			val initialEvents = deduplicateSnapshots(
+				readTimelineSnapshot(loadedTimeline, listenerClass),
+			)
+			initialSnapshot = initialEvents
+			if (initialEvents.size >= limit) return initialEvents.takeLast(limit)
+			val remaining = (limit - initialEvents.size).coerceAtMost(MAX_UNSIGNED_SHORT)
 			invokeUnit(
 				loadedTimeline,
 				PAGINATE_BACKWARDS_METHOD_NAME,
 				arrayOf(Short::class.javaPrimitiveType ?: throw SnapshotAdapterFailure()),
 				arrayOf(remaining.toShort()),
 			)
-			readTimelineSnapshot(loadedTimeline, listenerClass).takeLast(limit)
+			deduplicateSnapshots(
+				readTimelineSnapshot(loadedTimeline, listenerClass),
+			).takeLast(limit)
 		} catch (e: InterruptedException) {
 			Thread.currentThread().interrupt()
 			initialSnapshot
@@ -809,7 +827,20 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 	 * fails.
 	 */
 	@Synchronized
-	override fun sendTextMessage(roomId: String, text: String): Boolean {
+	override fun sendTextMessage(roomId: String, text: String): Boolean = sendText(roomId, text, null)
+
+	/**
+	 * Sends [text] as a reply to [inReplyToEventId] (MX-057) through the pinned AAR's suspend
+	 * `Timeline.sendReply(RoomMessageEventContentWithoutRelation, String)`, which returns `Unit`
+	 * and lets the SDK add the `m.relates_to.m.in_reply_to` relation (and forward any thread
+	 * relation of the replied-to event). The message content is built exactly like
+	 * [sendTextMessage]; a blank [inReplyToEventId] fails closed rather than sending ordinary text.
+	 */
+	@Synchronized
+	override fun sendReplyMessage(roomId: String, inReplyToEventId: String, text: String): Boolean =
+		inReplyToEventId.isNotBlank() && sendText(roomId, text, inReplyToEventId)
+
+	private fun sendText(roomId: String, text: String, inReplyToEventId: String?): Boolean {
 		val client = loginClient ?: return false
 		var room: Any? = null
 		var timeline: Any? = null
@@ -821,25 +852,25 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			val loadedTimeline =
 				invokeCloseableValue(room, "timeline", emptyArray(), emptyArray(), ::closeQuietly)
 			timeline = loadedTimeline
-			val formattedBodyClass = Class.forName(FORMATTED_BODY_CLASS_NAME)
-			val textContent = Class.forName(TEXT_MESSAGE_CONTENT_CLASS_NAME)
-				.getConstructor(String::class.java, formattedBodyClass)
-				.newInstance(text, null)
-			val messageType = Class.forName(MESSAGE_TYPE_TEXT_CLASS_NAME)
-				.getConstructor(textContent.javaClass)
-				.newInstance(textContent)
-			val createdContent = loadedTimeline.javaClass
-				.getMethod("createMessageContent", Class.forName(MESSAGE_TYPE_CLASS_NAME))
-				.invoke(loadedTimeline, messageType)
-				?: throw SnapshotAdapterFailure()
+			val createdContent = createTextContent(loadedTimeline, text)
 			content = createdContent
-			sendHandle = invokeCloseableValue(
-				loadedTimeline,
-				"send",
-				arrayOf(Class.forName(ROOM_MESSAGE_EVENT_CONTENT_CLASS_NAME)),
-				arrayOf(createdContent),
-				::closeQuietly,
-			)
+			val contentClass = Class.forName(ROOM_MESSAGE_EVENT_CONTENT_CLASS_NAME)
+			if (inReplyToEventId == null) {
+				sendHandle = invokeCloseableValue(
+					loadedTimeline,
+					"send",
+					arrayOf(contentClass),
+					arrayOf(createdContent),
+					::closeQuietly,
+				)
+			} else {
+				invokeUnit(
+					loadedTimeline,
+					"sendReply",
+					arrayOf(contentClass, String::class.java),
+					arrayOf(createdContent, inReplyToEventId),
+				)
+			}
 			true
 		} catch (e: InterruptedException) {
 			Thread.currentThread().interrupt()
@@ -854,6 +885,94 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			closeQuietly(timeline)
 			closeQuietly(room)
 		}
+	}
+
+	private fun createTextContent(timeline: Any, text: String): Any {
+		val formattedBodyClass = Class.forName(FORMATTED_BODY_CLASS_NAME)
+		val textContent = Class.forName(TEXT_MESSAGE_CONTENT_CLASS_NAME)
+			.getConstructor(String::class.java, formattedBodyClass)
+			.newInstance(text, null)
+		val messageType = Class.forName(MESSAGE_TYPE_TEXT_CLASS_NAME)
+			.getConstructor(textContent.javaClass)
+			.newInstance(textContent)
+		return timeline.javaClass
+			.getMethod("createMessageContent", Class.forName(MESSAGE_TYPE_CLASS_NAME))
+			.invoke(timeline, messageType)
+			?: throw SnapshotAdapterFailure()
+	}
+
+	/**
+	 * MX-058: suspend `Timeline.edit(EventOrTransactionId, EditedContent.RoomMessage)` (26.08.05),
+	 * only after `getEventTimelineItemByEventId` shows an own, editable `MessageType.Text` event;
+	 * foreign, media, redacted or unknown events and SDK failures return false, never throwing.
+	 */
+	@Synchronized
+	override fun editTextMessage(roomId: String, eventId: String, text: String): Boolean {
+		val client = loginClient ?: return false
+		var room: Any? = null
+		var timeline: Any? = null
+		var item: Any? = null
+		var content: Any? = null
+		return try {
+			room = client.javaClass.getMethod("getRoom", String::class.java).invoke(client, roomId)
+				?: throw SnapshotAdapterFailure()
+			val loadedTimeline =
+				invokeCloseableValue(room, "timeline", emptyArray(), emptyArray(), ::closeQuietly)
+			timeline = loadedTimeline
+			val loadedItem = invokeCloseableValue(
+				loadedTimeline,
+				"getEventTimelineItemByEventId",
+				arrayOf(String::class.java),
+				arrayOf(eventId),
+				::destroyQuietly,
+			)
+			item = loadedItem
+			if (!isOwnEditableText(loadedItem)) return false
+			val createdContent = createTextContent(loadedTimeline, text)
+			content = createdContent
+			val editedContent = Class.forName(EDITED_CONTENT_ROOM_MESSAGE_CLASS_NAME)
+				.getConstructor(Class.forName(ROOM_MESSAGE_EVENT_CONTENT_CLASS_NAME))
+				.newInstance(createdContent)
+			val eventIdObj = Class.forName(EVENT_ID_CLASS_NAME)
+				.getConstructor(String::class.java)
+				.newInstance(eventId)
+			invokeUnit(
+				loadedTimeline,
+				"edit",
+				arrayOf(
+					Class.forName(EVENT_OR_TRANSACTION_ID_CLASS_NAME),
+					Class.forName(EDITED_CONTENT_CLASS_NAME),
+				),
+				arrayOf(eventIdObj, editedContent),
+			)
+			true
+		} catch (e: InterruptedException) {
+			Thread.currentThread().interrupt()
+			false
+		} catch (e: Exception) {
+			false
+		} catch (e: LinkageError) {
+			false
+		} finally {
+			closeQuietly(content)
+			destroyQuietly(item)
+			closeQuietly(timeline)
+			closeQuietly(room)
+		}
+	}
+
+	private fun isOwnEditableText(event: Any): Boolean {
+		val eventClass = event.javaClass
+		if (eventClass.getMethod("isOwn").invoke(event) != true) return false
+		if (eventClass.getMethod("isEditable").invoke(event) != true) return false
+		val content = eventClass.getMethod("getContent").invoke(event)
+		if (content?.javaClass?.simpleName != "MsgLike") return false
+		val msgLike = content.javaClass.getMethod("getContent").invoke(content)
+		val kind = msgLike.javaClass.getMethod("getKind").invoke(msgLike)
+		if (kind.javaClass.simpleName != "Message") return false
+		val message = kind.javaClass.getMethod("getContent").invoke(kind)
+		val messageType = message.javaClass.getMethod("getMsgType").invoke(message)
+		return Class.forName(MESSAGE_TYPE_TEXT_CLASS_NAME).isInstance(messageType)
 	}
 
 	@Synchronized
@@ -977,6 +1096,314 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		} finally {
 			closeQuietly(timeline)
 			closeQuietly(room)
+		}
+	}
+
+	/**
+	 * MX-059: suspend `Timeline.toggleReaction(EventOrTransactionId, String)` (26.08.05);
+	 * duplicate in-flight submissions for the same (room, event, reaction) are rejected so
+	 * rapid taps do not double-toggle or race. Duplicate registration is recorded before
+	 * acquiring the client monitor so overlapping calls reject immediately rather than
+	 * serializing. On timeout or cancellation, duplicate protection is retained until the
+	 * native operation completes or cancels. Unknown events and SDK failures return false,
+	 * never throwing.
+	 */
+	override fun sendReaction(roomId: String, eventId: String, reaction: String): Boolean {
+		if (reaction.isBlank() || eventId.isBlank()) return false
+		val flightKey = "$roomId:$eventId:$reaction"
+		if (!inFlightReactions.add(flightKey)) return false
+		return toggleReactionInternal(roomId, eventId, reaction, flightKey) != null
+	}
+
+	/**
+	 * MX-060: removes the user's own [reaction] on [eventId] in [roomId].
+	 * Tracks SDK ownership to verify that the logged-in user actually added [reaction] to this
+	 * event before invoking the SDK's suspend `Timeline.toggleReaction(EventOrTransactionId, String)`.
+	 * Reuses the opened timeline to avoid closing and reopening before toggle. If the state changes
+	 * between lookup and toggle so that toggle adds the reaction (returning true) instead of
+	 * removing it (returning false), recovers by toggling again to remove the newly added reaction
+	 * and returns false without claiming success. Recovery is owned by the completion path and
+	 * retains operation ownership (inFlightReactions guard) across the initial toggle and recovery
+	 * even if the waiting caller times out or is interrupted, ensuring late additions are cleaned up
+	 * and the guard is never leaked.
+	 * If the event cannot be found, the user does not own
+	 * the reaction, or the SDK call fails, returns false -- never throwing.
+	 */
+	override fun removeReaction(roomId: String, eventId: String, reaction: String): Boolean {
+		if (reaction.isBlank() || eventId.isBlank() || roomId.isBlank()) return false
+		val flightKey = "$roomId:$eventId:$reaction"
+		if (!inFlightReactions.add(flightKey)) return false
+
+		val client = loginClient
+		if (client == null) {
+			inFlightReactions.remove(flightKey)
+			return false
+		}
+		val currentUserId = try {
+			client.javaClass.getMethod("userId").invoke(client) as? String
+		} catch (e: Exception) {
+			null
+		}
+		if (currentUserId.isNullOrBlank()) {
+			inFlightReactions.remove(flightKey)
+			return false
+		}
+
+		var room: Any? = null
+		var timeline: Any? = null
+		val ownsReaction = try {
+			val loadedRoom =
+				client.javaClass.getMethod("getRoom", String::class.java).invoke(client, roomId)
+					?: throw SnapshotAdapterFailure()
+			room = loadedRoom
+			val loadedTimeline =
+				invokeCloseableValue(loadedRoom, "timeline", emptyArray(), emptyArray(), ::closeQuietly)
+			timeline = loadedTimeline
+			val loadedItem = invokeCloseableValue(
+				loadedTimeline,
+				"getEventTimelineItemByEventId",
+				arrayOf(String::class.java),
+				arrayOf(eventId),
+				::destroyQuietly,
+			)
+			try {
+				hasOwnReaction(loadedItem, reaction, currentUserId)
+			} finally {
+				destroyQuietly(loadedItem)
+			}
+		} catch (e: InterruptedException) {
+			Thread.currentThread().interrupt()
+			false
+		} catch (e: Exception) {
+			false
+		} catch (e: LinkageError) {
+			false
+		}
+
+		if (!ownsReaction) {
+			closeQuietly(timeline)
+			closeQuietly(room)
+			inFlightReactions.remove(flightKey)
+			return false
+		}
+
+		// Reuse the open room and timeline directly to avoid closing and reopening.
+		val added = toggleReactionInternal(
+			roomId,
+			eventId,
+			reaction,
+			flightKey,
+			room,
+			timeline,
+			recoverOnAdded = true,
+		)
+		return added == false
+	}
+
+	private fun hasOwnReaction(item: Any, reaction: String, currentUserId: String): Boolean {
+		val eventClass = item.javaClass
+		val content = eventClass.getMethod("getContent").invoke(item) ?: return false
+		if (content.javaClass.simpleName != "MsgLike") return false
+		val msgLike = content.javaClass.getMethod("getContent").invoke(content) ?: return false
+		val reactions =
+			msgLike.javaClass.getMethod("getReactions").invoke(msgLike) as? List<*> ?: return false
+		return reactions.any { r ->
+			if (r == null) return@any false
+			val key = r.javaClass.getMethod("getKey").invoke(r) as? String
+			if (key != reaction) return@any false
+			val senders = r.javaClass.getMethod("getSenders").invoke(r) as? List<*> ?: return@any false
+			senders.any { s ->
+				try {
+					s?.javaClass?.getMethod("getSenderId")?.invoke(s) == currentUserId
+				} catch (e: Exception) {
+					false
+				}
+			}
+		}
+	}
+
+	private fun toggleReactionInternal(
+		roomId: String,
+		eventId: String,
+		reaction: String,
+		flightKey: String,
+		existingRoom: Any? = null,
+		existingTimeline: Any? = null,
+		recoverOnAdded: Boolean = false,
+	): Boolean? {
+		val completed = AtomicBoolean(false)
+		val outcome = AtomicReference<Result<Any?>>()
+		val latch = CountDownLatch(1)
+		val roomRef = AtomicReference<Any?>(existingRoom)
+		val timelineRef = AtomicReference<Any?>(existingTimeline)
+
+		val job: Any? = try {
+			val jobKt = Class.forName("kotlinx.coroutines.JobKt")
+			val jobMethod = jobKt.getMethod("Job", Class.forName("kotlinx.coroutines.Job"))
+			jobMethod.invoke(null, null)
+		} catch (e: Exception) {
+			null
+		}
+		val coroutineContext: CoroutineContext = if (job is CoroutineContext) {
+			job
+		} else {
+			EmptyCoroutineContext
+		}
+		fun cancelJob() {
+			if (job != null) {
+				try {
+					val cancelMethod = job.javaClass.methods.firstOrNull {
+						it.name == "cancel" &&
+							it.parameterTypes.size == 1 &&
+							CancellationException::class.java.isAssignableFrom(it.parameterTypes[0])
+					}
+					cancelMethod?.invoke(job, CancellationException("Reaction cancelled"))
+				} catch (ignored: Exception) {}
+			}
+		}
+
+		fun performRecovery() {
+			val recoveryDone = AtomicBoolean(false)
+			fun finishRecovery() {
+				if (!recoveryDone.compareAndSet(false, true)) return
+				try {
+					inFlightReactions.remove(flightKey)
+					closeQuietly(timelineRef.get())
+					closeQuietly(roomRef.get())
+				} finally {
+					outcome.set(Result.success(true))
+					latch.countDown()
+				}
+			}
+
+			try {
+				val loadedTimeline = timelineRef.get()
+				if (loadedTimeline == null) {
+					finishRecovery()
+					return
+				}
+				val eventIdClass = Class.forName(EVENT_ID_CLASS_NAME)
+				val eventIdObj = eventIdClass.getConstructor(String::class.java).newInstance(eventId)
+				val toggleReactionMethod = loadedTimeline.javaClass.getMethod(
+					"toggleReaction",
+					Class.forName(EVENT_OR_TRANSACTION_ID_CLASS_NAME),
+					String::class.java,
+					Continuation::class.java,
+				)
+				val recoveryContinuation = object : Continuation<Any?> {
+					override val context: CoroutineContext = EmptyCoroutineContext
+					override fun resumeWith(result: Result<Any?>) {
+						finishRecovery()
+					}
+				}
+				val recoveryInvokeResult = toggleReactionMethod.invoke(
+					loadedTimeline,
+					eventIdObj,
+					reaction,
+					recoveryContinuation,
+				)
+				if (recoveryInvokeResult !== COROUTINE_SUSPENDED) {
+					finishRecovery()
+				}
+			} catch (t: Throwable) {
+				finishRecovery()
+			}
+		}
+
+		fun complete(result: Result<Any?>?) {
+			if (!completed.compareAndSet(false, true)) return
+			if (recoverOnAdded && result?.getOrNull() == true) {
+				performRecovery()
+			} else {
+				try {
+					inFlightReactions.remove(flightKey)
+					closeQuietly(timelineRef.get())
+					closeQuietly(roomRef.get())
+				} finally {
+					if (result != null) outcome.set(result)
+					latch.countDown()
+				}
+			}
+		}
+
+		val continuation = object : Continuation<Any?> {
+			override val context: CoroutineContext = coroutineContext
+			override fun resumeWith(result: Result<Any?>) {
+				complete(result)
+			}
+		}
+
+		var suspended = false
+		return try {
+			synchronized(this) {
+				val client = loginClient ?: return null
+				val loadedRoom = existingRoom ?: (
+					client.javaClass.getMethod("getRoom", String::class.java).invoke(client, roomId)
+						?: throw SnapshotAdapterFailure()
+				)
+				roomRef.set(loadedRoom)
+				val loadedTimeline = existingTimeline ?: (
+					invokeCloseableValue(loadedRoom, "timeline", emptyArray(), emptyArray(), ::closeQuietly)
+				)
+				timelineRef.set(loadedTimeline)
+
+				val eventIdClass = Class.forName(EVENT_ID_CLASS_NAME)
+				val eventIdObj = eventIdClass.getConstructor(String::class.java).newInstance(eventId)
+
+				val toggleReactionMethod = loadedTimeline.javaClass.getMethod(
+					"toggleReaction",
+					Class.forName(EVENT_OR_TRANSACTION_ID_CLASS_NAME),
+					String::class.java,
+					Continuation::class.java,
+				)
+
+				val invokeResult = toggleReactionMethod.invoke(
+					loadedTimeline,
+					eventIdObj,
+					reaction,
+					continuation,
+				)
+
+				if (invokeResult === COROUTINE_SUSPENDED) {
+					suspended = true
+				} else {
+					val added = invokeResult as? Boolean ?: true
+					complete(Result.success(added))
+					if (!recoverOnAdded || !added) {
+						return added
+					}
+					suspended = true
+				}
+			}
+
+			val completedInTime = try {
+				latch.await(discoveryTimeoutMs, TimeUnit.MILLISECONDS)
+			} catch (e: InterruptedException) {
+				Thread.currentThread().interrupt()
+				cancelJob()
+				return null
+			}
+
+			if (!completedInTime) {
+				cancelJob()
+				return null
+			}
+
+			val result = outcome.get() ?: return null
+			if (result.isFailure) return null
+			result.getOrNull() as? Boolean
+		} catch (e: InterruptedException) {
+			Thread.currentThread().interrupt()
+			cancelJob()
+			null
+		} catch (e: Exception) {
+			null
+		} catch (e: LinkageError) {
+			null
+		} finally {
+			if (!suspended) {
+				complete(null)
+			}
 		}
 	}
 
@@ -1190,6 +1617,114 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			return (outcome.get() ?: throw SnapshotAdapterFailure()).getOrThrow()
 		}
 	}
+
+	private fun deduplicateSnapshots(
+		snapshots: List<MatrixMessageSnapshot>,
+	): List<MatrixMessageSnapshot> {
+		if (snapshots.isEmpty()) return emptyList()
+		val deduplicated = LinkedHashMap<String, MatrixMessageSnapshot>()
+		for (snapshot in snapshots) {
+			val existing = deduplicated[snapshot.eventId]
+			deduplicated[snapshot.eventId] = if (existing == null) {
+				snapshot
+			} else {
+				mergeSnapshots(existing, snapshot)
+			}
+		}
+		return deduplicated.values.toList()
+	}
+
+	private fun mergeSnapshots(
+		first: MatrixMessageSnapshot,
+		second: MatrixMessageSnapshot,
+	): MatrixMessageSnapshot {
+		if (first.type == ConnectorMessageType.DELETED ||
+			second.type == ConnectorMessageType.DELETED
+		) {
+			val deletedBase = if (second.type == ConnectorMessageType.DELETED) second else first
+			return deletedBase.copy(
+				bodyText = "",
+				type = ConnectorMessageType.DELETED,
+				isEdited = false,
+				attachment = null,
+				reactions = emptyList(),
+			)
+		}
+		val base = when {
+			first.isEdited && !second.isEdited -> first
+			!first.isEdited && second.isEdited -> second
+			else -> second
+		}
+		val attachment = if (base == first) {
+			first.attachment ?: second.attachment
+		} else {
+			second.attachment ?: first.attachment
+		}
+		val isReply = second.isReply || first.isReply
+		return base.copy(
+			reactions = base.reactions,
+			attachment = attachment,
+			isReply = isReply,
+		)
+	}
+
+	override fun getMediaThumbnail(
+		attachment: ConnectorAttachmentMetadata,
+		width: Int,
+		height: Int,
+	): ByteArray? {
+		if (width <= 0 || height <= 0) return null
+		val (client, generation) = synchronized(this) {
+			val gen = synchronized(lifecycleLock) { activeGeneration }
+			Pair(loginClient, gen)
+		}
+		if (client == null || generation == null) return null
+
+		val sourceJson = attachment.thumbnailSourceJson // encrypted originals: no full-res fetch
+			?: attachment.mediaSourceJson?.also { if ("\"key\"" in it) return null }
+		val sourceUrl = attachment.thumbnailUri ?: attachment.uri
+		if (sourceJson.isNullOrBlank() && sourceUrl.isNullOrBlank()) return null
+
+		var mediaSource: Any? = null
+		return try {
+			val mediaSourceClass = Class.forName(MEDIA_SOURCE_CLASS_NAME)
+			mediaSource = createMediaSource(mediaSourceClass, sourceJson, sourceUrl) ?: return null
+			val method = client.javaClass.methods.firstOrNull {
+				it.name.startsWith("getMediaThumbnail") && it.parameterTypes.size == 4
+			} ?: return null
+			val outcome = AtomicReference<Result<Any?>>()
+			val latch = CountDownLatch(1)
+			val continuation = object : Continuation<Any?> {
+				override val context: CoroutineContext = EmptyCoroutineContext
+				override fun resumeWith(result: Result<Any?>) {
+					outcome.set(result)
+					latch.countDown()
+				}
+			}
+			val invokeResult = method.invoke(
+				client,
+				mediaSource,
+				width.toLong(),
+				height.toLong(),
+				continuation,
+			)
+			val resultBytes = if (invokeResult !== COROUTINE_SUSPENDED) {
+				invokeResult as? ByteArray
+			} else {
+				if (!latch.await(discoveryTimeoutMs, TimeUnit.MILLISECONDS)) return null
+				outcome.get()?.getOrNull() as? ByteArray
+			}
+			val isCurrent = synchronized(lifecycleLock) { activeGeneration === generation }
+			if (!isCurrent) null else resultBytes
+		} catch (e: Exception) {
+			null
+		} finally {
+			destroyQuietly(mediaSource)
+		}
+	}
+
+	override fun getMediaThumbnail(mediaUrl: String, width: Int, height: Int): ByteArray? =
+		getMediaThumbnail(ConnectorAttachmentMetadata(uri = mediaUrl), width, height)
 
 	@Synchronized
 	override fun observeRoom(roomId: String, onUpdate: () -> Unit): RoomSubscription? {
@@ -1461,7 +1996,10 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 	private fun List<Any>.firstIndexOrFailure(): Int =
 		if (isEmpty()) throw SnapshotAdapterFailure() else 0
 
-	private fun readReactionSummaries(msgLike: Any): List<ConnectorReactionSummary> {
+	private fun readReactionSummaries(
+		msgLike: Any,
+		currentUserId: String? = null,
+	): List<ConnectorReactionSummary> {
 		val reactions = msgLike.javaClass.getMethod("getReactions").invoke(msgLike) as? List<*>
 			?: throw SnapshotAdapterFailure()
 		return reactions.mapNotNull { reaction ->
@@ -1473,7 +2011,18 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			if (key.isEmpty() || senders.isEmpty()) {
 				null
 			} else {
-				ConnectorReactionSummary(key, senders.size)
+				val isOwn = if (!currentUserId.isNullOrBlank()) {
+					senders.any { sender ->
+						try {
+							sender?.javaClass?.getMethod("getSenderId")?.invoke(sender) == currentUserId
+						} catch (ignored: Exception) {
+							false
+						}
+					}
+				} else {
+					false
+				}
+				ConnectorReactionSummary(key, senders.size, isOwn)
 			}
 		}
 	}
@@ -1509,7 +2058,12 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			// mx007_m3_item2_timeline_scoping.md), so no separate destroy call is needed here,
 			// consistent with message/kind/msgLike/content also being left undestroyed.
 			val inReplyTo = msgLike.javaClass.getMethod("getInReplyTo").invoke(msgLike)
-			val reactions = readReactionSummaries(msgLike)
+			val currentUserId = try {
+				loginClient?.let { it.javaClass.getMethod("userId").invoke(it) as? String }
+			} catch (ignored: Exception) {
+				null
+			}
+			val reactions = readReactionSummaries(msgLike, currentUserId)
 			val rawTypeName = messageType.javaClass.simpleName
 			val typeName = if (rawTypeName == "Companion") {
 				messageType.javaClass.enclosingClass?.simpleName ?: rawTypeName
@@ -1575,14 +2129,425 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 				val sizeObj = sizeMethod?.invoke(info)
 				rawSize = sizeObj?.toString()?.toLongOrNull()?.takeIf { it >= 0L }
 			}
+			val sourceMethod = contentClass.methods.firstOrNull {
+				it.name == "getSource" && it.parameterTypes.isEmpty()
+			}
+			val source = sourceMethod?.invoke(content)
+			var mediaUrl: String? = null
+			var mediaJson: String? = null
+			if (source != null) {
+				val urlMethod = source.javaClass.methods.firstOrNull {
+					it.name == "url" && it.parameterTypes.isEmpty()
+				}
+				mediaUrl = urlMethod?.invoke(source) as? String
+				val jsonMethod = source.javaClass.methods.firstOrNull {
+					it.name == "toJson" && it.parameterTypes.isEmpty()
+				}
+				mediaJson = jsonMethod?.invoke(source) as? String
+			}
+			var thumbUrl: String? = null
+			var thumbJson: String? = null
+			if (info != null) {
+				val thumbSourceMethod = info.javaClass.methods.firstOrNull {
+					it.name == "getThumbnailSource" && it.parameterTypes.isEmpty()
+				}
+				val thumbSource = thumbSourceMethod?.invoke(info)
+				if (thumbSource != null) {
+					val urlMethod = thumbSource.javaClass.methods.firstOrNull {
+						it.name == "url" && it.parameterTypes.isEmpty()
+					}
+					thumbUrl = urlMethod?.invoke(thumbSource) as? String
+					val jsonMethod = thumbSource.javaClass.methods.firstOrNull {
+						it.name == "toJson" && it.parameterTypes.isEmpty()
+					}
+					thumbJson = jsonMethod?.invoke(thumbSource) as? String
+				}
+			}
 			ConnectorAttachmentMetadata(
 				fileName = rawFilename,
 				mimeType = rawMime,
 				size = rawSize,
+				uri = mediaUrl,
+				mediaSourceJson = mediaJson,
+				thumbnailUri = thumbUrl,
+				thumbnailSourceJson = thumbJson,
 			)
 		} catch (e: Exception) {
 			null
 		}
+	}
+
+	override fun downloadFile(
+		attachment: ConnectorAttachmentMetadata,
+		destinationDir: File,
+		isCancelled: () -> Boolean,
+	): DownloadResult {
+		val (client, generation) = synchronized(this) {
+			val gen = synchronized(lifecycleLock) { activeGeneration }
+			Pair(loginClient, gen)
+		}
+		if (client == null || generation == null) {
+			return DownloadResult.Failure(FailureCause.LOGGED_OUT)
+		}
+
+		if (isCancelled()) return DownloadResult.Failure(FailureCause.CANCELLED)
+
+		val declaredSize = attachment.size
+		if (declaredSize == null ||
+			declaredSize <= 0L ||
+			declaredSize > ConnectorFileDownloader.MAX_FILE_BYTES
+		) {
+			return DownloadResult.Failure(FailureCause.OVERSIZE)
+		}
+
+		val mediaSourceJson = attachment.mediaSourceJson
+		val mediaUrl = attachment.uri
+		if (mediaSourceJson.isNullOrBlank() && mediaUrl.isNullOrBlank()) {
+			return DownloadResult.Failure(FailureCause.NOT_FOUND)
+		}
+
+		if (!destinationDir.exists()) destinationDir.mkdirs()
+		val attachmentsRoot: File = if (destinationDir.name == "matrix_attachments") {
+			destinationDir
+		} else if (destinationDir.parentFile?.name == "matrix_attachments") {
+			destinationDir.parentFile!!
+		} else {
+			destinationDir
+		}
+		synchronized(activeDownloadDirs) {
+			activeDownloadDirs.add(destinationDir)
+		}
+		synchronized(activeAttachmentRoots) {
+			activeAttachmentRoots.add(attachmentsRoot)
+		}
+		val store = synchronized(this) { activeStore }
+		if (store != null) {
+			try {
+				val rootsFile = File(store.directory, "matrix_attachment_roots")
+				val rootPath = attachmentsRoot.absolutePath
+				val existing = if (rootsFile.exists()) rootsFile.readLines() else emptyList()
+				if (!existing.contains(rootPath)) {
+					rootsFile.appendText(rootPath + "\n")
+				}
+			} catch (ignored: Exception) {}
+		}
+
+		var mediaSource: Any? = null
+		var handle: Any? = null
+		var downloadedFile: File? = null
+		val stagingDir = File(destinationDir, ".staging_${UUID.randomUUID()}")
+		stagingDir.mkdirs()
+
+		return try {
+			val mediaSourceClass = Class.forName(MEDIA_SOURCE_CLASS_NAME)
+			mediaSource = createMediaSource(mediaSourceClass, mediaSourceJson, mediaUrl)
+				?: return DownloadResult.Failure(FailureCause.NOT_FOUND)
+
+			if (isCancelled()) return DownloadResult.Failure(FailureCause.CANCELLED)
+
+			val safeFileName = sanitizeAttachmentFileName(attachment.fileName)
+			val rawHandle = invokeMediaDownload(
+				client = client,
+				mediaSourceClass = mediaSourceClass,
+				mediaSource = mediaSource,
+				fileName = safeFileName,
+				mimeType = attachment.mimeType ?: "application/octet-stream",
+				stagingDir = stagingDir,
+				generation = generation,
+				isCancelled = isCancelled,
+			)
+			handle = rawHandle
+
+			val isCurrent = synchronized(lifecycleLock) { activeGeneration === generation }
+			if (!isCurrent) {
+				cleanUpHandleAndFile(handle, null, stagingDir)
+				return DownloadResult.Failure(FailureCause.LOGGED_OUT)
+			}
+
+			if (isCancelled()) {
+				cleanUpHandleAndFile(handle, null, stagingDir)
+				return DownloadResult.Failure(FailureCause.CANCELLED)
+			}
+
+			val pathMethod = rawHandle.javaClass.getMethod("path")
+			val path = pathMethod.invoke(rawHandle) as? String
+			if (path == null) {
+				cleanUpHandleAndFile(handle, null, stagingDir)
+				return DownloadResult.Failure(FailureCause.NETWORK_ERROR)
+			}
+
+			val tempFile = File(path)
+			val canonicalDestPath = destinationDir.canonicalPath
+			val destPrefix = if (canonicalDestPath.endsWith(File.separator)) {
+				canonicalDestPath
+			} else {
+				canonicalDestPath + File.separator
+			}
+
+			val canonicalTempPath = tempFile.canonicalPath
+			if (!canonicalTempPath.startsWith(destPrefix)) {
+				cleanUpHandleAndFile(handle, null, stagingDir)
+				return DownloadResult.Failure(FailureCause.NETWORK_ERROR)
+			}
+
+			if (isCancelled()) {
+				cleanUpHandleAndFile(handle, null, stagingDir)
+				return DownloadResult.Failure(FailureCause.CANCELLED)
+			}
+
+			if (!tempFile.exists()) {
+				cleanUpHandleAndFile(handle, null, stagingDir)
+				return DownloadResult.Failure(FailureCause.NETWORK_ERROR)
+			}
+
+			if (tempFile.length() > ConnectorFileDownloader.MAX_FILE_BYTES) {
+				cleanUpHandleAndFile(handle, null, stagingDir)
+				return DownloadResult.Failure(FailureCause.OVERSIZE)
+			}
+
+			val targetFile = File(destinationDir, "${UUID.randomUUID()}_$safeFileName")
+			val canonicalTargetPath = targetFile.canonicalPath
+			if (!canonicalTargetPath.startsWith(destPrefix)) {
+				cleanUpHandleAndFile(handle, null, stagingDir)
+				return DownloadResult.Failure(FailureCause.NETWORK_ERROR)
+			}
+
+			val persistMethod = rawHandle.javaClass.methods.firstOrNull {
+				it.name == "persist" && it.parameterTypes.size == 1
+			}
+			val persisted = (persistMethod?.invoke(rawHandle, targetFile.absolutePath) as? Boolean) == true
+			if (!persisted || !targetFile.exists()) {
+				cleanUpHandleAndFile(handle, targetFile, stagingDir)
+				return DownloadResult.Failure(FailureCause.NETWORK_ERROR)
+			}
+			downloadedFile = targetFile
+
+			try {
+				stagingDir.deleteRecursively()
+			} catch (ignored: Exception) {}
+
+			if (isCancelled()) {
+				cleanUpHandleAndFile(handle, targetFile, stagingDir)
+				return DownloadResult.Failure(FailureCause.CANCELLED)
+			}
+
+			if (targetFile.length() > ConnectorFileDownloader.MAX_FILE_BYTES) {
+				cleanUpHandleAndFile(handle, targetFile, stagingDir)
+				return DownloadResult.Failure(FailureCause.OVERSIZE)
+			}
+
+			DownloadResult.Success(targetFile)
+		} catch (e: DownloadCancelledException) {
+			cleanUpHandleAndFile(handle, downloadedFile, stagingDir)
+			DownloadResult.Failure(FailureCause.CANCELLED)
+		} catch (e: DownloadLoggedOutException) {
+			cleanUpHandleAndFile(handle, downloadedFile, stagingDir)
+			DownloadResult.Failure(FailureCause.LOGGED_OUT)
+		} catch (e: DownloadOversizeException) {
+			cleanUpHandleAndFile(handle, downloadedFile, stagingDir)
+			DownloadResult.Failure(FailureCause.OVERSIZE)
+		} catch (e: InterruptedException) {
+			Thread.currentThread().interrupt()
+			cleanUpHandleAndFile(handle, downloadedFile, stagingDir)
+			DownloadResult.Failure(FailureCause.CANCELLED)
+		} catch (e: Exception) {
+			cleanUpHandleAndFile(handle, downloadedFile, stagingDir)
+			val isCancellation = e is CancellationException ||
+				e.javaClass.name == "kotlinx.coroutines.CancellationException" ||
+				isCancelled()
+			if (isCancellation) {
+				DownloadResult.Failure(FailureCause.CANCELLED)
+			} else {
+				DownloadResult.Failure(FailureCause.NETWORK_ERROR)
+			}
+		} finally {
+			try {
+				if (stagingDir.exists()) stagingDir.deleteRecursively()
+			} catch (ignored: Exception) {}
+			closeQuietly(handle)
+			destroyQuietly(mediaSource)
+		}
+	}
+
+	private fun invokeMediaDownload(
+		client: Any,
+		mediaSourceClass: Class<*>,
+		mediaSource: Any,
+		fileName: String,
+		mimeType: String,
+		stagingDir: File,
+		generation: Any,
+		isCancelled: () -> Boolean,
+		timeoutMs: Long = 300_000L,
+	): Any {
+		val method = client.javaClass.getMethod(
+			"getMediaFile",
+			mediaSourceClass,
+			String::class.java,
+			String::class.java,
+			Boolean::class.javaPrimitiveType ?: java.lang.Boolean.TYPE,
+			String::class.java,
+			Continuation::class.java,
+		)
+		val job: Any? = try {
+			val jobKt = Class.forName("kotlinx.coroutines.JobKt")
+			val jobMethod = jobKt.getMethod("Job", Class.forName("kotlinx.coroutines.Job"))
+			jobMethod.invoke(null, null)
+		} catch (e: Exception) {
+			null
+		}
+		val coroutineContext: CoroutineContext = if (job is CoroutineContext) {
+			job
+		} else {
+			EmptyCoroutineContext
+		}
+		fun cancelJob() {
+			if (job != null) {
+				try {
+					val cancelMethod = job.javaClass.methods.firstOrNull {
+						it.name == "cancel" &&
+							it.parameterTypes.size == 1 &&
+							CancellationException::class.java.isAssignableFrom(it.parameterTypes[0])
+					}
+					cancelMethod?.invoke(job, CancellationException("Media download cancelled"))
+				} catch (ignored: Exception) {}
+			}
+		}
+		val outcome = AtomicReference<Result<Any?>>()
+		val latch = CountDownLatch(1)
+		val claimed = AtomicBoolean(false)
+		val continuation = object : Continuation<Any?> {
+			override val context: CoroutineContext = coroutineContext
+			override fun resumeWith(result: Result<Any?>) {
+				outcome.set(result)
+				latch.countDown()
+				if (!claimed.compareAndSet(false, true)) {
+					cleanUpHandle(result.getOrNull())
+				}
+			}
+		}
+		val invokeResult = method.invoke(
+			client,
+			mediaSource,
+			fileName,
+			mimeType,
+			false,
+			stagingDir.absolutePath,
+			continuation,
+		)
+		if (invokeResult !== COROUTINE_SUSPENDED) {
+			if (isCancelled()) {
+				cancelJob()
+				cleanUpHandle(invokeResult)
+				throw DownloadCancelledException()
+			}
+			val currentGen = synchronized(lifecycleLock) { activeGeneration }
+			if (currentGen !== generation) {
+				cancelJob()
+				cleanUpHandle(invokeResult)
+				throw DownloadLoggedOutException()
+			}
+			return invokeResult ?: throw SnapshotAdapterFailure()
+		}
+		val pollIntervalMs = 50L
+		val deadline = System.currentTimeMillis() + timeoutMs
+		while (true) {
+			if (isCancelled()) {
+				cancelJob()
+				if (claimed.compareAndSet(false, true)) {
+					cleanUpHandle(outcome.get()?.getOrNull())
+					throw DownloadCancelledException()
+				}
+			}
+			val currentGen = synchronized(lifecycleLock) { activeGeneration }
+			if (currentGen !== generation) {
+				cancelJob()
+				if (claimed.compareAndSet(false, true)) {
+					cleanUpHandle(outcome.get()?.getOrNull())
+					throw DownloadLoggedOutException()
+				}
+			}
+			val writtenBytes = runCatching {
+				stagingDir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+			}.getOrDefault(0L)
+			if (writtenBytes > ConnectorFileDownloader.MAX_FILE_BYTES) {
+				cancelJob()
+				if (claimed.compareAndSet(false, true)) {
+					cleanUpHandle(outcome.get()?.getOrNull())
+					throw DownloadOversizeException()
+				}
+			}
+			if (latch.await(pollIntervalMs, TimeUnit.MILLISECONDS)) {
+				break
+			}
+			if (System.currentTimeMillis() >= deadline) {
+				cancelJob()
+				if (claimed.compareAndSet(false, true)) {
+					cleanUpHandle(outcome.get()?.getOrNull())
+					throw SnapshotAdapterFailure()
+				}
+			}
+		}
+		return (outcome.get() ?: throw SnapshotAdapterFailure()).getOrThrow()
+			?: throw SnapshotAdapterFailure()
+	}
+
+	private fun cleanUpHandle(handle: Any?) {
+		if (handle == null) return
+		try {
+			val path = handle.javaClass.getMethod("path").invoke(handle) as? String
+			if (path != null) {
+				val file = File(path)
+				if (file.exists()) file.delete()
+			}
+		} catch (ignored: Exception) {}
+		closeQuietly(handle)
+		destroyQuietly(handle)
+	}
+
+	private fun cleanUpHandleAndFile(handle: Any?, file: File?, stagingDir: File? = null) {
+		try {
+			if (file != null && file.exists()) file.delete()
+		} catch (ignored: Exception) {}
+		try {
+			if (stagingDir != null && stagingDir.exists()) stagingDir.deleteRecursively()
+		} catch (ignored: Exception) {}
+		cleanUpHandle(handle)
+	}
+
+	private fun createMediaSource(mediaSourceClass: Class<*>, json: String?, url: String?): Any? {
+		val companion = try {
+			mediaSourceClass.getField("Companion").get(null)
+		} catch (e: Exception) {
+			null
+		}
+		val methods = if (companion != null) companion.javaClass.methods else mediaSourceClass.methods
+		val receiver = companion
+		if (!json.isNullOrBlank()) {
+			val fromJson = methods.firstOrNull {
+				it.name == "fromJson" &&
+					it.parameterTypes.size == 1 &&
+					it.parameterTypes[0] == String::class.java
+			}
+			if (fromJson != null) {
+				try {
+					return fromJson.invoke(receiver, json)
+				} catch (ignored: Exception) {}
+			}
+		}
+		if (!url.isNullOrBlank()) {
+			val fromUrl = methods.firstOrNull {
+				it.name == "fromUrl" &&
+					it.parameterTypes.size == 1 &&
+					it.parameterTypes[0] == String::class.java
+			}
+			if (fromUrl != null) {
+				try {
+					return fromUrl.invoke(receiver, url)
+				} catch (ignored: Exception) {}
+			}
+		}
+		return null
 	}
 
 	@Synchronized
@@ -1597,6 +2562,39 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		}
 		cancelRoomSubscriptions(detached)
 		cancelTypingSubscriptions(detachedTyping)
+		val downloadDirsToClear = synchronized(activeDownloadDirs) {
+			val copy = ArrayList(activeDownloadDirs)
+			activeDownloadDirs.clear()
+			copy
+		}
+		for (dir in downloadDirsToClear) {
+			try {
+				dir.deleteRecursively()
+			} catch (ignored: Exception) {}
+		}
+		val rootsToClear = synchronized(activeAttachmentRoots) {
+			val copy = ArrayList(activeAttachmentRoots)
+			activeAttachmentRoots.clear()
+			copy
+		}
+		val store = activeStore
+		if (store != null) {
+			try {
+				val rootsFile = File(store.directory, "matrix_attachment_roots")
+				if (rootsFile.exists()) {
+					rootsFile.readLines().forEach { line ->
+						val trimmed = line.trim()
+						if (trimmed.isNotEmpty()) rootsToClear.add(File(trimmed))
+					}
+					rootsFile.delete()
+				}
+			} catch (ignored: Exception) {}
+		}
+		for (root in rootsToClear) {
+			try {
+				root.deleteRecursively()
+			} catch (ignored: Exception) {}
+		}
 		activeStore = null
 		val client = loginClient ?: return
 		loginClient = null
@@ -1620,6 +2618,39 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		}
 		cancelRoomSubscriptions(detached)
 		cancelTypingSubscriptions(detachedTyping)
+		val downloadDirsToClear = synchronized(activeDownloadDirs) {
+			val copy = ArrayList(activeDownloadDirs)
+			activeDownloadDirs.clear()
+			copy
+		}
+		for (dir in downloadDirsToClear) {
+			try {
+				dir.deleteRecursively()
+			} catch (ignored: Exception) {}
+		}
+		val rootsToClear = synchronized(activeAttachmentRoots) {
+			val copy = ArrayList(activeAttachmentRoots)
+			activeAttachmentRoots.clear()
+			copy
+		}
+		val store = activeStore
+		if (store != null) {
+			try {
+				val rootsFile = File(store.directory, "matrix_attachment_roots")
+				if (rootsFile.exists()) {
+					rootsFile.readLines().forEach { line ->
+						val trimmed = line.trim()
+						if (trimmed.isNotEmpty()) rootsToClear.add(File(trimmed))
+					}
+					rootsFile.delete()
+				}
+			} catch (ignored: Exception) {}
+		}
+		for (root in rootsToClear) {
+			try {
+				root.deleteRecursively()
+			} catch (ignored: Exception) {}
+		}
 		val client = loginClient
 		loginClient = null
 		activeStore = null
@@ -1805,6 +2836,9 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 	/** Adapter-side failure (timeout, missing/blank result) with no SDK exception to map. */
 	private class DiscoveryAdapterFailure : Exception()
 	private class SnapshotAdapterFailure : Exception()
+	private class DownloadCancelledException : Exception()
+	private class DownloadLoggedOutException : Exception()
+	private class DownloadOversizeException : Exception()
 
 	/**
 	 * [claimStore] found its directory already in [openedStores]. Kept distinct from a
@@ -1842,6 +2876,9 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		const val EVENT_OR_TRANSACTION_ID_CLASS_NAME =
 			"org.matrix.rustcomponents.sdk.EventOrTransactionId"
 		const val EVENT_ID_CLASS_NAME = "org.matrix.rustcomponents.sdk.EventOrTransactionId\$EventId"
+		const val EDITED_CONTENT_CLASS_NAME = "org.matrix.rustcomponents.sdk.EditedContent"
+		const val EDITED_CONTENT_ROOM_MESSAGE_CLASS_NAME =
+			"org.matrix.rustcomponents.sdk.EditedContent\$RoomMessage"
 		const val MEDIA_SOURCE_CLASS_NAME = "org.matrix.rustcomponents.sdk.MediaSource"
 		const val RECEIPT_TYPE_CLASS_NAME = "org.matrix.rustcomponents.sdk.ReceiptType"
 		const val ULONG_CLASS_NAME = "kotlin.ULong"
@@ -1854,4 +2891,29 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		const val GCM_NONCE_LENGTH_BYTES = 12
 		const val GCM_TAG_LENGTH_BITS = 128
 	}
+}
+
+internal fun sanitizeAttachmentFileName(rawName: String?): String {
+	if (rawName.isNullOrBlank()) {
+		return "attachment_" + UUID.randomUUID().toString()
+	}
+	val baseName = rawName.substringAfterLast('/').substringAfterLast('\\').trim()
+	val stripped = baseName.trimStart('.')
+	val safeChars = stripped.filter {
+		it != '/' && it != '\\' && it != '\u0000' && it != '\r' && it != '\n'
+	}.trim()
+	if (safeChars.isEmpty() || safeChars == "." || safeChars == "..") {
+		return "attachment_" + UUID.randomUUID().toString()
+	}
+	val capped = if (safeChars.length > 128) {
+		val ext = safeChars.substringAfterLast('.', "")
+		if (ext.isNotEmpty() && ext.length < 16) {
+			safeChars.take(128 - ext.length - 1) + "." + ext
+		} else {
+			safeChars.take(128)
+		}
+	} else {
+		safeChars
+	}
+	return capped.ifEmpty { "attachment_" + UUID.randomUUID().toString() }
 }

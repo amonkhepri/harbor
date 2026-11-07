@@ -43,6 +43,14 @@ interface MatrixMessageSendClient {
 	fun sendTextMessage(roomId: String, text: String): Boolean
 
 	/**
+	 * Sends [text] into [roomId] as a reply to [inReplyToEventId] (MX-057) via the pinned SDK's
+	 * suspend `Timeline.sendReply(RoomMessageEventContentWithoutRelation, String)`. Returns false
+	 * -- never throwing -- under the same conditions as [sendTextMessage]; unsupported clients
+	 * fail closed.
+	 */
+	fun sendReplyMessage(roomId: String, inReplyToEventId: String, text: String): Boolean = false
+
+	/**
 	 * Sends [imageBytes] as a single image attachment into [roomId] as [fileName] with content
 	 * type [mimeType]. Returns true on success, false -- never throwing -- when no session is
 	 * retained, [roomId] cannot be found, or the SDK send call fails.
@@ -65,4 +73,27 @@ interface MatrixMessageSendClient {
 	 * throwing -- when no session is retained, [roomId] cannot be found, or the SDK call fails.
 	 */
 	fun deleteMessage(roomId: String, eventId: String): Boolean
+
+	/**
+	 * Replaces the body of the user's own text event [eventId] in [roomId] with [text] (MX-058).
+	 * Returns false -- never throwing -- when the event is not an own editable text message or
+	 * the SDK call fails. Unsupported clients fail closed.
+	 */
+	fun editTextMessage(roomId: String, eventId: String, text: String): Boolean = false
+
+	/**
+	 * Adds [reaction] to [eventId] in [roomId] (MX-059) via the pinned SDK's
+	 * suspend `Timeline.toggleReaction(EventOrTransactionId, String)`. Returns false
+	 * -- never throwing -- under the same conditions as [sendTextMessage]; unsupported clients
+	 * fail closed.
+	 */
+	fun sendReaction(roomId: String, eventId: String, reaction: String): Boolean = false
+
+	/**
+	 * Removes the user's own [reaction] from [eventId] in [roomId] (MX-060) via the pinned SDK's
+	 * suspend `Timeline.toggleReaction(EventOrTransactionId, String)`. Returns false
+	 * -- never throwing -- under the same conditions as [sendTextMessage]; unsupported clients
+	 * fail closed.
+	 */
+	fun removeReaction(roomId: String, eventId: String, reaction: String): Boolean = false
 }

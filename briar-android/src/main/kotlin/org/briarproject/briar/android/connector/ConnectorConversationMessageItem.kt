@@ -5,8 +5,11 @@ import org.briarproject.briar.api.connector.ConnectorMessage
 import org.briarproject.briar.api.connector.ConnectorMessageType
 import org.briarproject.briar.api.connector.ConnectorReactionSummary
 import org.briarproject.briar.api.connector.ConnectorSource
+import java.io.File
 
 enum class ConnectorLocalEchoStatus { PENDING, SENT, FAILED }
+
+enum class ConnectorDownloadState { IDLE, DOWNLOADING, DOWNLOADED, FAILED }
 
 data class ConnectorConversationMessageItem(
 	val connectorSource: ConnectorSource,
@@ -21,6 +24,8 @@ data class ConnectorConversationMessageItem(
 	val reactions: List<ConnectorReactionSummary> = emptyList(),
 	val localEchoStatus: ConnectorLocalEchoStatus? = null,
 	val attachment: ConnectorAttachmentMetadata? = null,
+	val downloadState: ConnectorDownloadState? = null,
+	val downloadedFile: File? = null,
 ) {
 	val stableId: String
 		get() = "${connectorSource.id}:$connectorThreadId:$connectorMessageId" +
@@ -44,8 +49,8 @@ data class ConnectorConversationMessageItem(
 			it.sourceMessageOrder
 		}
 
-		fun fromMessages(messages: List<ConnectorMessage>): List<ConnectorConversationMessageItem> =
-			messages.sortedWith(byDateAscending)
+		fun fromMessages(messages: List<ConnectorMessage>): List<ConnectorConversationMessageItem> {
+			val items = messages.sortedWith(byDateAscending)
 				.filter {
 					it.type == ConnectorMessageType.PHOTO ||
 						it.type == ConnectorMessageType.FILE ||
@@ -53,6 +58,59 @@ data class ConnectorConversationMessageItem(
 						it.text.trim().isNotEmpty()
 				}
 				.map { from(it) }
+			if (items.isEmpty()) return emptyList()
+
+			val deduplicated = LinkedHashMap<String, ConnectorConversationMessageItem>()
+			for (item in items) {
+				val existing = deduplicated[item.stableId]
+				deduplicated[item.stableId] = if (existing == null) {
+					item
+				} else {
+					mergeItems(existing, item)
+				}
+			}
+			return deduplicated.values.toList()
+		}
+
+		private fun mergeItems(
+			first: ConnectorConversationMessageItem,
+			second: ConnectorConversationMessageItem,
+		): ConnectorConversationMessageItem {
+			if (first.type == ConnectorMessageType.DELETED ||
+				second.type == ConnectorMessageType.DELETED
+			) {
+				val deletedBase = if (second.type == ConnectorMessageType.DELETED) second else first
+				return deletedBase.copy(
+					text = "",
+					type = ConnectorMessageType.DELETED,
+					isEdited = false,
+					attachment = null,
+					reactions = emptyList(),
+					downloadState = null,
+					downloadedFile = null,
+				)
+			}
+			val base = when {
+				first.isEdited && !second.isEdited -> first
+				!first.isEdited && second.isEdited -> second
+				else -> second
+			}
+			val attachment = if (base == first) {
+				first.attachment ?: second.attachment
+			} else {
+				second.attachment ?: first.attachment
+			}
+			val downloadState = second.downloadState ?: first.downloadState
+			val downloadedFile = second.downloadedFile ?: first.downloadedFile
+			val isReply = second.isReply || first.isReply
+			return base.copy(
+				reactions = base.reactions,
+				attachment = attachment,
+				isReply = isReply,
+				downloadState = downloadState,
+				downloadedFile = downloadedFile,
+			)
+		}
 
 		fun from(message: ConnectorMessage): ConnectorConversationMessageItem =
 			ConnectorConversationMessageItem(

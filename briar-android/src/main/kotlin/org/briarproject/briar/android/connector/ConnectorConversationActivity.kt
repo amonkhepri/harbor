@@ -1,6 +1,8 @@
 package org.briarproject.briar.android.connector
 
 import android.app.Dialog
+import android.content.ActivityNotFoundException
+import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.os.Parcelable
@@ -17,6 +19,7 @@ import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.ActionBar
+import androidx.core.content.FileProvider
 import androidx.fragment.app.DialogFragment
 import androidx.lifecycle.ViewModelProvider
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -35,9 +38,25 @@ import org.briarproject.briar.android.util.ActivityLaunchers.OpenImageDocumentAd
 import org.briarproject.briar.android.util.BriarSnackbarBuilder
 import org.briarproject.briar.android.util.UiUtils.launchActivityToOpenFile
 import org.briarproject.briar.android.view.BriarRecyclerView
+import org.briarproject.briar.api.connector.ConnectorFileDownloader
 import org.briarproject.briar.api.connector.ConnectorFileSender
+import org.briarproject.briar.api.connector.ConnectorThumbnailLoader
+import java.io.File
+import java.io.FileInputStream
+import java.io.IOException
+import java.util.Collections
+import java.util.Locale
+import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Executor
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
+import java.util.zip.ZipFile
 import org.briarproject.briar.api.connector.ConnectorImageSender
 import org.briarproject.briar.api.connector.ConnectorMessageDeleter
+import org.briarproject.briar.api.connector.ConnectorMessageEditor
+import org.briarproject.briar.api.connector.ConnectorReactionRemover
+import org.briarproject.briar.api.connector.ConnectorReactionSender
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult
 import org.briarproject.briar.api.connector.ConnectorMessageType
 import org.briarproject.briar.api.connector.ConnectorReadMarker
@@ -47,15 +66,11 @@ import org.briarproject.briar.api.connector.ConnectorTypingObserver
 import org.briarproject.briar.api.connector.ConnectorUnreadMarker
 import org.briarproject.briar.api.connector.ConnectorRegistry
 import org.briarproject.briar.api.connector.ConnectorSources
+import org.briarproject.briar.api.connector.ConnectorReplySender
 import org.briarproject.briar.api.connector.ConnectorTextSender
 import org.briarproject.briar.api.connector.ReadOnlyConnector
 import org.briarproject.nullsafety.MethodsNotNullByDefault
 import org.briarproject.nullsafety.ParametersNotNullByDefault
-import java.io.IOException
-import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.Executor
-import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
 
 // A restored layoutManagerState that the async submitList callback has not
@@ -121,6 +136,142 @@ class ConnectorConversationActivity : BriarActivity() {
 		const val THREAD_ID = "connector.THREAD_ID"
 		const val THREAD_TITLE = "connector.THREAD_TITLE"
 
+		internal const val ATTACHMENTS_DIR_NAME = "matrix_attachments"
+		internal const val DEFAULT_MIME_TYPE = "application/octet-stream"
+		private val activeProcessDownloadDirs = Collections.synchronizedSet(LinkedHashSet<File>())
+
+		private val EXECUTABLE_EXTENSIONS = setOf(
+			"apk", "dex", "so", "sh", "exe", "bat", "bin", "jar", "class", "cmd", "vbs",
+		)
+		private val EXECUTABLE_MIME_TYPES = setOf(
+			"application/vnd.android.package-archive",
+			"application/x-executable",
+			"application/x-sharedlib",
+			"application/x-sh",
+			"application/x-shellscript",
+			"application/x-msdos-program",
+			"application/x-msdownload",
+			"*/*",
+		)
+
+		internal fun isExecutable(mimeType: String?, extension: String): Boolean {
+			if (extension in EXECUTABLE_EXTENSIONS) return true
+			if (mimeType != null && mimeType.lowercase(Locale.ROOT) in EXECUTABLE_MIME_TYPES) return true
+			return false
+		}
+
+		internal fun isExecutable(file: File?, mimeType: String?, extension: String): Boolean {
+			if (isExecutable(mimeType, extension)) return true
+			if (file != null && file.exists() && file.isFile) {
+				return isExecutableFile(file)
+			}
+			return false
+		}
+
+		private fun isZipExecutable(file: File): Boolean {
+			return try {
+				ZipFile(file).use { zip ->
+					if (zip.getEntry("AndroidManifest.xml") != null ||
+						zip.getEntry("classes.dex") != null
+					) {
+						return true
+					}
+					val entries = zip.entries()
+					var count = 0
+					while (entries.hasMoreElements()) {
+						val entry = entries.nextElement()
+						val name = entry.name.lowercase(Locale.ROOT)
+						if (name == "androidmanifest.xml" ||
+							name.endsWith("/androidmanifest.xml") ||
+							name == "classes.dex" ||
+							name.endsWith("/classes.dex") ||
+							(name.startsWith("classes") && name.endsWith(".dex"))
+						) {
+							return true
+						}
+						count++
+						if (count >= 10_000) {
+							return true
+						}
+					}
+					false
+				}
+			} catch (ignored: Exception) {
+				false
+			}
+		}
+
+		private fun isExecutableFile(file: File): Boolean {
+			if (!file.exists() || !file.isFile || file.length() == 0L) return false
+			try {
+				FileInputStream(file).use { fis ->
+					val header = ByteArray(4)
+					val bytesRead = fis.read(header)
+					if (bytesRead < 2) return false
+
+					// Shebang script: #!
+					if (header[0] == 0x23.toByte() && header[1] == 0x21.toByte()) return true
+
+					// Windows DOS/PE executable: MZ
+					if (header[0] == 0x4d.toByte() && header[1] == 0x5a.toByte()) return true
+
+					if (bytesRead >= 4) {
+						// ELF binary (.so, Linux/Android executable): \x7fELF
+						if (header[0] == 0x7f.toByte() &&
+							header[1] == 0x45.toByte() &&
+							header[2] == 0x4c.toByte() &&
+							header[3] == 0x46.toByte()
+						) {
+							return true
+						}
+
+						// Dalvik / Android DEX: "dex\n" (0x64, 0x65, 0x78, 0x0a)
+						if (header[0] == 0x64.toByte() &&
+							header[1] == 0x65.toByte() &&
+							header[2] == 0x78.toByte() &&
+							header[3] == 0x0a.toByte()
+						) {
+							return true
+						}
+
+						// Java bytecode: 0xCAFEBABE
+						if (header[0] == 0xca.toByte() &&
+							header[1] == 0xfe.toByte() &&
+							header[2] == 0xba.toByte() &&
+							header[3] == 0xbe.toByte()
+						) {
+							return true
+						}
+
+						// ZIP container (PK\x03\x04, PK\x05\x06, PK\x07\x08) -> inspect for AndroidManifest.xml / classes.dex
+						if (header[0] == 0x50.toByte() && header[1] == 0x4b.toByte()) {
+							return isZipExecutable(file)
+						}
+					}
+				}
+			} catch (ignored: Exception) {}
+			return false
+		}
+
+		/**
+		 * Sweeps [cacheDir]/matrix_attachments of any directories whose in-memory state was lost
+		 * (e.g. from an earlier killed process, unhandled teardown, or orphaned downloads).
+		 */
+		internal fun sweepOrphanedDownloads(cacheDir: File) {
+			try {
+				val attachmentsRoot = File(cacheDir, ATTACHMENTS_DIR_NAME)
+				if (!attachmentsRoot.exists()) return
+				val active = synchronized(activeProcessDownloadDirs) {
+					HashSet(activeProcessDownloadDirs)
+				}
+				attachmentsRoot.listFiles()?.forEach { fileOrDir ->
+					if (fileOrDir !in active) {
+						fileOrDir.deleteRecursively()
+					}
+				}
+			} catch (ignored: Exception) {}
+		}
+
 		private const val MESSAGE_LIMIT = 50
 		private const val REFRESH_INTERVAL_MS = 15_000L
 		internal const val TYPING_EXPIRY_MS = 5_000L
@@ -128,6 +279,8 @@ class ConnectorConversationActivity : BriarActivity() {
 		private const val DEFAULT_IMAGE_FILE_EXTENSION = "jpg"
 		private const val STATE_PENDING_IMAGE = "pendingImage"
 		private const val STATE_FIND_VISIBLE = "findVisible"
+		private const val STATE_REPLY_TO_ID = "replyToId"
+		private const val STATE_REPLY_PREVIEW = "replyPreview"
 
 		private fun emptyTextForState(state: ConnectorConversationAvailabilityState): Int = when (state) {
 			LOADING ->
@@ -222,7 +375,13 @@ class ConnectorConversationActivity : BriarActivity() {
 	}
 
 	private val adapter =
-		ConnectorConversationAdapter(::onDeleteMessageClicked, ::onRetrySendClicked)
+		ConnectorConversationAdapter(
+			::onDeleteMessageClicked,
+			::onRetrySendClicked,
+			::onFileClicked,
+		)
+	private val activeDownloads = ConcurrentHashMap<String, AtomicBoolean>()
+	internal val ownedDownloadDirs = Collections.synchronizedSet(LinkedHashSet<File>())
 
 	@Inject
 	lateinit var connectorRegistry: ConnectorRegistry
@@ -236,9 +395,17 @@ class ConnectorConversationActivity : BriarActivity() {
 	private var layoutManagerState: Parcelable? = null
 	private var connector: ReadOnlyConnector? = null
 	private var textSender: ConnectorTextSender? = null
+	private var replySender: ConnectorReplySender? = null
+	private var reactionSender: ConnectorReactionSender? = null
+	private var reactionRemover: ConnectorReactionRemover? = null
+	private val inFlightReactions = Collections.synchronizedSet(mutableSetOf<String>())
+	private var replyBar: View? = null
+	private var replyPreview: TextView? = null
+	private var replyTarget: ConnectorReplyTarget? = null
 	private var imageSender: ConnectorImageSender? = null
 	private var fileSender: ConnectorFileSender? = null
 	private var readMarker: ConnectorReadMarker? = null
+	private var thumbnailManager: ConnectorThumbnailManager? = null
 	private val readStateLock = Any()
 	private val unreadOwner = ConnectorConversationLoadOwner()
 	private val leaveOwner = ConnectorConversationLoadOwner()
@@ -305,6 +472,7 @@ class ConnectorConversationActivity : BriarActivity() {
 
 	override fun onCreate(state: Bundle?) {
 		super.onCreate(state)
+		sweepOrphanedDownloads(cacheDir)
 		setContentView(R.layout.activity_connector_conversation)
 
 		val sourceId = intent.getStringExtra(SOURCE_ID)
@@ -313,9 +481,21 @@ class ConnectorConversationActivity : BriarActivity() {
 		imageUpload.restore(state?.getString(STATE_PENDING_IMAGE))
 		connector = connectorRegistry.connectors.firstOrNull { it.source.id == sourceId }
 		textSender = connector as? ConnectorTextSender
+		replySender = (connector as? ConnectorReplySender)?.takeIf { textSender != null }
+		if (replySender != null) adapter.onReplyClicked = ::onReplyClicked
+		reactionSender = connector as? ConnectorReactionSender
+		reactionRemover = connector as? ConnectorReactionRemover
+		if (reactionSender != null || reactionRemover != null) adapter.onReactClicked = ::onReactClicked
+		adapter.editsOwnText = connector is ConnectorMessageEditor
 		imageSender = connector as? ConnectorImageSender
 		fileSender = connector as? ConnectorFileSender
 		readMarker = connector as? ConnectorReadMarker
+		val thumbnailLoader = connector as? ConnectorThumbnailLoader
+		if (thumbnailLoader != null) {
+			val manager = ConnectorThumbnailManager(thumbnailLoader, ioExecutor)
+			thumbnailManager = manager
+			adapter.thumbnailManager = manager
+		}
 		fileUpload = ViewModelProvider(this)[ConnectorFileUploadState::class.java]
 		sourceName = connector?.source?.displayName
 			?: getString(R.string.connector_conversation_label)
@@ -392,6 +572,16 @@ class ConnectorConversationActivity : BriarActivity() {
 		}
 		sendButton = findViewById(R.id.connectorConversationSendButton)
 		sendButton.setOnClickListener { onSendClicked() }
+		replyBar = findViewById(R.id.connectorConversationReplyBar)
+		replyPreview = findViewById(R.id.connectorConversationReplyPreview)
+		findViewById<View>(R.id.connectorConversationReplyCancel).setOnClickListener {
+			if (!sendInFlight) setReplyTarget(null)
+		}
+		val restoredReplyId = state?.getString(STATE_REPLY_TO_ID)
+		if (replySender != null && restoredReplyId != null) {
+			val preview = state.getString(STATE_REPLY_PREVIEW).orEmpty()
+			setReplyTarget(ConnectorReplyTarget(restoredReplyId, preview))
+		}
 		attachButton = findViewById(R.id.connectorConversationAttachButton)
 		attachButton.setOnClickListener { onAttachImageClicked() }
 		fileButton = findViewById(R.id.connectorConversationFileButton)
@@ -467,6 +657,10 @@ class ConnectorConversationActivity : BriarActivity() {
 		outState.putParcelable(STATE_LAYOUT_MANAGER, stateToSave)
 		outState.putString(STATE_PENDING_IMAGE, imageUpload.pendingImage)
 		outState.putBoolean(STATE_FIND_VISIBLE, findBar.visibility == View.VISIBLE)
+		replyTarget?.let {
+			outState.putString(STATE_REPLY_TO_ID, it.messageId)
+			outState.putString(STATE_REPLY_PREVIEW, it.preview)
+		}
 	}
 
 	override fun onRestoreInstanceState(savedInstanceState: Bundle) {
@@ -481,10 +675,23 @@ class ConnectorConversationActivity : BriarActivity() {
 		startTypingObserver()
 	}
 
+	internal fun resetActiveDownloads() {
+		if (activeDownloads.isNotEmpty()) {
+			var updated = messageState
+			for (echoId in activeDownloads.keys) {
+				updated = updated.updateDownloadState(echoId, ConnectorDownloadState.IDLE, null)
+			}
+			activeDownloads.values.forEach { it.set(true) }
+			activeDownloads.clear()
+			submitMessageState(updated)
+		}
+	}
+
 	override fun onStop() {
 		stopRoomObserver()
 		stopTypingObserver()
 		list.stopPeriodicUpdate()
+		resetActiveDownloads()
 		super.onStop()
 	}
 
@@ -575,6 +782,8 @@ class ConnectorConversationActivity : BriarActivity() {
 		stopRoomObserver()
 		stopTypingObserver()
 		retryCoalescer.cancel()
+		resetActiveDownloads()
+		clearOwnedDownloads()
 		loadFailedSnackbar?.dismiss()
 		loadFailedSnackbar = null
 		lastLoadFailed = false
@@ -584,6 +793,8 @@ class ConnectorConversationActivity : BriarActivity() {
 		loadOwner.invalidate()
 		retryOwner.invalidate()
 		inFlightRetryIds.clear()
+		thumbnailManager?.clear()
+		thumbnailManager = null
 		super.onDestroy()
 	}
 
@@ -863,6 +1074,7 @@ class ConnectorConversationActivity : BriarActivity() {
 	internal fun getLoadFailedSnackbar(): Snackbar? = loadFailedSnackbar
 
 	internal fun startRoomObserver() {
+		sweepOrphanedDownloads(cacheDir)
 		val observer = connector as? ConnectorRoomObserver ?: return
 		if (!hasValidThreadId(threadId)) return
 		stopRoomObserver()
@@ -1039,6 +1251,7 @@ class ConnectorConversationActivity : BriarActivity() {
 		fileButton.visibility = if (canSendFile()) View.VISIBLE else View.GONE
 		val visible = shouldShowComposeBar(enabled, authorized, threadId, textSender)
 		composeBar.visibility = if (visible) View.VISIBLE else View.GONE
+		replyBar?.visibility = if (visible && replyTarget != null) View.VISIBLE else View.GONE
 		attachButton.visibility =
 			if (shouldShowAttachButton(
 					enabled,
@@ -1062,21 +1275,61 @@ class ConnectorConversationActivity : BriarActivity() {
 		setComposeEnabled(false)
 		val sourceId = intent?.getStringExtra(SOURCE_ID) ?: connector?.source?.id
 		ConnectorDraftStore.clearDraft(sourceId, threadId)
-		submitMessageState(messageState.beginTextSend(connector!!.source, threadId, text))
+		val target = replyTarget
+		val replyToId = target?.messageId
+		submitMessageState(
+			messageState.beginTextSend(
+				connector!!.source,
+				threadId,
+				text,
+				replyToMessageId = replyToId,
+			),
+		)
 		val echoId = messageState.localEchoes.last().item.stableId
 		val activeThreadId = threadId
 		ioExecutor.execute {
-			val sent = try {
-				sender.sendText(activeThreadId, text)
-			} catch (e: RuntimeException) {
-				false
-			}
+			val sent = sendTextOrReply(sender, activeThreadId, replyToId, text)
 			runOnUiThread {
 				if (isFinishing || isDestroyed) return@runOnUiThread
 				submitMessageState(messageState.completeSend(echoId, sent))
+				// A failed send keeps the composed text, so it also keeps the selected reply.
+				if (sent && replyTarget == target) setReplyTarget(null)
 				onSendCompleted(sent, clearComposeText = true)
 			}
 		}
+	}
+
+	/** Sends a reply when [replyToId] is set, otherwise ordinary text (MX-057). */
+	private fun sendTextOrReply(
+		sender: ConnectorTextSender,
+		threadId: String,
+		replyToId: String?,
+		text: String,
+	): Boolean = try {
+		val reply = replySender
+		when {
+			replyToId == null -> sender.sendText(threadId, text)
+			reply == null -> false
+			else -> reply.sendReply(threadId, replyToId, text)
+		}
+	} catch (e: RuntimeException) {
+		false
+	}
+
+	private fun onReplyClicked(item: ConnectorConversationMessageItem) {
+		if (replySender == null || sendInFlight || composeBar.visibility != View.VISIBLE) return
+		if (item.connectorThreadId != threadId || !ConnectorReplyTarget.canReplyTo(item)) return
+		setReplyTarget(ConnectorReplyTarget.from(item, resources))
+		composeText.requestFocus()
+	}
+
+	internal fun setReplyTarget(target: ConnectorReplyTarget?) {
+		replyTarget = target
+		replyPreview?.text = target?.let {
+			getString(R.string.connector_conversation_replying_to, it.preview)
+		}.orEmpty()
+		val visible = target != null && composeBar.visibility == View.VISIBLE
+		replyBar?.visibility = if (visible) View.VISIBLE else View.GONE
 	}
 
 	private fun canSendFile(): Boolean = fileSender != null &&
@@ -1215,12 +1468,97 @@ class ConnectorConversationActivity : BriarActivity() {
 	}
 
 	private fun onDeleteMessageClicked(item: ConnectorConversationMessageItem) {
-		// MX-020: Prompt to delete an outgoing message
-		if (connector !is ConnectorMessageDeleter) return
 		if (threadId.isEmpty()) return
+		// MX-058: own text messages open an edit dialog that also offers Delete when supported.
+		if (connector is ConnectorMessageEditor && item.type == ConnectorMessageType.TEXT) {
+			ConnectorEditMessageDialogFragment.newInstance(
+				item.connectorThreadId,
+				item.connectorMessageId,
+				item.text,
+			)
+				.show(supportFragmentManager, ConnectorEditMessageDialogFragment.TAG)
+			return
+		}
+		// MX-020: Prompt to delete an outgoing message
+		if (connector is ConnectorMessageDeleter) {
+			showDeleteConfirmation(item.connectorThreadId, item.connectorMessageId)
+		}
+	}
 
-		ConnectorDeleteMessageDialogFragment.newInstance(item.connectorThreadId, item.connectorMessageId)
+	private fun onReactClicked(item: ConnectorConversationMessageItem) {
+		if (threadId.isEmpty()) return
+		if (reactionSender == null && reactionRemover == null) return
+		val ownReactions = ArrayList(item.reactions.filter { it.isOwn }.map { it.key })
+		ConnectorReactionDialogFragment.newInstance(
+			item.connectorThreadId,
+			item.connectorMessageId,
+			ownReactions,
+		).show(supportFragmentManager, ConnectorReactionDialogFragment.TAG)
+	}
+
+	internal fun confirmReaction(
+		targetThreadId: String,
+		connectorMessageId: String,
+		reaction: String,
+		isRemove: Boolean = false,
+	) {
+		val sender = reactionSender
+		val remover = reactionRemover
+		if (reaction.isBlank() || connectorMessageId.isBlank()) return
+		if (isRemove && remover == null) return
+		if (!isRemove && sender == null) return
+		val flightKey = "$targetThreadId:$connectorMessageId:$reaction"
+		if (!inFlightReactions.add(flightKey)) return
+		ioExecutor.execute {
+			val success = try {
+				if (isRemove) {
+					remover?.removeReaction(targetThreadId, connectorMessageId, reaction) ?: false
+				} else {
+					sender?.sendReaction(targetThreadId, connectorMessageId, reaction) ?: false
+				}
+			} finally {
+				inFlightReactions.remove(flightKey)
+			}
+			runOnUiThread {
+				if (isFinishing || isDestroyed) return@runOnUiThread
+				if (!success) {
+					val errorRes = if (isRemove) {
+						R.string.connector_conversation_reaction_remove_failed
+					} else {
+						R.string.connector_conversation_reaction_failed
+					}
+					Snackbar.make(
+						list,
+						errorRes,
+						Snackbar.LENGTH_LONG,
+					).show()
+				}
+			}
+		}
+	}
+
+	internal fun canDeleteMessages() = connector is ConnectorMessageDeleter
+
+	internal fun showDeleteConfirmation(targetThreadId: String, connectorMessageId: String) {
+		ConnectorDeleteMessageDialogFragment.newInstance(targetThreadId, connectorMessageId)
 			.show(supportFragmentManager, ConnectorDeleteMessageDialogFragment.TAG)
+	}
+
+	// The local row changes only after the provider accepted the edit; failures keep the original.
+	internal fun confirmEditMessage(targetThreadId: String, connectorMessageId: String, text: String) {
+		val editor = connector as? ConnectorMessageEditor ?: return
+		if (text.isBlank()) return
+		ioExecutor.execute {
+			val success = editor.editTextMessage(targetThreadId, connectorMessageId, text)
+			runOnUiThread {
+				if (isFinishing || isDestroyed) return@runOnUiThread
+				if (!success) {
+					Snackbar.make(list, R.string.connector_conversation_edit_failed, Snackbar.LENGTH_LONG).show()
+					return@runOnUiThread
+				}
+				submitMessageState(markMessageEdited(messageState, targetThreadId, connectorMessageId, text))
+			}
+		}
 	}
 
 	// Persisted ids let confirmation proceed before the post-rotation message reload finishes.
@@ -1268,13 +1606,17 @@ class ConnectorConversationActivity : BriarActivity() {
 
 		inFlightRetryIds.add(echoId)
 		val generation = retryOwner.begin(echoId)
+		val replyToId = messageState.localEchoes
+			.firstOrNull { it.item.stableId == echoId }
+			?.replyToMessageId
 		submitMessageState(messageState.retrySend(echoId))
 		ioExecutor.execute {
-			val sent = try {
-				if (!activeConnector.isAuthorized()) false else sender.sendText(activeThreadId, item.text)
+			val authorized = try {
+				activeConnector.isAuthorized()
 			} catch (e: RuntimeException) {
 				false
 			}
+			val sent = authorized && sendTextOrReply(sender, activeThreadId, replyToId, item.text)
 			runOnUiThread {
 				inFlightRetryIds.remove(echoId)
 				val dead = !retryOwner.owns(echoId, generation) || isFinishing || isDestroyed
@@ -1292,6 +1634,204 @@ class ConnectorConversationActivity : BriarActivity() {
 				}
 			}
 		}
+	}
+
+	internal fun onFileClicked(item: ConnectorConversationMessageItem) {
+		val isImage = item.type == ConnectorMessageType.PHOTO
+		if (item.type != ConnectorMessageType.FILE && !isImage) return
+		val echoId = item.stableId
+		if (item.downloadState == ConnectorDownloadState.DOWNLOADING) {
+			val existingFlag = activeDownloads.remove(echoId)
+			existingFlag?.set(true)
+			submitMessageState(
+				messageState.updateDownloadState(echoId, ConnectorDownloadState.IDLE, null),
+			)
+			return
+		}
+		if (item.downloadState == ConnectorDownloadState.DOWNLOADED) {
+			val file = item.downloadedFile
+			if (file != null && file.exists()) {
+				if (isImage) openImageViewer(file) else openDownloadedFile(file, item.attachment?.mimeType)
+				return
+			}
+			submitMessageState(
+				messageState.updateDownloadState(echoId, ConnectorDownloadState.IDLE, null),
+			)
+		}
+
+		val activeDownloader = connector as? ConnectorFileDownloader ?: return
+		val attachment = item.attachment ?: return
+
+		val declaredSize = attachment.size
+		if (declaredSize == null ||
+			declaredSize <= 0L ||
+			declaredSize > ConnectorFileDownloader.MAX_FILE_BYTES
+		) {
+			submitMessageState(
+				messageState.updateDownloadState(echoId, ConnectorDownloadState.FAILED, null),
+			)
+			return
+		}
+
+		val cancelFlag = AtomicBoolean(false)
+		activeDownloads[echoId] = cancelFlag
+		submitMessageState(
+			messageState.updateDownloadState(echoId, ConnectorDownloadState.DOWNLOADING, null),
+		)
+
+		val downloadSubdir = File(File(cacheDir, ATTACHMENTS_DIR_NAME), UUID.randomUUID().toString())
+		downloadSubdir.mkdirs()
+		ownedDownloadDirs.add(downloadSubdir)
+		activeProcessDownloadDirs.add(downloadSubdir)
+
+		ioExecutor.execute {
+			val result = activeDownloader.downloadFile(
+				threadId = item.connectorThreadId,
+				messageId = item.connectorMessageId,
+				attachment = attachment,
+				destinationDir = downloadSubdir,
+				isCancelled = { cancelFlag.get() },
+			)
+			val wasCurrent = activeDownloads.remove(echoId, cancelFlag)
+			if (cancelFlag.get() || !wasCurrent) {
+				if (result is ConnectorFileDownloader.DownloadResult.Success) {
+					result.file.delete()
+				}
+				downloadSubdir.deleteRecursively()
+				ownedDownloadDirs.remove(downloadSubdir)
+				activeProcessDownloadDirs.remove(downloadSubdir)
+				return@execute
+			}
+			runOnUiThread {
+				if (isFinishing || isDestroyed || cancelFlag.get()) {
+					if (result is ConnectorFileDownloader.DownloadResult.Success) {
+						result.file.delete()
+					}
+					downloadSubdir.deleteRecursively()
+					ownedDownloadDirs.remove(downloadSubdir)
+					activeProcessDownloadDirs.remove(downloadSubdir)
+					return@runOnUiThread
+				}
+				when (result) {
+					is ConnectorFileDownloader.DownloadResult.Success -> {
+						submitMessageState(
+							messageState.updateDownloadState(
+								echoId,
+								ConnectorDownloadState.DOWNLOADED,
+								result.file,
+							),
+						)
+						if (isImage) openImageViewer(result.file)
+					}
+					is ConnectorFileDownloader.DownloadResult.Failure -> {
+						downloadSubdir.deleteRecursively()
+						ownedDownloadDirs.remove(downloadSubdir)
+						activeProcessDownloadDirs.remove(downloadSubdir)
+						if (result.cause != ConnectorFileDownloader.FailureCause.CANCELLED) {
+							submitMessageState(
+								messageState.updateDownloadState(
+									echoId,
+									ConnectorDownloadState.FAILED,
+									null,
+								),
+							)
+						}
+					}
+				}
+			}
+		}
+	}
+
+	/** MX-056: images open in-app rather than through external viewers. */
+	internal fun openImageViewer(file: File) {
+		startActivity(ConnectorImageViewerActivity.intent(this, file))
+	}
+
+	internal fun openDownloadedFile(file: File, mimeType: String?) {
+		if (!file.exists()) return
+		val authority = "${applicationContext.packageName}.connector.fileprovider"
+		val rawMime = ConnectorFileMetadataFormatter.sanitizeMimeType(mimeType)
+		val ext = file.extension.lowercase(Locale.ROOT)
+		val type = if (!rawMime.isNullOrEmpty() && rawMime != "*/*") {
+			rawMime
+		} else if (ext.isNotEmpty()) {
+			MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: DEFAULT_MIME_TYPE
+		} else {
+			DEFAULT_MIME_TYPE
+		}
+
+		if (isExecutable(mimeType = type, extension = ext)) {
+			BriarSnackbarBuilder()
+				.make(list, R.string.error_start_activity, Snackbar.LENGTH_SHORT)
+				.show()
+			return
+		}
+
+		ioExecutor.execute {
+			if (!file.exists()) return@execute
+			val executable = isExecutable(file, type, ext)
+			runOnUiThread {
+				if (isFinishing || isDestroyed) return@runOnUiThread
+				if (executable) {
+					BriarSnackbarBuilder()
+						.make(list, R.string.error_start_activity, Snackbar.LENGTH_SHORT)
+						.show()
+					return@runOnUiThread
+				}
+
+				try {
+					val uri = FileProvider.getUriForFile(this, authority, file)
+					val intent = Intent(Intent.ACTION_VIEW).apply {
+						setDataAndType(uri, type)
+						addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+					}
+					if (intent.resolveActivity(packageManager) == null &&
+						packageManager.queryIntentActivities(intent, 0).isEmpty()
+					) {
+						BriarSnackbarBuilder()
+							.make(list, R.string.error_start_activity, Snackbar.LENGTH_SHORT)
+							.show()
+						return@runOnUiThread
+					}
+
+					val chooser = Intent.createChooser(intent, file.name).apply {
+						addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+					}
+					startActivity(chooser)
+				} catch (e: ActivityNotFoundException) {
+					BriarSnackbarBuilder()
+						.make(list, R.string.error_start_activity, Snackbar.LENGTH_SHORT)
+						.show()
+				} catch (e: SecurityException) {
+					BriarSnackbarBuilder()
+						.make(list, R.string.error_start_activity, Snackbar.LENGTH_SHORT)
+						.show()
+				} catch (e: Exception) {
+					BriarSnackbarBuilder()
+						.make(list, R.string.error_start_activity, Snackbar.LENGTH_SHORT)
+						.show()
+				}
+			}
+		}
+	}
+
+	internal fun clearOwnedDownloads() {
+		val dirs = synchronized(ownedDownloadDirs) {
+			val copy = ownedDownloadDirs.toList()
+			ownedDownloadDirs.clear()
+			copy
+		}
+		for (dir in dirs) {
+			activeProcessDownloadDirs.remove(dir)
+			try {
+				dir.deleteRecursively()
+			} catch (ignored: Exception) {}
+		}
+	}
+
+	internal fun clearAttachmentDirectory() {
+		clearOwnedDownloads()
+		sweepOrphanedDownloads(cacheDir)
 	}
 }
 
@@ -1356,4 +1896,152 @@ internal fun markMessageDeleted(
 	val updated = item.copy(type = ConnectorMessageType.DELETED)
 	val messages = state.messages.map { if (it.stableId == item.stableId) updated else it }
 	return state.copy(messages = messages)
+}
+
+class ConnectorEditMessageDialogFragment : DialogFragment() {
+	companion object {
+		const val TAG = "ConnectorEditMessageDialogFragment"
+		private const val ARG_THREAD_ID = "threadId"
+		private const val ARG_MESSAGE_ID = "messageId"
+		private const val ARG_TEXT = "text"
+
+		fun newInstance(
+			threadId: String,
+			messageId: String,
+			text: String,
+		): ConnectorEditMessageDialogFragment = ConnectorEditMessageDialogFragment().apply {
+			arguments = Bundle().apply {
+				putString(ARG_THREAD_ID, threadId)
+				putString(ARG_MESSAGE_ID, messageId)
+				putString(ARG_TEXT, text)
+			}
+		}
+	}
+
+	override fun onCreateDialog(savedInstanceState: Bundle?): Dialog {
+		val activity = requireActivity() as ConnectorConversationActivity
+		val args = requireArguments()
+		val threadId = args.getString(ARG_THREAD_ID)!!
+		val messageId = args.getString(ARG_MESSAGE_ID)!!
+		// A stable id lets the dialog restore in-progress text after rotation.
+		val input = EditText(activity).apply {
+			id = android.R.id.edit
+			setText(args.getString(ARG_TEXT))
+		}
+		val builder = AlertDialog.Builder(activity, R.style.BriarDialogTheme)
+			.setTitle(R.string.connector_conversation_edit)
+			.setView(input)
+			.setPositiveButton(R.string.connector_conversation_edit_save) { _, _ ->
+				activity.confirmEditMessage(threadId, messageId, input.text.toString())
+			}
+			.setNegativeButton(R.string.cancel, null)
+		if (activity.canDeleteMessages()) {
+			builder.setNeutralButton(R.string.delete) { _, _ ->
+				activity.showDeleteConfirmation(threadId, messageId)
+			}
+		}
+		return builder
+			.create()
+	}
+}
+
+internal fun markMessageEdited(
+	state: ConnectorConversationMessageListState,
+	threadId: String,
+	messageId: String,
+	text: String,
+): ConnectorConversationMessageListState = state.copy(
+	messages = state.messages.map {
+		if (it.connectorThreadId == threadId &&
+			it.connectorMessageId == messageId &&
+			it.localEchoStatus == null &&
+			it.type == ConnectorMessageType.TEXT
+		) {
+			it.copy(text = text, isEdited = true)
+		} else {
+			it
+		}
+	},
+)
+
+class ConnectorReactionDialogFragment : DialogFragment() {
+	companion object {
+		const val TAG = "ConnectorReactionDialogFragment"
+		private const val ARG_THREAD_ID = "threadId"
+		private const val ARG_MESSAGE_ID = "messageId"
+		private const val ARG_OWN_REACTIONS = "ownReactions"
+
+		val DEFAULT_REACTIONS = listOf(
+			"👍",
+			"❤️",
+			"😂",
+			"😮",
+			"😢",
+			"🎉",
+		)
+
+		fun newInstance(
+			threadId: String,
+			messageId: String,
+			ownReactions: ArrayList<String> = arrayListOf(),
+		): ConnectorReactionDialogFragment = ConnectorReactionDialogFragment().apply {
+			arguments = Bundle().apply {
+				putString(ARG_THREAD_ID, threadId)
+				putString(ARG_MESSAGE_ID, messageId)
+				putStringArrayList(ARG_OWN_REACTIONS, ownReactions)
+			}
+		}
+	}
+
+	override fun onCreateDialog(savedInstanceState: Bundle?): Dialog {
+		val activity = requireActivity() as ConnectorConversationActivity
+		val threadId = requireArguments().getString(ARG_THREAD_ID)!!
+		val messageId = requireArguments().getString(ARG_MESSAGE_ID)!!
+		val ownReactions = requireArguments().getStringArrayList(ARG_OWN_REACTIONS) ?: emptyList<String>()
+
+		val defaultLabels = listOf(
+			getString(R.string.connector_reaction_thumbs_up),
+			getString(R.string.connector_reaction_heart),
+			getString(R.string.connector_reaction_joy),
+			getString(R.string.connector_reaction_surprised),
+			getString(R.string.connector_reaction_sad),
+			getString(R.string.connector_reaction_celebrate),
+		)
+
+		val choiceKeys = mutableListOf<String>()
+		val choiceLabels = mutableListOf<String>()
+		val isRemoveList = mutableListOf<Boolean>()
+
+		for (i in DEFAULT_REACTIONS.indices) {
+			val key = DEFAULT_REACTIONS[i]
+			val isOwn = ownReactions.contains(key)
+			choiceKeys.add(key)
+			isRemoveList.add(isOwn)
+			if (isOwn) {
+				choiceLabels.add(getString(R.string.connector_reaction_remove, defaultLabels[i]))
+			} else {
+				choiceLabels.add(defaultLabels[i])
+			}
+		}
+
+		for (ownKey in ownReactions) {
+			if (!DEFAULT_REACTIONS.contains(ownKey)) {
+				choiceKeys.add(ownKey)
+				isRemoveList.add(true)
+				choiceLabels.add(getString(R.string.connector_reaction_remove, ownKey))
+			}
+		}
+
+		var submitted = false
+		return AlertDialog.Builder(activity, R.style.BriarDialogTheme)
+			.setTitle(R.string.connector_conversation_react)
+			.setItems(choiceLabels.toTypedArray()) { dialog, which ->
+				if (submitted) return@setItems
+				submitted = true
+				activity.confirmReaction(threadId, messageId, choiceKeys[which], isRemoveList[which])
+				dialog.dismiss()
+			}
+			.setNegativeButton(R.string.cancel, null)
+			.create()
+	}
 }

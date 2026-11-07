@@ -1,5 +1,8 @@
 package org.matrix.rustcomponents.sdk
 
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlin.coroutines.coroutineContext
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlin.coroutines.suspendCoroutine
@@ -187,6 +190,89 @@ class Timeline {
 		}
 	}
 
+	/** Mirrors the pinned AAR's real shape: suspend, returns `Unit` (MX-057). */
+	suspend fun sendReply(msg: RoomMessageEventContentWithoutRelation, eventId: String) {
+		FakeMatrixSdkState.sendCallCount++
+		FakeMatrixSdkState.lastSentContent = msg
+		FakeMatrixSdkState.lastReplyToEventId = eventId
+		FakeMatrixSdkState.sendFailureToThrow?.let { throw it }
+	}
+
+	/** Mirrors the pinned AAR's suspend lookup (MX-058); unknown ids throw like the SDK. */
+	suspend fun getEventTimelineItemByEventId(eventId: String): EventTimelineItem =
+		FakeMatrixSdkState.eventItemsById[eventId]?.toEventTimelineItem()
+			?: throw ClientException.Generic("not found", "not found")
+
+	suspend fun edit(eventOrTransactionId: EventOrTransactionId, newContent: EditedContent) {
+		FakeMatrixSdkState.editCallCount++
+		FakeMatrixSdkState.lastEditedEventId =
+			(eventOrTransactionId as EventOrTransactionId.EventId).eventId
+		FakeMatrixSdkState.lastEditedContent = newContent
+		FakeMatrixSdkState.editFailureToThrow?.let { throw it }
+	}
+
+	suspend fun toggleReaction(eventOrTransactionId: EventOrTransactionId, key: String): Boolean {
+		FakeMatrixSdkState.toggleReactionCallCount++
+		FakeMatrixSdkState.lastReactionEventId =
+			(eventOrTransactionId as? EventOrTransactionId.EventId)?.eventId
+		FakeMatrixSdkState.lastReactionKey = key
+		FakeMatrixSdkState.toggleReactionFailureToThrow?.let { throw it }
+		FakeMatrixSdkState.onToggleReaction?.invoke()
+		val eventId = (eventOrTransactionId as? EventOrTransactionId.EventId)?.eventId
+		var added = true
+		if (eventId != null && FakeMatrixSdkState.eventItemsById.containsKey(eventId)) {
+			val existingSpec = FakeMatrixSdkState.eventItemsById[eventId]!!
+			val currentUserId = FakeMatrixSdkState.currentUserId ?: "@alice:matrix.example.org"
+			val existingReaction = existingSpec.reactions.firstOrNull { it.key == key }
+			val hasOwn = existingReaction?.senders?.any { it.senderId == currentUserId } == true
+			val newReactions = if (hasOwn) {
+				added = false
+				val updatedSenders = existingReaction!!.senders.filter { it.senderId != currentUserId }
+				if (updatedSenders.isEmpty()) {
+					existingSpec.reactions.filter { it.key != key }
+				} else {
+					existingSpec.reactions.map {
+						if (it.key == key) it.copy(senders = updatedSenders) else it
+					}
+				}
+			} else {
+				added = true
+				if (existingReaction != null) {
+					existingSpec.reactions.map {
+						if (it.key == key) it.copy(senders = it.senders + ReactionSenderData(currentUserId)) else it
+					}
+				} else {
+					existingSpec.reactions + Reaction(key, listOf(ReactionSenderData(currentUserId)))
+				}
+			}
+			FakeMatrixSdkState.eventItemsById =
+				FakeMatrixSdkState.eventItemsById + (eventId to existingSpec.copy(reactions = newReactions))
+		}
+		if (FakeMatrixSdkState.toggleReactionSuspendAsynchronously) {
+			if (FakeMatrixSdkState.toggleReactionCancellable) {
+				return kotlinx.coroutines.suspendCancellableCoroutine { continuation ->
+					continuation.invokeOnCancellation {
+						FakeMatrixSdkState.toggleReactionCancelled = true
+					}
+					if (FakeMatrixSdkState.onToggleReactionContinuation != null) {
+						FakeMatrixSdkState.onToggleReactionContinuation?.invoke(continuation)
+					} else {
+						continuation.resume(added)
+					}
+				}
+			} else {
+				return kotlin.coroutines.suspendCoroutine { continuation ->
+					if (FakeMatrixSdkState.onToggleReactionContinuation != null) {
+						FakeMatrixSdkState.onToggleReactionContinuation?.invoke(continuation)
+					} else {
+						continuation.resume(added)
+					}
+				}
+			}
+		}
+		return added
+	}
+
 	fun sendFile(params: UploadParameters, info: FileInfo): SendAttachmentJoinHandle {
 		FakeMatrixSdkState.sendFileCallCount++
 		FakeMatrixSdkState.lastSendFileParams = params
@@ -263,6 +349,7 @@ data class FakeTimelineEventSpec(
 	val isReply: Boolean = false,
 	val reactions: List<Reaction> = emptyList(),
 	val redacted: Boolean = false,
+	val editable: Boolean = own,
 ) {
 	fun toEventTimelineItem(): EventTimelineItem {
 		val content = if (redacted) {
@@ -278,7 +365,7 @@ data class FakeTimelineEventSpec(
 				),
 			)
 		}
-		return EventTimelineItem(identifier, sender, own, content, timestamp)
+		return EventTimelineItem(identifier, sender, own, content, timestamp, editable)
 	}
 }
 
@@ -293,8 +380,10 @@ class EventTimelineItem(
 	private val own: Boolean,
 	val content: TimelineItemContent,
 	val timestamp: ULong,
+	private val editable: Boolean = own,
 ) {
 	fun isOwn(): Boolean = own
+	fun isEditable(): Boolean = editable
 
 	fun destroy() {
 		FakeMatrixSdkState.eventTimelineItemDestroyCount++
@@ -331,7 +420,7 @@ class MsgLikeContent(
 
 data class Reaction(val key: String, val senders: List<ReactionSenderData>)
 
-class ReactionSenderData
+data class ReactionSenderData(val senderId: String = "", val timestamp: ULong = 0uL)
 
 class InReplyToDetails {
 	fun destroy() {
@@ -418,6 +507,11 @@ class RoomMessageEventContentWithoutRelation(val messageType: MessageType) {
 	}
 }
 
+/** Mirrors the pinned AAR's real shape: `EditedContent.RoomMessage(content)` (MX-058). */
+sealed class EditedContent {
+	class RoomMessage(val content: RoomMessageEventContentWithoutRelation) : EditedContent()
+}
+
 /** Mirrors the pinned AAR's real shape: an owned closeable value `Timeline.send` returns. */
 class SendHandle {
 	fun close() {
@@ -454,8 +548,49 @@ class Mentions
 /** Unconstructed stand-in for the pinned AAR's `ThumbnailInfo`; MX-014 sends no thumbnail. */
 class ThumbnailInfo
 
-/** Unconstructed stand-in for the pinned AAR's `MediaSource`; MX-014 sends no thumbnail source. */
-class MediaSource
+/** Stand-in for the pinned AAR's `MediaSource`; supports url and json constructor/converters (MX-053). */
+class MediaSource(val url: String = "", val json: String = "") {
+	fun url(): String = url
+	fun toJson(): String = json.ifEmpty { url }
+	fun destroy() {
+		FakeMatrixSdkState.mediaSourceDestroyCount++
+	}
+
+	companion object {
+		@JvmStatic
+		fun fromJson(json: String): MediaSource = MediaSource(url = json, json = json)
+
+		@JvmStatic
+		fun fromUrl(url: String): MediaSource = MediaSource(url = url, json = url)
+	}
+}
+
+class MediaFileHandle(private val tempDir: java.io.File?, private val path: String) :
+	AutoCloseable {
+	constructor(path: String) : this(null, path)
+
+	fun path(): String = path
+	fun persist(newPath: String): Boolean {
+		val dest = java.io.File(newPath)
+		val src = java.io.File(path)
+		if (!src.exists()) return false
+		dest.parentFile?.mkdirs()
+		return try {
+			src.copyTo(dest, overwrite = true)
+			src.delete()
+			true
+		} catch (e: Exception) {
+			false
+		}
+	}
+	fun destroy() {
+		FakeMatrixSdkState.mediaFileHandleDestroyCount++
+		tempDir?.deleteRecursively()
+	}
+	override fun close() {
+		destroy()
+	}
+}
 
 /** FileInfo has the same synthetic ULong constructor marker as ImageInfo in the pinned AAR. */
 class FileInfo(
@@ -670,6 +805,7 @@ class Client internal constructor(
 			slidingSyncVersion = SlidingSyncVersion.NATIVE,
 		)
 		sessionDelegate?.saveSessionInKeychain(session!!)
+		FakeMatrixSdkState.currentUserId = session?.userId
 		FakeMatrixSdkState.onLogin?.invoke()
 	}
 
@@ -677,6 +813,7 @@ class Client internal constructor(
 		FakeMatrixSdkState.restoreSessionCallCount++
 		FakeMatrixSdkState.restoreSessionException?.let { throw it }
 		this.session = session
+		FakeMatrixSdkState.currentUserId = session.userId
 	}
 
 	fun userId(): String = session?.userId ?: throw ClientException.Generic("no session", "no session")
@@ -685,11 +822,49 @@ class Client internal constructor(
 		FakeMatrixSdkState.onDispose?.invoke()
 		FakeMatrixSdkState.logoutCallCount++
 		session = null
+		FakeMatrixSdkState.currentUserId = null
 	}
 
 	fun close() {
 		FakeMatrixSdkState.onDispose?.invoke()
 		FakeMatrixSdkState.clientCloseCount++
+	}
+
+	suspend fun getMediaThumbnail(source: MediaSource, width: ULong, height: ULong): ByteArray {
+		FakeMatrixSdkState.getMediaThumbnailCallCount++
+		FakeMatrixSdkState.lastMediaThumbnailSource = source
+		FakeMatrixSdkState.lastMediaThumbnailWidth = width
+		FakeMatrixSdkState.lastMediaThumbnailHeight = height
+		FakeMatrixSdkState.onGetMediaThumbnail?.invoke()
+		FakeMatrixSdkState.mediaThumbnailFailureToThrow?.let { throw it }
+		return FakeMatrixSdkState.mediaThumbnailToReturn ?: ByteArray(0)
+	}
+
+	suspend fun getMediaFile(
+		mediaSource: MediaSource,
+		filename: String?,
+		mimeType: String,
+		useCache: Boolean,
+		tempDir: String?,
+	): MediaFileHandle {
+		FakeMatrixSdkState.getMediaFileCallCount++
+		coroutineContext[Job]?.invokeOnCompletion { cause ->
+			if (cause is CancellationException) {
+				FakeMatrixSdkState.downloadJobCancelled = true
+			}
+		}
+		FakeMatrixSdkState.onGetMediaFile?.invoke()
+		FakeMatrixSdkState.getMediaFileException?.let { throw it }
+		val dirPath = tempDir ?: System.getProperty("java.io.tmpdir") ?: "."
+		val dir = java.io.File(dirPath)
+		dir.mkdirs()
+		val handleDir = java.io.File(dir, "tempdir_" + java.util.UUID.randomUUID())
+		handleDir.mkdirs()
+		val targetName = filename ?: "downloaded_file"
+		val file = java.io.File(handleDir, targetName)
+		val bytes = FakeMatrixSdkState.mediaContentToReturn ?: "fake file content".toByteArray()
+		file.writeBytes(bytes)
+		return MediaFileHandle(handleDir, file.absolutePath)
 	}
 
 	/**
@@ -919,7 +1094,23 @@ object FakeMatrixSdkState {
 	var lastCreatedMessageType: MessageType? = null
 	var sendCallCount = 0
 	var lastSentContent: RoomMessageEventContentWithoutRelation? = null
+	var lastReplyToEventId: String? = null
 	var sendFailureToThrow: ClientException? = null
+	var eventItemsById: Map<String, FakeTimelineEventSpec> = emptyMap()
+	var editCallCount = 0
+	var lastEditedEventId: String? = null
+	var lastEditedContent: EditedContent? = null
+	var editFailureToThrow: ClientException? = null
+	var currentUserId: String? = null
+	var toggleReactionCallCount = 0
+	var lastReactionEventId: String? = null
+	var lastReactionKey: String? = null
+	var toggleReactionFailureToThrow: ClientException? = null
+	var onToggleReaction: (() -> Unit)? = null
+	var toggleReactionSuspendAsynchronously = false
+	var toggleReactionCancellable = true
+	var toggleReactionCancelled = false
+	var onToggleReactionContinuation: ((kotlin.coroutines.Continuation<Boolean>) -> Unit)? = null
 	var sendSuspendAsynchronously = false
 	var sendDelayMs = 0L
 	var roomMessageEventContentCloseCount = 0
@@ -952,9 +1143,37 @@ object FakeMatrixSdkState {
 	var roomInfoCallCount = 0
 	var roomInfoDestroyCount = 0
 	var roomInfoFailureToThrow: Exception? = null
+	var getMediaFileCallCount = 0
+	var getMediaFileException: Exception? = null
+	var onGetMediaFile: (suspend () -> Unit)? = null
+	var mediaContentToReturn: ByteArray? = null
+	var mediaFileHandleDestroyCount = 0
+	var downloadJobCancelled = false
+	var getMediaThumbnailCallCount = 0
+	var mediaSourceDestroyCount = 0
+	var mediaThumbnailFailureToThrow: Throwable? = null
+	var mediaThumbnailToReturn: ByteArray? = null
+	var lastMediaThumbnailSource: MediaSource? = null
+	var lastMediaThumbnailWidth: ULong? = null
+	var lastMediaThumbnailHeight: ULong? = null
+	var onGetMediaThumbnail: (() -> Unit)? = null
 
 	fun reset() {
 		awaitBuilds()
+		getMediaThumbnailCallCount = 0
+		mediaSourceDestroyCount = 0
+		mediaThumbnailFailureToThrow = null
+		mediaThumbnailToReturn = null
+		lastMediaThumbnailSource = null
+		lastMediaThumbnailWidth = null
+		lastMediaThumbnailHeight = null
+		onGetMediaThumbnail = null
+		getMediaFileCallCount = 0
+		getMediaFileException = null
+		onGetMediaFile = null
+		mediaContentToReturn = null
+		mediaFileHandleDestroyCount = 0
+		downloadJobCancelled = false
 		roomInfoCallCount = 0
 		roomInfoDestroyCount = 0
 		roomInfoFailureToThrow = null
@@ -1021,7 +1240,23 @@ object FakeMatrixSdkState {
 		lastCreatedMessageType = null
 		sendCallCount = 0
 		lastSentContent = null
+		lastReplyToEventId = null
 		sendFailureToThrow = null
+		eventItemsById = emptyMap()
+		editCallCount = 0
+		lastEditedEventId = null
+		lastEditedContent = null
+		editFailureToThrow = null
+		currentUserId = null
+		toggleReactionCallCount = 0
+		lastReactionEventId = null
+		lastReactionKey = null
+		toggleReactionFailureToThrow = null
+		onToggleReaction = null
+		toggleReactionSuspendAsynchronously = false
+		toggleReactionCancellable = true
+		toggleReactionCancelled = false
+		onToggleReactionContinuation = null
 		sendSuspendAsynchronously = false
 		sendDelayMs = 0L
 		roomMessageEventContentCloseCount = 0
