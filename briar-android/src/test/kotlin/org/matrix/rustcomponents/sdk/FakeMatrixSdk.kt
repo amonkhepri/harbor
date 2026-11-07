@@ -217,6 +217,7 @@ class Timeline {
 			(eventOrTransactionId as? EventOrTransactionId.EventId)?.eventId
 		FakeMatrixSdkState.lastReactionKey = key
 		FakeMatrixSdkState.toggleReactionFailureToThrow?.let { throw it }
+		FakeMatrixSdkState.onToggleReaction?.invoke()
 		return true
 	}
 
@@ -1049,6 +1050,7 @@ object FakeMatrixSdkState {
 	var lastReactionEventId: String? = null
 	var lastReactionKey: String? = null
 	var toggleReactionFailureToThrow: ClientException? = null
+	var onToggleReaction: (() -> Unit)? = null
 	var sendSuspendAsynchronously = false
 	var sendDelayMs = 0L
 	var roomMessageEventContentCloseCount = 0
@@ -1189,6 +1191,7 @@ object FakeMatrixSdkState {
 		lastReactionEventId = null
 		lastReactionKey = null
 		toggleReactionFailureToThrow = null
+		onToggleReaction = null
 		sendSuspendAsynchronously = false
 		sendDelayMs = 0L
 		roomMessageEventContentCloseCount = 0
