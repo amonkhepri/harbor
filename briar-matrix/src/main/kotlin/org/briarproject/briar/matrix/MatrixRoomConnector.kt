@@ -62,6 +62,7 @@ class MatrixRoomConnector @JvmOverloads constructor(
 	private val clock: Clock,
 	private val recentThreadsBudgetMs: Long = DEFAULT_RECENT_THREADS_BUDGET_MS,
 	private val fileDownloadClient: MatrixFileDownloadClient? = null,
+	private val maxInvitations: Int = DEFAULT_INVITATION_LIMIT,
 ) : MatrixConnector,
 	ConnectorTextSender,
 	ConnectorReplySender,
@@ -99,7 +100,12 @@ class MatrixRoomConnector @JvmOverloads constructor(
 		// Stopping here for scope splitting instead of inventing Fake/V2 Sync APIs.
 		val deadlineMs = clock.currentTimeMillis() + recentThreadsBudgetMs
 		val joinedSnapshots = roomSnapshotClient.getJoinedRooms(limit)
-		val invitedSnapshots = roomSnapshotClient.getInvitedRooms(limit)
+		val invitationLimit = minOf(limit.coerceAtLeast(0), maxInvitations)
+		val invitedSnapshots = if (invitationLimit > 0) {
+			roomSnapshotClient.getInvitedRooms(invitationLimit).take(invitationLimit)
+		} else {
+			emptyList()
+		}
 
 		val joinedThreads = joinedSnapshots.map { snapshot ->
 			val latest = if (clock.currentTimeMillis() < deadlineMs) {
@@ -142,10 +148,14 @@ class MatrixRoomConnector @JvmOverloads constructor(
 
 		val seen = HashSet<String>()
 		val result = ArrayList<ConnectorThread>()
-		for (thread in invitedThreads + joinedThreads) {
+		for (thread in joinedThreads) {
 			if (seen.add(thread.threadId)) {
 				result.add(thread)
-				if (result.size >= limit) break
+			}
+		}
+		for (thread in invitedThreads) {
+			if (seen.add(thread.threadId)) {
+				result.add(thread)
 			}
 		}
 		return result
@@ -293,5 +303,8 @@ class MatrixRoomConnector @JvmOverloads constructor(
 	companion object {
 		/** Overall wall-clock budget for [getRecentThreads]'s per-room preview loop (MX-034). */
 		const val DEFAULT_RECENT_THREADS_BUDGET_MS: Long = 10_000L
+
+		/** Maximum invitations returned alongside joined rooms in [getRecentThreads] (MX-062). */
+		const val DEFAULT_INVITATION_LIMIT: Int = 10
 	}
 }

@@ -37,6 +37,21 @@ class InboxThreadAdapterTest {
 		assertContentsChanged(item.copy(latestActivityMillis = 2L))
 		assertContentsChanged(item.copy(unreadCount = 2))
 		assertContentsChanged(item.copy(isMarkedUnread = true))
+		assertContentsChanged(item.copy(isInvited = true))
+	}
+
+	@Test
+	fun testConnectorContentsDetectIsInvitedChange() {
+		val item = connectorItem()
+
+		assertEquals(
+			true,
+			callback.areContentsTheSame(item, item.copy(isInvited = false)),
+		)
+		assertEquals(
+			false,
+			callback.areContentsTheSame(item, item.copy(isInvited = true)),
+		)
 	}
 
 	@Test

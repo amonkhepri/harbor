@@ -383,6 +383,77 @@ class MatrixRoomConnectorTest {
 	}
 
 	@Test
+	fun `getRecentThreads returns joined rooms even when there are limit invitations`() {
+		val limit = 5
+		val joinedSnapshots = listOf(
+			MatrixRoomSnapshot("!joined1:example.org", "Joined Room 1"),
+			MatrixRoomSnapshot("!joined2:example.org", "Joined Room 2"),
+		)
+		val invitedSnapshots = (1..limit).map { i ->
+			MatrixRoomSnapshot(
+				roomId = "!invited$i:example.org",
+				displayName = "Invited Room $i",
+				topic = "Topic $i",
+				isInvited = true,
+			)
+		}
+		val roomSnapshotClient = FakeRoomSnapshotClient(
+			snapshots = joinedSnapshots,
+			invitedSnapshots = invitedSnapshots,
+		)
+		val connector = connector(
+			roomSnapshotClient = roomSnapshotClient,
+			messageSnapshotClient = FakeMessageSnapshotClient(emptyList()),
+			authSession = FakeMatrixAuthSession(MatrixAuthState.READY),
+		)
+
+		val threads = connector.getRecentThreads(limit)
+
+		val returnedJoined = threads.filter { !it.isInvited }
+		val returnedInvited = threads.filter { it.isInvited }
+		assertEquals(2, returnedJoined.size)
+		assertEquals(
+			listOf("!joined1:example.org", "!joined2:example.org"),
+			returnedJoined.map { it.threadId },
+		)
+		assertEquals(limit, returnedInvited.size)
+	}
+
+	@Test
+	fun `getRecentThreads caps invitations separately without truncating joined rooms`() {
+		val limit = 20
+		val joinedSnapshots = (1..limit).map { i ->
+			MatrixRoomSnapshot("!joined$i:example.org", "Joined Room $i")
+		}
+		val invitedSnapshots = (1..25).map { i ->
+			MatrixRoomSnapshot(
+				roomId = "!invited$i:example.org",
+				displayName = "Spam Invite $i",
+				topic = "Topic $i",
+				isInvited = true,
+			)
+		}
+		val roomSnapshotClient = FakeRoomSnapshotClient(
+			snapshots = joinedSnapshots,
+			invitedSnapshots = invitedSnapshots,
+		)
+		val connector = connector(
+			roomSnapshotClient = roomSnapshotClient,
+			messageSnapshotClient = FakeMessageSnapshotClient(emptyList()),
+			authSession = FakeMatrixAuthSession(MatrixAuthState.READY),
+			maxInvitations = 5,
+		)
+
+		val threads = connector.getRecentThreads(limit)
+
+		val returnedJoined = threads.filter { !it.isInvited }
+		val returnedInvited = threads.filter { it.isInvited }
+		assertEquals(20, returnedJoined.size)
+		assertEquals(5, returnedInvited.size)
+		assertEquals(5, roomSnapshotClient.lastRequestedInvitedLimit)
+	}
+
+	@Test
 	fun `getRecentMessageReadResult maps snapshots to connector-neutral messages`() {
 		val messageSnapshotClient = FakeMessageSnapshotClient(
 			listOf(
@@ -796,6 +867,7 @@ class MatrixRoomConnectorTest {
 		authSession: MatrixAuthSession,
 		clock: Clock = SettableClock(AtomicLong(0L)),
 		recentThreadsBudgetMs: Long = MatrixRoomConnector.DEFAULT_RECENT_THREADS_BUDGET_MS,
+		maxInvitations: Int = MatrixRoomConnector.DEFAULT_INVITATION_LIMIT,
 	): MatrixRoomConnector = MatrixRoomConnector(
 		roomSnapshotClient,
 		authSession,
@@ -803,6 +875,8 @@ class MatrixRoomConnectorTest {
 		messageSendClient,
 		clock,
 		recentThreadsBudgetMs,
+		fileDownloadClient = null,
+		maxInvitations = maxInvitations,
 	)
 
 	private class FakeRoomSnapshotClient(
@@ -824,7 +898,7 @@ class MatrixRoomConnectorTest {
 
 		override fun getInvitedRooms(limit: Int): List<MatrixRoomSnapshot> {
 			lastRequestedInvitedLimit = limit
-			return invitedSnapshots
+			return invitedSnapshots.take(limit.coerceAtLeast(0))
 		}
 	}
 
