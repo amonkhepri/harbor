@@ -35,8 +35,9 @@ class ConnectorMessageLinksTest {
 		val samples = mapOf(
 			"https://example.com" to listOf("https://example.com"),
 			"http://example.org/path?arg=1#hash" to listOf("http://example.org/path?arg=1#hash"),
-			"HTTP://EXAMPLE.COM/UPPER" to listOf("HTTP://EXAMPLE.COM/UPPER"),
-			"HTTPS://SECURE.ORG" to listOf("HTTPS://SECURE.ORG"),
+			"HTTP://EXAMPLE.COM/UPPER" to listOf("http://EXAMPLE.COM/UPPER"),
+			"HTTPS://SECURE.ORG" to listOf("https://SECURE.ORG"),
+			"hTtPs://mixed.case.com/path" to listOf("https://mixed.case.com/path"),
 			"Check https://example.com." to listOf("https://example.com"),
 			"Visit (https://example.com/test) today!" to listOf("https://example.com/test"),
 			"Two links: http://first.org and https://second.org/doc" to

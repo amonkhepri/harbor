@@ -255,7 +255,6 @@ internal class ConnectorConversationAdapter(
 			}
 			if (item.type == ConnectorMessageType.TEXT) {
 				ConnectorMessageLinks.linkify(text)
-				text.setOnLongClickListener { itemView.performLongClick() }
 			} else {
 				text.movementMethod = null
 				text.isFocusable = false

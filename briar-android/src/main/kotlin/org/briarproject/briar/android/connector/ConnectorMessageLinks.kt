@@ -11,11 +11,22 @@ import android.text.util.Linkify
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
+import android.view.ViewParent
 import android.widget.TextView
 import java.util.regex.Pattern
 import kotlin.math.abs
 
 internal object ConnectorMessageLinks {
+
+	private val SCHEME_NORMALIZER = Linkify.TransformFilter { _, url ->
+		if (url.startsWith("http://", ignoreCase = true)) {
+			"http://" + url.substring(7)
+		} else if (url.startsWith("https://", ignoreCase = true)) {
+			"https://" + url.substring(8)
+		} else {
+			url
+		}
+	}
 
 	private val WEB_URL_PATTERN: Pattern = Pattern.compile(
 		"https?://[a-zA-Z0-9+&@#/%?=~_|!:,.;()\\-]*[a-zA-Z0-9+&@#/%=~_|]",
@@ -25,7 +36,13 @@ internal object ConnectorMessageLinks {
 	fun linkify(textView: TextView) {
 		val text = textView.text ?: return
 		val spannable = if (text is Spannable) text else SpannableString(text)
-		val hasLinks = Linkify.addLinks(spannable, WEB_URL_PATTERN, null)
+		val hasLinks = Linkify.addLinks(
+			spannable,
+			WEB_URL_PATTERN,
+			null,
+			null,
+			SCHEME_NORMALIZER,
+		)
 		if (hasLinks) {
 			if (text !is Spannable) {
 				textView.text = spannable
@@ -93,8 +110,17 @@ internal object ConnectorMessageLinks {
 						val runnable = Runnable {
 							longClickPerformed = true
 							Selection.removeSelection(buffer)
-							val parent = widget.parent as? View
-							if (parent == null || !parent.performLongClick()) {
+							var current: ViewParent? = widget.parent
+							var handled = false
+							while (current != null) {
+								val view = current as? View
+								if (view != null && view.performLongClick()) {
+									handled = true
+									break
+								}
+								current = current.parent
+							}
+							if (!handled) {
 								widget.performLongClick()
 							}
 						}

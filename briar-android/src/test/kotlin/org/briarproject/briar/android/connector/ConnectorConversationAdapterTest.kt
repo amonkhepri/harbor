@@ -1,10 +1,14 @@
 package org.briarproject.briar.android.connector
 
+import android.app.Activity
 import android.app.Application
+import android.os.Looper
 import android.text.Spannable
 import android.text.style.URLSpan
 import android.view.LayoutInflater
+import android.view.MotionEvent
 import android.view.View
+import android.view.ViewConfiguration
 import android.widget.FrameLayout
 import android.widget.TextView
 import org.briarproject.briar.R
@@ -23,9 +27,12 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
+import java.time.Duration
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [21], application = Application::class)
@@ -901,6 +908,150 @@ class ConnectorConversationAdapterTest {
 
 		// Delete / message action long-press works on sent message with link
 		assertTrue(view.performLongClick())
+		assertEquals(sentItem, deletedItem)
+	}
+
+	@Test
+	fun testFailedMessageTouchDispatchesRetryClickViaTextTouch() {
+		val activity = Robolectric.buildActivity(Activity::class.java).setup().get()
+		val parent = FrameLayout(activity)
+		val view = LayoutInflater.from(activity)
+			.inflate(R.layout.list_item_connector_message, parent, false)
+		parent.addView(view)
+		activity.setContentView(parent)
+
+		var retryItem: ConnectorConversationMessageItem? = null
+		val holder = ConnectorConversationAdapter.MessageViewHolder(
+			itemView = view,
+			onRetrySendClicked = { retryItem = it },
+		)
+
+		val failedItem = ConnectorConversationMessageItem(
+			connectorSource = ConnectorSources.MATRIX,
+			connectorThreadId = "!room:example.org",
+			connectorMessageId = "\$msg:example.org",
+			dateMillis = 1_000L,
+			isOutgoing = true,
+			localEchoStatus = FAILED,
+			text = "Plain failed send body without links",
+			type = ConnectorMessageType.TEXT,
+		)
+		holder.bind(failedItem)
+
+		activity.window.decorView.measure(
+			View.MeasureSpec.makeMeasureSpec(1000, View.MeasureSpec.EXACTLY),
+			View.MeasureSpec.makeMeasureSpec(500, View.MeasureSpec.EXACTLY),
+		)
+		activity.window.decorView.layout(0, 0, 1000, 500)
+
+		val text = view.findViewById<TextView>(R.id.connectorMessageText)
+		assertTrue(text.width > 0 && text.height > 0)
+
+		val x = (text.left + 10).toFloat()
+		val y = (text.top + 10).toFloat()
+		val down = MotionEvent.obtain(0, 0, MotionEvent.ACTION_DOWN, x, y, 0)
+		val up = MotionEvent.obtain(0, 50, MotionEvent.ACTION_UP, x, y, 0)
+
+		view.dispatchTouchEvent(down)
+		view.dispatchTouchEvent(up)
+		shadowOf(Looper.getMainLooper()).idle()
+
+		assertEquals(failedItem, retryItem)
+	}
+
+	@Test
+	fun testFailedMessageWithLinkTouchOutsideLinkDispatchesRetryClick() {
+		val activity = Robolectric.buildActivity(Activity::class.java).setup().get()
+		val parent = FrameLayout(activity)
+		val view = LayoutInflater.from(activity)
+			.inflate(R.layout.list_item_connector_message, parent, false)
+		parent.addView(view)
+		activity.setContentView(parent)
+
+		var retryItem: ConnectorConversationMessageItem? = null
+		val holder = ConnectorConversationAdapter.MessageViewHolder(
+			itemView = view,
+			onRetrySendClicked = { retryItem = it },
+		)
+
+		val failedItem = ConnectorConversationMessageItem(
+			connectorSource = ConnectorSources.MATRIX,
+			connectorThreadId = "!room:example.org",
+			connectorMessageId = "\$msg:example.org",
+			dateMillis = 1_000L,
+			isOutgoing = true,
+			localEchoStatus = FAILED,
+			text = "https://matrix.org failed message body with text at end",
+			type = ConnectorMessageType.TEXT,
+		)
+		holder.bind(failedItem)
+
+		activity.window.decorView.measure(
+			View.MeasureSpec.makeMeasureSpec(1000, View.MeasureSpec.EXACTLY),
+			View.MeasureSpec.makeMeasureSpec(500, View.MeasureSpec.EXACTLY),
+		)
+		activity.window.decorView.layout(0, 0, 1000, 500)
+
+		val text = view.findViewById<TextView>(R.id.connectorMessageText)
+		val x = (text.right - 20).toFloat()
+		val y = (text.top + 10).toFloat()
+		val down = MotionEvent.obtain(100, 100, MotionEvent.ACTION_DOWN, x, y, 0)
+		val up = MotionEvent.obtain(100, 150, MotionEvent.ACTION_UP, x, y, 0)
+
+		view.dispatchTouchEvent(down)
+		view.dispatchTouchEvent(up)
+		shadowOf(Looper.getMainLooper()).idle()
+
+		assertEquals(failedItem, retryItem)
+	}
+
+	@Test
+	fun testTextMessageTouchDispatchesLongPressToActionMenu() {
+		val activity = Robolectric.buildActivity(Activity::class.java).setup().get()
+		val parent = FrameLayout(activity)
+		val view = LayoutInflater.from(activity)
+			.inflate(R.layout.list_item_connector_message, parent, false)
+		parent.addView(view)
+		activity.setContentView(parent)
+
+		var deletedItem: ConnectorConversationMessageItem? = null
+		val holder = ConnectorConversationAdapter.MessageViewHolder(
+			itemView = view,
+			onDeleteClicked = { deletedItem = it },
+		)
+
+		val sentItem = ConnectorConversationMessageItem(
+			connectorSource = ConnectorSources.MATRIX,
+			connectorThreadId = "!room:example.org",
+			connectorMessageId = "\$msg:example.org",
+			dateMillis = 1_000L,
+			isOutgoing = true,
+			localEchoStatus = null,
+			text = "Plain sent message without links",
+			type = ConnectorMessageType.TEXT,
+		)
+		holder.bind(sentItem)
+
+		activity.window.decorView.measure(
+			View.MeasureSpec.makeMeasureSpec(1000, View.MeasureSpec.EXACTLY),
+			View.MeasureSpec.makeMeasureSpec(500, View.MeasureSpec.EXACTLY),
+		)
+		activity.window.decorView.layout(0, 0, 1000, 500)
+
+		val text = view.findViewById<TextView>(R.id.connectorMessageText)
+		val x = (text.left + 10).toFloat()
+		val y = (text.top + 10).toFloat()
+		val down = MotionEvent.obtain(200, 200, MotionEvent.ACTION_DOWN, x, y, 0)
+		view.dispatchTouchEvent(down)
+
+		shadowOf(Looper.getMainLooper()).idleFor(
+			Duration.ofMillis(ViewConfiguration.getLongPressTimeout().toLong() + 100),
+		)
+
+		val up = MotionEvent.obtain(200, 800, MotionEvent.ACTION_UP, x, y, 0)
+		view.dispatchTouchEvent(up)
+		shadowOf(Looper.getMainLooper()).idle()
+
 		assertEquals(sentItem, deletedItem)
 	}
 }
