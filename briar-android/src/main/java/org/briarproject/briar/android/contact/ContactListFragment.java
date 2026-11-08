@@ -157,11 +157,21 @@ public class ContactListFragment extends BaseFragment
 
 	@Override
 	public void onConnectorItemClick(View view, ConnectorInboxThreadItem item) {
-		startActivity(createConnectorConversationIntent(getActivity(), item));
+		if (item.isInvited()) {
+			return;
+		}
+		Intent i = createConnectorConversationIntent(getActivity(), item);
+		if (i != null) {
+			startActivity(i);
+		}
 	}
 
+	@Nullable
 	static Intent createConnectorConversationIntent(Context context,
 			ConnectorInboxThreadItem item) {
+		if (item.isInvited()) {
+			return null;
+		}
 		Intent i = new Intent(context, ConnectorConversationActivity.class);
 		i.putExtra(ConnectorConversationActivity.SOURCE_ID,
 				item.getConnectorSource().getId());
@@ -225,22 +235,30 @@ public class ContactListFragment extends BaseFragment
 	@Override
 	public void onStart() {
 		super.onStart();
-		viewModel.clearAllContactNotifications();
-		viewModel.clearAllContactAddedNotifications();
-		viewModel.loadContacts();
-		viewModel.loadConnectorThreads();
-		viewModel.checkForPendingContacts();
-		list.startPeriodicUpdate(CONNECTOR_REFRESH_INTERVAL_MS,
-				viewModel::loadConnectorThreads);
+		if (viewModel != null) {
+			viewModel.clearAllContactNotifications();
+			viewModel.clearAllContactAddedNotifications();
+			viewModel.loadContacts();
+			viewModel.loadConnectorThreads();
+			viewModel.checkForPendingContacts();
+			if (list != null) {
+				list.startPeriodicUpdate(CONNECTOR_REFRESH_INTERVAL_MS,
+						viewModel::loadConnectorThreads);
+			}
+		}
 	}
 
 	@Override
 	public void onStop() {
 		super.onStop();
-		list.stopPeriodicUpdate();
+		if (list != null) {
+			list.stopPeriodicUpdate();
+		}
 		dismissSnackBar();
 		// Close the speed dial to prevent a crash (#1672)
-		speedDial.closeMenu();
+		if (speedDial != null) {
+			speedDial.closeMenu();
+		}
 	}
 
 	@UiThread

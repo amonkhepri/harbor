@@ -1,21 +1,29 @@
 package org.briarproject.briar.android.contact
 
+import android.content.Intent
 import android.view.MenuInflater
+import android.view.View
 import android.widget.FrameLayout
 import android.widget.PopupMenu
+import androidx.fragment.app.FragmentActivity
 import org.briarproject.briar.R
+import org.briarproject.briar.android.activity.ActivityComponent
 import org.briarproject.briar.android.connector.ConnectorConversationActivity
 import org.briarproject.briar.android.contact.ConnectorInboxAvailabilityState.ACCOUNT_UNAVAILABLE
 import org.briarproject.briar.android.contact.ConnectorInboxAvailabilityState.EMPTY
 import org.briarproject.briar.android.contact.ConnectorInboxAvailabilityState.LOAD_FAILED
 import org.briarproject.briar.android.contact.ConnectorInboxAvailabilityState.LOADING
 import org.briarproject.briar.android.contact.ConnectorInboxAvailabilityState.NONE
+import org.briarproject.briar.android.fragment.BaseFragment
+import org.briarproject.briar.android.fragment.BaseFragment.BaseFragmentListener
 import org.briarproject.briar.api.connector.ConnectorSources
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.mockito.Mockito.mock
+import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
@@ -142,9 +150,10 @@ class ContactListFragmentTest {
 			item,
 		)
 
+		assertNotNull(intent)
 		assertEquals(
 			ConnectorConversationActivity::class.java.name,
-			intent.component?.className,
+			intent!!.component?.className,
 		)
 		assertEquals("matrix", intent.getStringExtra(ConnectorConversationActivity.SOURCE_ID))
 		assertEquals(
@@ -152,6 +161,76 @@ class ContactListFragmentTest {
 			intent.getStringExtra(ConnectorConversationActivity.THREAD_ID),
 		)
 		assertEquals("Room title", intent.getStringExtra(ConnectorConversationActivity.THREAD_TITLE))
+	}
+
+	@Test
+	fun testInvitedMatrixInboxItemReturnsNullConversationIntent() {
+		val item = FakeConnectorInboxThreadItem(
+			connectorSource = ConnectorSources.MATRIX,
+			connectorThreadId = "!room:example.org",
+			title = "Room title",
+			isInvited = true,
+		)
+
+		val intent = ContactListFragment.createConnectorConversationIntent(
+			RuntimeEnvironment.getApplication(),
+			item,
+		)
+
+		assertNull(intent)
+	}
+
+	@Test
+	fun testInvitedItemClickDoesNotStartConversationActivity() {
+		val activity = Robolectric.buildActivity(TestActivity::class.java).setup().get()
+		val fragment = TestContactListFragment()
+		activity.supportFragmentManager.beginTransaction().add(fragment, "tag").commitNow()
+
+		val invitedItem = FakeConnectorInboxThreadItem(
+			connectorSource = ConnectorSources.MATRIX,
+			connectorThreadId = "!invited:example.org",
+			title = "Invited Room",
+			isInvited = true,
+		)
+		fragment.onConnectorItemClick(View(activity), invitedItem)
+		assertNull(fragment.startedIntent)
+
+		val joinedItem = FakeConnectorInboxThreadItem(
+			connectorSource = ConnectorSources.MATRIX,
+			connectorThreadId = "!joined:example.org",
+			title = "Joined Room",
+			isInvited = false,
+		)
+		fragment.onConnectorItemClick(View(activity), joinedItem)
+		assertNotNull(fragment.startedIntent)
+		assertEquals(
+			"!joined:example.org",
+			fragment.startedIntent?.getStringExtra(ConnectorConversationActivity.THREAD_ID),
+		)
+	}
+
+	class TestContactListFragment : ContactListFragment() {
+		var startedIntent: Intent? = null
+		override fun injectFragment(component: ActivityComponent) {}
+		override fun onCreateView(
+			inflater: android.view.LayoutInflater,
+			container: android.view.ViewGroup?,
+			savedInstanceState: android.os.Bundle?,
+		): View = View(inflater.context)
+		override fun startActivity(intent: Intent) {
+			startedIntent = intent
+		}
+	}
+
+	class TestActivity :
+		FragmentActivity(),
+		BaseFragmentListener {
+		override fun getActivityComponent(): ActivityComponent = mock(ActivityComponent::class.java)
+		override fun showNextFragment(f: BaseFragment) {}
+		override fun handleException(e: java.lang.Exception) {}
+		override fun runOnDbThread(runnable: Runnable) {
+			runnable.run()
+		}
 	}
 
 	@Test
@@ -167,9 +246,10 @@ class ContactListFragmentTest {
 			item,
 		)
 
+		assertNotNull(intent)
 		assertEquals(
 			ConnectorConversationActivity::class.java.name,
-			intent.component?.className,
+			intent!!.component?.className,
 		)
 		assertEquals("telegram", intent.getStringExtra(ConnectorConversationActivity.SOURCE_ID))
 		assertEquals("555", intent.getStringExtra(ConnectorConversationActivity.THREAD_ID))

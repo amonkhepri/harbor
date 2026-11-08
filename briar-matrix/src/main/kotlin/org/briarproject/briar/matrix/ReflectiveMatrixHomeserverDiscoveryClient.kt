@@ -844,7 +844,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 				?: throw SnapshotAdapterFailure()
 			val membership = room.javaClass.getMethod("membership").invoke(room) as? Enum<*>
 			if (membership?.name != "JOINED") {
-				return emptyList()
+				return null
 			}
 			val loadedTimeline =
 				invokeCloseableValue(room, "timeline", emptyArray(), emptyArray(), ::closeQuietly)
@@ -1423,7 +1423,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 				val loadedRoom = existingRoom ?: (
 					client.javaClass.getMethod("getRoom", String::class.java).invoke(client, roomId)
 						?: throw SnapshotAdapterFailure()
-				)
+					)
 				val membership = loadedRoom.javaClass.getMethod("membership").invoke(loadedRoom) as? Enum<*>
 				if (membership?.name != "JOINED") {
 					closeQuietly(loadedRoom)
@@ -1433,7 +1433,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 				roomRef.set(loadedRoom)
 				val loadedTimeline = existingTimeline ?: (
 					invokeCloseableValue(loadedRoom, "timeline", emptyArray(), emptyArray(), ::closeQuietly)
-				)
+					)
 				timelineRef.set(loadedTimeline)
 
 				val eventIdClass = Class.forName(EVENT_ID_CLASS_NAME)

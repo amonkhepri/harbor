@@ -388,7 +388,7 @@ class ReflectiveMatrixHomeserverDiscoveryClientTest {
 		)
 
 		val messages = client.getRecentMessages("!invited:example.org", 10)
-		assertEquals(emptyList<Any>(), messages)
+		assertNull(messages)
 		assertEquals(false, client.sendTextMessage("!invited:example.org", "hello"))
 		assertEquals(false, client.editTextMessage("!invited:example.org", "\$m1", "edited"))
 		assertEquals(false, client.deleteMessage("!invited:example.org", "\$m1"))
