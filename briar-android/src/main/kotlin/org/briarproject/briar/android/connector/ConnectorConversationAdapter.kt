@@ -97,6 +97,7 @@ internal class ConnectorConversationAdapter(
 			thumbnailCancellation = null
 			boundThreadId = null
 			boundMessageId = null
+			onLinkClicked = null
 			thumbnail.setImageDrawable(null)
 			thumbnail.visibility = View.GONE
 			text.movementMethod = null

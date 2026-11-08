@@ -124,6 +124,11 @@ internal object ConnectorMessageLinks {
 
 				val layout = widget.layout ?: return false
 				val line = layout.getLineForVertical(y)
+				if (y < layout.getLineTop(line) || y > layout.getLineBottom(line)) {
+					cancelPendingLongClick()
+					Selection.removeSelection(buffer)
+					return false
+				}
 				val off = layout.getOffsetForHorizontal(line, x.toFloat())
 
 				val links = buffer.getSpans(off, off, ClickableSpan::class.java)
@@ -153,6 +158,10 @@ internal object ConnectorMessageLinks {
 						longClickPerformed = false
 						Selection.setSelection(buffer, spanStart, spanEnd)
 						val runnable = Runnable {
+							if (!widget.isAttachedToWindow) {
+								cancelPendingLongClick()
+								return@Runnable
+							}
 							longClickPerformed = true
 							Selection.removeSelection(buffer)
 							var current: ViewParent? = widget.parent

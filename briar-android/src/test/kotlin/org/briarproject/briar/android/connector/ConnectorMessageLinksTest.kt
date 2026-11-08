@@ -213,4 +213,79 @@ class ConnectorMessageLinksTest {
 		assertNotNull("LinkDialogFragment should be shown", dialog)
 		assertTrue(dialog is LinkDialogFragment)
 	}
+
+	@Test
+	fun testVerticalTouchOutsideLineBoundsDoesNotClickLink() {
+		val activity = Robolectric.buildActivity(Activity::class.java).setup().get()
+		val parent = FrameLayout(activity)
+		val textView = TextView(activity)
+		textView.setPadding(0, 40, 0, 40)
+		parent.addView(textView)
+		activity.setContentView(parent)
+
+		var parentClicked = false
+		parent.setOnClickListener { parentClicked = true }
+
+		var clickedUrl: String? = null
+		textView.text = "https://example.com"
+		ConnectorMessageLinks.linkify(textView) { clickedUrl = it }
+
+		activity.window.decorView.measure(
+			View.MeasureSpec.makeMeasureSpec(1000, View.MeasureSpec.EXACTLY),
+			View.MeasureSpec.makeMeasureSpec(200, View.MeasureSpec.EXACTLY),
+		)
+		activity.window.decorView.layout(0, 0, 1000, 200)
+
+		// Tap in top padding (y = 10, while padding is 40)
+		val down = MotionEvent.obtain(0, 0, MotionEvent.ACTION_DOWN, 10f, 10f, 0)
+		val up = MotionEvent.obtain(0, 50, MotionEvent.ACTION_UP, 10f, 10f, 0)
+		parent.dispatchTouchEvent(down)
+		parent.dispatchTouchEvent(up)
+		shadowOf(Looper.getMainLooper()).idle()
+
+		assertNull("Link should not be clicked when tapping vertical padding", clickedUrl)
+		assertTrue("Parent click should fire for touch in padding", parentClicked)
+	}
+
+	@Test
+	fun testDetachedViewDuringPendingLongPressDoesNotTriggerAction() {
+		val activity = Robolectric.buildActivity(Activity::class.java).setup().get()
+		val parent = FrameLayout(activity)
+		val textView = TextView(activity)
+		parent.addView(textView)
+		activity.setContentView(parent)
+
+		var parentLongClicked = false
+		parent.setOnLongClickListener {
+			parentLongClicked = true
+			true
+		}
+
+		var clickedUrl: String? = null
+		textView.text = "https://example.com"
+		ConnectorMessageLinks.linkify(textView) { clickedUrl = it }
+
+		activity.window.decorView.measure(
+			View.MeasureSpec.makeMeasureSpec(1000, View.MeasureSpec.EXACTLY),
+			View.MeasureSpec.makeMeasureSpec(100, View.MeasureSpec.EXACTLY),
+		)
+		activity.window.decorView.layout(0, 0, 1000, 100)
+
+		val down = MotionEvent.obtain(0, 0, MotionEvent.ACTION_DOWN, 10f, 10f, 0)
+		parent.dispatchTouchEvent(down)
+
+		// Detach view before long press triggers
+		parent.removeView(textView)
+
+		shadowOf(Looper.getMainLooper()).idleFor(
+			Duration.ofMillis(ViewConfiguration.getLongPressTimeout().toLong() + 100),
+		)
+
+		val up = MotionEvent.obtain(0, 600, MotionEvent.ACTION_UP, 10f, 10f, 0)
+		parent.dispatchTouchEvent(up)
+		shadowOf(Looper.getMainLooper()).idle()
+
+		assertNull("Link should not be clicked after detachment", clickedUrl)
+		assertFalse("Parent long click should not fire when view was detached", parentLongClicked)
+	}
 }
