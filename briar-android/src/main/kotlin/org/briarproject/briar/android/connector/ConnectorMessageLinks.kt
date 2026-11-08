@@ -1,5 +1,7 @@
 package org.briarproject.briar.android.connector
 
+import android.content.Context
+import android.content.ContextWrapper
 import android.os.Handler
 import android.os.Looper
 import android.text.Selection
@@ -7,12 +9,15 @@ import android.text.Spannable
 import android.text.SpannableString
 import android.text.method.LinkMovementMethod
 import android.text.style.ClickableSpan
+import android.text.style.URLSpan
 import android.text.util.Linkify
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
 import android.view.ViewParent
 import android.widget.TextView
+import androidx.fragment.app.FragmentActivity
+import org.briarproject.briar.android.widget.LinkDialogFragment
 import java.util.regex.Pattern
 import kotlin.math.abs
 
@@ -33,7 +38,7 @@ internal object ConnectorMessageLinks {
 		Pattern.CASE_INSENSITIVE,
 	)
 
-	fun linkify(textView: TextView) {
+	fun linkify(textView: TextView, onLinkClicked: ((String) -> Unit)? = null) {
 		val text = textView.text ?: return
 		val spannable = if (text is Spannable) text else SpannableString(text)
 		val hasLinks = Linkify.addLinks(
@@ -44,6 +49,15 @@ internal object ConnectorMessageLinks {
 			SCHEME_NORMALIZER,
 		)
 		if (hasLinks) {
+			val existingUrlSpans = spannable.getSpans(0, spannable.length, URLSpan::class.java)
+			for (span in existingUrlSpans) {
+				val start = spannable.getSpanStart(span)
+				val end = spannable.getSpanEnd(span)
+				val flags = spannable.getSpanFlags(span)
+				val url = span.url
+				spannable.removeSpan(span)
+				spannable.setSpan(WebUrlSpan(url, onLinkClicked), start, end, flags)
+			}
 			if (text !is Spannable) {
 				textView.text = spannable
 			}
@@ -54,6 +68,37 @@ internal object ConnectorMessageLinks {
 		textView.isFocusable = false
 		textView.isClickable = false
 		textView.isLongClickable = false
+	}
+
+	internal open class WebUrlSpan(
+		url: String,
+		private val onLinkClicked: ((String) -> Unit)? = null,
+	) : URLSpan(url) {
+		override fun onClick(widget: View) {
+			if (onLinkClicked != null) {
+				onLinkClicked.invoke(url)
+			} else {
+				showLinkDialog(widget, url)
+			}
+		}
+	}
+
+	internal fun showLinkDialog(view: View, url: String) {
+		val activity = findFragmentActivity(view.context) ?: return
+		val fm = activity.supportFragmentManager
+		if (!fm.isStateSaved && !fm.isDestroyed) {
+			val dialog = LinkDialogFragment.newInstance(url)
+			dialog.show(fm, dialog.uniqueTag)
+		}
+	}
+
+	private fun findFragmentActivity(context: Context): FragmentActivity? {
+		var ctx: Context? = context
+		while (ctx is ContextWrapper) {
+			if (ctx is FragmentActivity) return ctx
+			ctx = ctx.baseContext
+		}
+		return null
 	}
 
 	internal class LinkTouchMovementMethod private constructor() : LinkMovementMethod() {

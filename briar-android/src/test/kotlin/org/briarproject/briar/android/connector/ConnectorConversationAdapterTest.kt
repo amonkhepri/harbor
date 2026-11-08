@@ -11,10 +11,12 @@ import android.view.View
 import android.view.ViewConfiguration
 import android.widget.FrameLayout
 import android.widget.TextView
+import androidx.fragment.app.FragmentActivity
 import org.briarproject.briar.R
 import org.briarproject.briar.android.connector.ConnectorLocalEchoStatus.FAILED
 import org.briarproject.briar.android.connector.ConnectorLocalEchoStatus.PENDING
 import org.briarproject.briar.android.connector.ConnectorLocalEchoStatus.SENT
+import org.briarproject.briar.android.widget.LinkDialogFragment
 import org.briarproject.briar.api.connector.ConnectorAttachmentMetadata
 import org.briarproject.briar.api.connector.ConnectorMessageReceiptState
 import org.briarproject.briar.api.connector.ConnectorMessageType
@@ -1053,5 +1055,94 @@ class ConnectorConversationAdapterTest {
 		shadowOf(Looper.getMainLooper()).idle()
 
 		assertEquals(sentItem, deletedItem)
+	}
+
+	@Test
+	fun testTextMessageLinkTapShowsLinkDialogFragmentByDefault() {
+		val activity = Robolectric.buildActivity(FragmentActivity::class.java).setup().get()
+		val parent = FrameLayout(activity)
+		val view = LayoutInflater.from(activity)
+			.inflate(R.layout.list_item_connector_message, parent, false)
+		parent.addView(view)
+		activity.setContentView(parent)
+
+		val holder = ConnectorConversationAdapter.MessageViewHolder(view)
+		val textItem = ConnectorConversationMessageItem(
+			connectorSource = ConnectorSources.MATRIX,
+			connectorThreadId = "!room:example.org",
+			connectorMessageId = "\$msg:example.org",
+			dateMillis = 1_000L,
+			isOutgoing = false,
+			localEchoStatus = null,
+			text = "https://matrix.org",
+			type = ConnectorMessageType.TEXT,
+		)
+		holder.bind(textItem)
+
+		activity.window.decorView.measure(
+			View.MeasureSpec.makeMeasureSpec(1000, View.MeasureSpec.EXACTLY),
+			View.MeasureSpec.makeMeasureSpec(500, View.MeasureSpec.EXACTLY),
+		)
+		activity.window.decorView.layout(0, 0, 1000, 500)
+
+		val text = view.findViewById<TextView>(R.id.connectorMessageText)
+		val x = (text.left + 10).toFloat()
+		val y = (text.top + 10).toFloat()
+		val down = MotionEvent.obtain(10, 10, MotionEvent.ACTION_DOWN, x, y, 0)
+		val up = MotionEvent.obtain(10, 60, MotionEvent.ACTION_UP, x, y, 0)
+
+		view.dispatchTouchEvent(down)
+		view.dispatchTouchEvent(up)
+		shadowOf(Looper.getMainLooper()).idle()
+		activity.supportFragmentManager.executePendingTransactions()
+
+		val tag = LinkDialogFragment.newInstance("https://matrix.org").uniqueTag
+		val dialog = activity.supportFragmentManager.findFragmentByTag(tag)
+		assertNotNull("LinkDialogFragment should be displayed", dialog)
+		assertTrue(dialog is LinkDialogFragment)
+	}
+
+	@Test
+	fun testTextMessageLinkTapDispatchesCustomOnLinkClicked() {
+		val activity = Robolectric.buildActivity(FragmentActivity::class.java).setup().get()
+		val parent = FrameLayout(activity)
+		val view = LayoutInflater.from(activity)
+			.inflate(R.layout.list_item_connector_message, parent, false)
+		parent.addView(view)
+		activity.setContentView(parent)
+
+		var clickedUrl: String? = null
+		val holder = ConnectorConversationAdapter.MessageViewHolder(view).apply {
+			onLinkClicked = { clickedUrl = it }
+		}
+		val textItem = ConnectorConversationMessageItem(
+			connectorSource = ConnectorSources.MATRIX,
+			connectorThreadId = "!room:example.org",
+			connectorMessageId = "\$msg:example.org",
+			dateMillis = 1_000L,
+			isOutgoing = false,
+			localEchoStatus = null,
+			text = "https://matrix.org",
+			type = ConnectorMessageType.TEXT,
+		)
+		holder.bind(textItem)
+
+		activity.window.decorView.measure(
+			View.MeasureSpec.makeMeasureSpec(1000, View.MeasureSpec.EXACTLY),
+			View.MeasureSpec.makeMeasureSpec(500, View.MeasureSpec.EXACTLY),
+		)
+		activity.window.decorView.layout(0, 0, 1000, 500)
+
+		val text = view.findViewById<TextView>(R.id.connectorMessageText)
+		val x = (text.left + 10).toFloat()
+		val y = (text.top + 10).toFloat()
+		val down = MotionEvent.obtain(20, 20, MotionEvent.ACTION_DOWN, x, y, 0)
+		val up = MotionEvent.obtain(20, 70, MotionEvent.ACTION_UP, x, y, 0)
+
+		view.dispatchTouchEvent(down)
+		view.dispatchTouchEvent(up)
+		shadowOf(Looper.getMainLooper()).idle()
+
+		assertEquals("https://matrix.org", clickedUrl)
 	}
 }

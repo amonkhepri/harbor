@@ -24,6 +24,7 @@ internal class ConnectorConversationAdapter(
 	/** True when the own-message action opens the edit dialog for text rows (MX-058). */
 	var editsOwnText: Boolean = false,
 	var onReactClicked: ((ConnectorConversationMessageItem) -> Unit)? = null,
+	var onLinkClicked: ((String) -> Unit)? = null,
 ) : ListAdapter<
 	ConnectorConversationMessageItem,
 	ConnectorConversationAdapter.MessageViewHolder,
@@ -44,10 +45,13 @@ internal class ConnectorConversationAdapter(
 			onReplyClicked,
 			editsOwnText,
 			onReactClicked,
-		)
+		).apply {
+			onLinkClicked = this@ConnectorConversationAdapter.onLinkClicked
+		}
 	}
 
 	override fun onBindViewHolder(holder: MessageViewHolder, position: Int) {
+		holder.onLinkClicked = onLinkClicked
 		holder.bind(getItem(position))
 	}
 
@@ -68,6 +72,7 @@ internal class ConnectorConversationAdapter(
 	) : RecyclerView.ViewHolder(itemView) {
 		constructor(itemView: View, onDeleteClicked: ((ConnectorConversationMessageItem) -> Unit)?) :
 			this(itemView, onDeleteClicked, null, null, null, null, false, null)
+		var onLinkClicked: ((String) -> Unit)? = null
 		private val text: TextView =
 			itemView.findViewById(R.id.connectorMessageText)
 		private val thumbnail: ImageView =
@@ -254,7 +259,7 @@ internal class ConnectorConversationAdapter(
 				text.visibility = View.VISIBLE
 			}
 			if (item.type == ConnectorMessageType.TEXT) {
-				ConnectorMessageLinks.linkify(text)
+				ConnectorMessageLinks.linkify(text, onLinkClicked)
 			} else {
 				text.movementMethod = null
 				text.isFocusable = false
