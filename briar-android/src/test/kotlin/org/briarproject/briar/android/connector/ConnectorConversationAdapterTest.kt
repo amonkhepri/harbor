@@ -1,6 +1,8 @@
 package org.briarproject.briar.android.connector
 
 import android.app.Application
+import android.text.Spannable
+import android.text.style.URLSpan
 import android.view.LayoutInflater
 import android.view.View
 import android.widget.FrameLayout
@@ -16,6 +18,7 @@ import org.briarproject.briar.api.connector.ConnectorReactionSummary
 import org.briarproject.briar.api.connector.ConnectorSources
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -745,7 +748,10 @@ class ConnectorConversationAdapterTest {
 
 		// 1. Unknown receipt state renders Outgoing
 		holder.bind(baseItem.copy(receiptState = ConnectorMessageReceiptState.UNKNOWN))
-		assertEquals(context.getString(R.string.connector_conversation_direction_outgoing), direction.text.toString())
+		assertEquals(
+			context.getString(R.string.connector_conversation_direction_outgoing),
+			direction.text.toString(),
+		)
 
 		// 2. Unread receipt state renders Unread
 		holder.bind(baseItem.copy(receiptState = ConnectorMessageReceiptState.UNREAD))
@@ -757,10 +763,144 @@ class ConnectorConversationAdapterTest {
 
 		// 4. Incoming message always renders Incoming
 		holder.bind(baseItem.copy(isOutgoing = false, receiptState = ConnectorMessageReceiptState.READ))
-		assertEquals(context.getString(R.string.connector_conversation_direction_incoming), direction.text.toString())
+		assertEquals(
+			context.getString(R.string.connector_conversation_direction_incoming),
+			direction.text.toString(),
+		)
 
 		// 5. Local echo status takes priority over receipt state
-		holder.bind(baseItem.copy(localEchoStatus = PENDING, receiptState = ConnectorMessageReceiptState.READ))
+		holder.bind(
+			baseItem.copy(localEchoStatus = PENDING, receiptState = ConnectorMessageReceiptState.READ),
+		)
 		assertEquals(context.getString(R.string.connector_message_sending), direction.text.toString())
+	}
+
+	@Test
+	fun testTextMessageWithWebLinksIsLinkified() {
+		val context = RuntimeEnvironment.getApplication()
+		val view = LayoutInflater.from(context)
+			.inflate(R.layout.list_item_connector_message, null)
+		val holder = ConnectorConversationAdapter.MessageViewHolder(view)
+		val text = view.findViewById<TextView>(R.id.connectorMessageText)
+
+		val item = ConnectorConversationMessageItem(
+			connectorSource = ConnectorSources.MATRIX,
+			connectorThreadId = "!room:example.org",
+			connectorMessageId = "\$msg:example.org",
+			dateMillis = 1_000L,
+			isOutgoing = false,
+			text = "Check out https://matrix.org for details",
+			type = ConnectorMessageType.TEXT,
+		)
+		holder.bind(item)
+
+		val spannable = text.text as? Spannable
+		assertNotNull("Text should be Spannable", spannable)
+		val spans = spannable!!.getSpans(0, spannable.length, URLSpan::class.java)
+		assertEquals(1, spans.size)
+		assertEquals("https://matrix.org", spans[0].url)
+		assertNotNull("MovementMethod should be active for linked text", text.movementMethod)
+	}
+
+	@Test
+	fun testTextMessageWithoutWebLinksHasNoSpansOrMovementMethod() {
+		val context = RuntimeEnvironment.getApplication()
+		val view = LayoutInflater.from(context)
+			.inflate(R.layout.list_item_connector_message, null)
+		val holder = ConnectorConversationAdapter.MessageViewHolder(view)
+		val text = view.findViewById<TextView>(R.id.connectorMessageText)
+
+		val item = ConnectorConversationMessageItem(
+			connectorSource = ConnectorSources.MATRIX,
+			connectorThreadId = "!room:example.org",
+			connectorMessageId = "\$msg:example.org",
+			dateMillis = 1_000L,
+			isOutgoing = false,
+			text = "Plain message without links",
+			type = ConnectorMessageType.TEXT,
+		)
+		holder.bind(item)
+
+		val spannable = text.text as? Spannable
+		val spans = spannable?.getSpans(0, spannable.length, URLSpan::class.java) ?: emptyArray()
+		assertEquals(0, spans.size)
+		assertNull("MovementMethod should be null for plain text", text.movementMethod)
+	}
+
+	@Test
+	fun testRecycledViewHolderResetsLinksOnNonTextMessage() {
+		val context = RuntimeEnvironment.getApplication()
+		val view = LayoutInflater.from(context)
+			.inflate(R.layout.list_item_connector_message, null)
+		val holder = ConnectorConversationAdapter.MessageViewHolder(view)
+		val text = view.findViewById<TextView>(R.id.connectorMessageText)
+
+		val textItem = ConnectorConversationMessageItem(
+			connectorSource = ConnectorSources.MATRIX,
+			connectorThreadId = "!room:example.org",
+			connectorMessageId = "\$msg1:example.org",
+			dateMillis = 1_000L,
+			isOutgoing = false,
+			text = "Check https://matrix.org",
+			type = ConnectorMessageType.TEXT,
+		)
+		holder.bind(textItem)
+		assertNotNull(text.movementMethod)
+
+		holder.recycle()
+		assertNull(text.movementMethod)
+
+		val photoItem = textItem.copy(
+			connectorMessageId = "\$msg2:example.org",
+			type = ConnectorMessageType.PHOTO,
+			attachment = ConnectorAttachmentMetadata(
+				uri = "content://media/photo",
+				fileName = "test.png",
+				size = 1024L,
+				mimeType = "image/png",
+			),
+		)
+		holder.bind(photoItem)
+		assertNull("MovementMethod should be null for photo item", text.movementMethod)
+	}
+
+	@Test
+	fun testTextMessageWithLinkPreservesLongPressAndFailedRetryClick() {
+		val context = RuntimeEnvironment.getApplication()
+		val parent = FrameLayout(context)
+		val view = LayoutInflater.from(context)
+			.inflate(R.layout.list_item_connector_message, parent, false)
+		parent.addView(view)
+
+		var retryItem: ConnectorConversationMessageItem? = null
+		var deletedItem: ConnectorConversationMessageItem? = null
+		val holder = ConnectorConversationAdapter.MessageViewHolder(
+			itemView = view,
+			onDeleteClicked = { deletedItem = it },
+			onRetrySendClicked = { retryItem = it },
+		)
+
+		val failedItem = ConnectorConversationMessageItem(
+			connectorSource = ConnectorSources.MATRIX,
+			connectorThreadId = "!room:example.org",
+			connectorMessageId = "\$msg:example.org",
+			dateMillis = 1_000L,
+			isOutgoing = true,
+			localEchoStatus = FAILED,
+			text = "Failed send with link https://matrix.org",
+			type = ConnectorMessageType.TEXT,
+		)
+		holder.bind(failedItem)
+
+		// Failed send retry click works
+		assertTrue(view.performClick())
+		assertEquals(failedItem, retryItem)
+
+		val sentItem = failedItem.copy(localEchoStatus = null)
+		holder.bind(sentItem)
+
+		// Delete / message action long-press works on sent message with link
+		assertTrue(view.performLongClick())
+		assertEquals(sentItem, deletedItem)
 	}
 }

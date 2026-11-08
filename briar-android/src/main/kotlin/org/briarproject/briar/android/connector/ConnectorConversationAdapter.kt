@@ -94,6 +94,11 @@ internal class ConnectorConversationAdapter(
 			boundMessageId = null
 			thumbnail.setImageDrawable(null)
 			thumbnail.visibility = View.GONE
+			text.movementMethod = null
+			text.isFocusable = false
+			text.isClickable = false
+			text.isLongClickable = false
+			text.setOnLongClickListener(null)
 		}
 
 		fun bind(item: ConnectorConversationMessageItem) {
@@ -247,6 +252,16 @@ internal class ConnectorConversationAdapter(
 					)
 				}
 				text.visibility = View.VISIBLE
+			}
+			if (item.type == ConnectorMessageType.TEXT) {
+				ConnectorMessageLinks.linkify(text)
+				text.setOnLongClickListener { itemView.performLongClick() }
+			} else {
+				text.movementMethod = null
+				text.isFocusable = false
+				text.isClickable = false
+				text.isLongClickable = false
+				text.setOnLongClickListener(null)
 			}
 			direction.setText(
 				when (item.localEchoStatus) {
