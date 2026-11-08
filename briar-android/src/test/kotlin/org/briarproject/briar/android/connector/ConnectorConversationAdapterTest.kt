@@ -1,14 +1,22 @@
 package org.briarproject.briar.android.connector
 
+import android.app.Activity
 import android.app.Application
+import android.os.Looper
+import android.text.Spannable
+import android.text.style.URLSpan
 import android.view.LayoutInflater
+import android.view.MotionEvent
 import android.view.View
+import android.view.ViewConfiguration
 import android.widget.FrameLayout
 import android.widget.TextView
+import androidx.fragment.app.FragmentActivity
 import org.briarproject.briar.R
 import org.briarproject.briar.android.connector.ConnectorLocalEchoStatus.FAILED
 import org.briarproject.briar.android.connector.ConnectorLocalEchoStatus.PENDING
 import org.briarproject.briar.android.connector.ConnectorLocalEchoStatus.SENT
+import org.briarproject.briar.android.widget.LinkDialogFragment
 import org.briarproject.briar.api.connector.ConnectorAttachmentMetadata
 import org.briarproject.briar.api.connector.ConnectorMessageReceiptState
 import org.briarproject.briar.api.connector.ConnectorMessageType
@@ -16,13 +24,17 @@ import org.briarproject.briar.api.connector.ConnectorReactionSummary
 import org.briarproject.briar.api.connector.ConnectorSources
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
+import java.time.Duration
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [21], application = Application::class)
@@ -745,7 +757,10 @@ class ConnectorConversationAdapterTest {
 
 		// 1. Unknown receipt state renders Outgoing
 		holder.bind(baseItem.copy(receiptState = ConnectorMessageReceiptState.UNKNOWN))
-		assertEquals(context.getString(R.string.connector_conversation_direction_outgoing), direction.text.toString())
+		assertEquals(
+			context.getString(R.string.connector_conversation_direction_outgoing),
+			direction.text.toString(),
+		)
 
 		// 2. Unread receipt state renders Unread
 		holder.bind(baseItem.copy(receiptState = ConnectorMessageReceiptState.UNREAD))
@@ -757,10 +772,377 @@ class ConnectorConversationAdapterTest {
 
 		// 4. Incoming message always renders Incoming
 		holder.bind(baseItem.copy(isOutgoing = false, receiptState = ConnectorMessageReceiptState.READ))
-		assertEquals(context.getString(R.string.connector_conversation_direction_incoming), direction.text.toString())
+		assertEquals(
+			context.getString(R.string.connector_conversation_direction_incoming),
+			direction.text.toString(),
+		)
 
 		// 5. Local echo status takes priority over receipt state
-		holder.bind(baseItem.copy(localEchoStatus = PENDING, receiptState = ConnectorMessageReceiptState.READ))
+		holder.bind(
+			baseItem.copy(localEchoStatus = PENDING, receiptState = ConnectorMessageReceiptState.READ),
+		)
 		assertEquals(context.getString(R.string.connector_message_sending), direction.text.toString())
+	}
+
+	@Test
+	fun testTextMessageWithWebLinksIsLinkified() {
+		val context = RuntimeEnvironment.getApplication()
+		val view = LayoutInflater.from(context)
+			.inflate(R.layout.list_item_connector_message, null)
+		val holder = ConnectorConversationAdapter.MessageViewHolder(view)
+		val text = view.findViewById<TextView>(R.id.connectorMessageText)
+
+		val item = ConnectorConversationMessageItem(
+			connectorSource = ConnectorSources.MATRIX,
+			connectorThreadId = "!room:example.org",
+			connectorMessageId = "\$msg:example.org",
+			dateMillis = 1_000L,
+			isOutgoing = false,
+			text = "Check out https://matrix.org for details",
+			type = ConnectorMessageType.TEXT,
+		)
+		holder.bind(item)
+
+		val spannable = text.text as? Spannable
+		assertNotNull("Text should be Spannable", spannable)
+		val spans = spannable!!.getSpans(0, spannable.length, URLSpan::class.java)
+		assertEquals(1, spans.size)
+		assertEquals("https://matrix.org", spans[0].url)
+		assertNotNull("MovementMethod should be active for linked text", text.movementMethod)
+	}
+
+	@Test
+	fun testTextMessageWithoutWebLinksHasNoSpansOrMovementMethod() {
+		val context = RuntimeEnvironment.getApplication()
+		val view = LayoutInflater.from(context)
+			.inflate(R.layout.list_item_connector_message, null)
+		val holder = ConnectorConversationAdapter.MessageViewHolder(view)
+		val text = view.findViewById<TextView>(R.id.connectorMessageText)
+
+		val item = ConnectorConversationMessageItem(
+			connectorSource = ConnectorSources.MATRIX,
+			connectorThreadId = "!room:example.org",
+			connectorMessageId = "\$msg:example.org",
+			dateMillis = 1_000L,
+			isOutgoing = false,
+			text = "Plain message without links",
+			type = ConnectorMessageType.TEXT,
+		)
+		holder.bind(item)
+
+		val spannable = text.text as? Spannable
+		val spans = spannable?.getSpans(0, spannable.length, URLSpan::class.java) ?: emptyArray()
+		assertEquals(0, spans.size)
+		assertNull("MovementMethod should be null for plain text", text.movementMethod)
+	}
+
+	@Test
+	fun testRecycledViewHolderResetsLinksOnNonTextMessage() {
+		val context = RuntimeEnvironment.getApplication()
+		val view = LayoutInflater.from(context)
+			.inflate(R.layout.list_item_connector_message, null)
+		val holder = ConnectorConversationAdapter.MessageViewHolder(view)
+		val text = view.findViewById<TextView>(R.id.connectorMessageText)
+
+		val textItem = ConnectorConversationMessageItem(
+			connectorSource = ConnectorSources.MATRIX,
+			connectorThreadId = "!room:example.org",
+			connectorMessageId = "\$msg1:example.org",
+			dateMillis = 1_000L,
+			isOutgoing = false,
+			text = "Check https://matrix.org",
+			type = ConnectorMessageType.TEXT,
+		)
+		holder.bind(textItem)
+		assertNotNull(text.movementMethod)
+
+		holder.recycle()
+		assertNull(text.movementMethod)
+
+		val photoItem = textItem.copy(
+			connectorMessageId = "\$msg2:example.org",
+			type = ConnectorMessageType.PHOTO,
+			attachment = ConnectorAttachmentMetadata(
+				uri = "content://media/photo",
+				fileName = "test.png",
+				size = 1024L,
+				mimeType = "image/png",
+			),
+		)
+		holder.bind(photoItem)
+		assertNull("MovementMethod should be null for photo item", text.movementMethod)
+	}
+
+	@Test
+	fun testTextMessageWithLinkPreservesLongPressAndFailedRetryClick() {
+		val context = RuntimeEnvironment.getApplication()
+		val parent = FrameLayout(context)
+		val view = LayoutInflater.from(context)
+			.inflate(R.layout.list_item_connector_message, parent, false)
+		parent.addView(view)
+
+		var retryItem: ConnectorConversationMessageItem? = null
+		var deletedItem: ConnectorConversationMessageItem? = null
+		val holder = ConnectorConversationAdapter.MessageViewHolder(
+			itemView = view,
+			onDeleteClicked = { deletedItem = it },
+			onRetrySendClicked = { retryItem = it },
+		)
+
+		val failedItem = ConnectorConversationMessageItem(
+			connectorSource = ConnectorSources.MATRIX,
+			connectorThreadId = "!room:example.org",
+			connectorMessageId = "\$msg:example.org",
+			dateMillis = 1_000L,
+			isOutgoing = true,
+			localEchoStatus = FAILED,
+			text = "Failed send with link https://matrix.org",
+			type = ConnectorMessageType.TEXT,
+		)
+		holder.bind(failedItem)
+
+		// Failed send retry click works
+		assertTrue(view.performClick())
+		assertEquals(failedItem, retryItem)
+
+		val sentItem = failedItem.copy(localEchoStatus = null)
+		holder.bind(sentItem)
+
+		// Delete / message action long-press works on sent message with link
+		assertTrue(view.performLongClick())
+		assertEquals(sentItem, deletedItem)
+	}
+
+	@Test
+	fun testFailedMessageTouchDispatchesRetryClickViaTextTouch() {
+		val activity = Robolectric.buildActivity(Activity::class.java).setup().get()
+		val parent = FrameLayout(activity)
+		val view = LayoutInflater.from(activity)
+			.inflate(R.layout.list_item_connector_message, parent, false)
+		parent.addView(view)
+		activity.setContentView(parent)
+
+		var retryItem: ConnectorConversationMessageItem? = null
+		val holder = ConnectorConversationAdapter.MessageViewHolder(
+			itemView = view,
+			onRetrySendClicked = { retryItem = it },
+		)
+
+		val failedItem = ConnectorConversationMessageItem(
+			connectorSource = ConnectorSources.MATRIX,
+			connectorThreadId = "!room:example.org",
+			connectorMessageId = "\$msg:example.org",
+			dateMillis = 1_000L,
+			isOutgoing = true,
+			localEchoStatus = FAILED,
+			text = "Plain failed send body without links",
+			type = ConnectorMessageType.TEXT,
+		)
+		holder.bind(failedItem)
+
+		activity.window.decorView.measure(
+			View.MeasureSpec.makeMeasureSpec(1000, View.MeasureSpec.EXACTLY),
+			View.MeasureSpec.makeMeasureSpec(500, View.MeasureSpec.EXACTLY),
+		)
+		activity.window.decorView.layout(0, 0, 1000, 500)
+
+		val text = view.findViewById<TextView>(R.id.connectorMessageText)
+		assertTrue(text.width > 0 && text.height > 0)
+
+		val x = (text.left + 10).toFloat()
+		val y = (text.top + 10).toFloat()
+		val down = MotionEvent.obtain(0, 0, MotionEvent.ACTION_DOWN, x, y, 0)
+		val up = MotionEvent.obtain(0, 50, MotionEvent.ACTION_UP, x, y, 0)
+
+		view.dispatchTouchEvent(down)
+		view.dispatchTouchEvent(up)
+		shadowOf(Looper.getMainLooper()).idle()
+
+		assertEquals(failedItem, retryItem)
+	}
+
+	@Test
+	fun testFailedMessageWithLinkTouchOutsideLinkDispatchesRetryClick() {
+		val activity = Robolectric.buildActivity(Activity::class.java).setup().get()
+		val parent = FrameLayout(activity)
+		val view = LayoutInflater.from(activity)
+			.inflate(R.layout.list_item_connector_message, parent, false)
+		parent.addView(view)
+		activity.setContentView(parent)
+
+		var retryItem: ConnectorConversationMessageItem? = null
+		val holder = ConnectorConversationAdapter.MessageViewHolder(
+			itemView = view,
+			onRetrySendClicked = { retryItem = it },
+		)
+
+		val failedItem = ConnectorConversationMessageItem(
+			connectorSource = ConnectorSources.MATRIX,
+			connectorThreadId = "!room:example.org",
+			connectorMessageId = "\$msg:example.org",
+			dateMillis = 1_000L,
+			isOutgoing = true,
+			localEchoStatus = FAILED,
+			text = "https://matrix.org failed message body with text at end",
+			type = ConnectorMessageType.TEXT,
+		)
+		holder.bind(failedItem)
+
+		activity.window.decorView.measure(
+			View.MeasureSpec.makeMeasureSpec(1000, View.MeasureSpec.EXACTLY),
+			View.MeasureSpec.makeMeasureSpec(500, View.MeasureSpec.EXACTLY),
+		)
+		activity.window.decorView.layout(0, 0, 1000, 500)
+
+		val text = view.findViewById<TextView>(R.id.connectorMessageText)
+		val x = (text.right - 20).toFloat()
+		val y = (text.top + 10).toFloat()
+		val down = MotionEvent.obtain(100, 100, MotionEvent.ACTION_DOWN, x, y, 0)
+		val up = MotionEvent.obtain(100, 150, MotionEvent.ACTION_UP, x, y, 0)
+
+		view.dispatchTouchEvent(down)
+		view.dispatchTouchEvent(up)
+		shadowOf(Looper.getMainLooper()).idle()
+
+		assertEquals(failedItem, retryItem)
+	}
+
+	@Test
+	fun testTextMessageTouchDispatchesLongPressToActionMenu() {
+		val activity = Robolectric.buildActivity(Activity::class.java).setup().get()
+		val parent = FrameLayout(activity)
+		val view = LayoutInflater.from(activity)
+			.inflate(R.layout.list_item_connector_message, parent, false)
+		parent.addView(view)
+		activity.setContentView(parent)
+
+		var deletedItem: ConnectorConversationMessageItem? = null
+		val holder = ConnectorConversationAdapter.MessageViewHolder(
+			itemView = view,
+			onDeleteClicked = { deletedItem = it },
+		)
+
+		val sentItem = ConnectorConversationMessageItem(
+			connectorSource = ConnectorSources.MATRIX,
+			connectorThreadId = "!room:example.org",
+			connectorMessageId = "\$msg:example.org",
+			dateMillis = 1_000L,
+			isOutgoing = true,
+			localEchoStatus = null,
+			text = "Plain sent message without links",
+			type = ConnectorMessageType.TEXT,
+		)
+		holder.bind(sentItem)
+
+		activity.window.decorView.measure(
+			View.MeasureSpec.makeMeasureSpec(1000, View.MeasureSpec.EXACTLY),
+			View.MeasureSpec.makeMeasureSpec(500, View.MeasureSpec.EXACTLY),
+		)
+		activity.window.decorView.layout(0, 0, 1000, 500)
+
+		val text = view.findViewById<TextView>(R.id.connectorMessageText)
+		val x = (text.left + 10).toFloat()
+		val y = (text.top + 10).toFloat()
+		val down = MotionEvent.obtain(200, 200, MotionEvent.ACTION_DOWN, x, y, 0)
+		view.dispatchTouchEvent(down)
+
+		shadowOf(Looper.getMainLooper()).idleFor(
+			Duration.ofMillis(ViewConfiguration.getLongPressTimeout().toLong() + 100),
+		)
+
+		val up = MotionEvent.obtain(200, 800, MotionEvent.ACTION_UP, x, y, 0)
+		view.dispatchTouchEvent(up)
+		shadowOf(Looper.getMainLooper()).idle()
+
+		assertEquals(sentItem, deletedItem)
+	}
+
+	@Test
+	fun testTextMessageLinkTapShowsLinkDialogFragmentByDefault() {
+		val activity = Robolectric.buildActivity(FragmentActivity::class.java).setup().get()
+		val parent = FrameLayout(activity)
+		val view = LayoutInflater.from(activity)
+			.inflate(R.layout.list_item_connector_message, parent, false)
+		parent.addView(view)
+		activity.setContentView(parent)
+
+		val holder = ConnectorConversationAdapter.MessageViewHolder(view)
+		val textItem = ConnectorConversationMessageItem(
+			connectorSource = ConnectorSources.MATRIX,
+			connectorThreadId = "!room:example.org",
+			connectorMessageId = "\$msg:example.org",
+			dateMillis = 1_000L,
+			isOutgoing = false,
+			localEchoStatus = null,
+			text = "https://matrix.org",
+			type = ConnectorMessageType.TEXT,
+		)
+		holder.bind(textItem)
+
+		activity.window.decorView.measure(
+			View.MeasureSpec.makeMeasureSpec(1000, View.MeasureSpec.EXACTLY),
+			View.MeasureSpec.makeMeasureSpec(500, View.MeasureSpec.EXACTLY),
+		)
+		activity.window.decorView.layout(0, 0, 1000, 500)
+
+		val text = view.findViewById<TextView>(R.id.connectorMessageText)
+		val x = (text.left + 10).toFloat()
+		val y = (text.top + 10).toFloat()
+		val down = MotionEvent.obtain(10, 10, MotionEvent.ACTION_DOWN, x, y, 0)
+		val up = MotionEvent.obtain(10, 60, MotionEvent.ACTION_UP, x, y, 0)
+
+		view.dispatchTouchEvent(down)
+		view.dispatchTouchEvent(up)
+		shadowOf(Looper.getMainLooper()).idle()
+		activity.supportFragmentManager.executePendingTransactions()
+
+		val tag = LinkDialogFragment.newInstance("https://matrix.org").uniqueTag
+		val dialog = activity.supportFragmentManager.findFragmentByTag(tag)
+		assertNotNull("LinkDialogFragment should be displayed", dialog)
+		assertTrue(dialog is LinkDialogFragment)
+	}
+
+	@Test
+	fun testTextMessageLinkTapDispatchesCustomOnLinkClicked() {
+		val activity = Robolectric.buildActivity(FragmentActivity::class.java).setup().get()
+		val parent = FrameLayout(activity)
+		val view = LayoutInflater.from(activity)
+			.inflate(R.layout.list_item_connector_message, parent, false)
+		parent.addView(view)
+		activity.setContentView(parent)
+
+		var clickedUrl: String? = null
+		val holder = ConnectorConversationAdapter.MessageViewHolder(view).apply {
+			onLinkClicked = { clickedUrl = it }
+		}
+		val textItem = ConnectorConversationMessageItem(
+			connectorSource = ConnectorSources.MATRIX,
+			connectorThreadId = "!room:example.org",
+			connectorMessageId = "\$msg:example.org",
+			dateMillis = 1_000L,
+			isOutgoing = false,
+			localEchoStatus = null,
+			text = "https://matrix.org",
+			type = ConnectorMessageType.TEXT,
+		)
+		holder.bind(textItem)
+
+		activity.window.decorView.measure(
+			View.MeasureSpec.makeMeasureSpec(1000, View.MeasureSpec.EXACTLY),
+			View.MeasureSpec.makeMeasureSpec(500, View.MeasureSpec.EXACTLY),
+		)
+		activity.window.decorView.layout(0, 0, 1000, 500)
+
+		val text = view.findViewById<TextView>(R.id.connectorMessageText)
+		val x = (text.left + 10).toFloat()
+		val y = (text.top + 10).toFloat()
+		val down = MotionEvent.obtain(20, 20, MotionEvent.ACTION_DOWN, x, y, 0)
+		val up = MotionEvent.obtain(20, 70, MotionEvent.ACTION_UP, x, y, 0)
+
+		view.dispatchTouchEvent(down)
+		view.dispatchTouchEvent(up)
+		shadowOf(Looper.getMainLooper()).idle()
+
+		assertEquals("https://matrix.org", clickedUrl)
 	}
 }
