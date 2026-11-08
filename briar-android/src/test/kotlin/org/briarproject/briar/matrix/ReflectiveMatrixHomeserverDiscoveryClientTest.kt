@@ -392,6 +392,8 @@ class ReflectiveMatrixHomeserverDiscoveryClientTest {
 		assertEquals(false, client.sendTextMessage("!invited:example.org", "hello"))
 		assertEquals(false, client.editTextMessage("!invited:example.org", "\$m1", "edited"))
 		assertEquals(false, client.deleteMessage("!invited:example.org", "\$m1"))
+		assertEquals(false, client.sendReaction("!invited:example.org", "\$m1", "👍"))
+		assertEquals(false, client.removeReaction("!invited:example.org", "\$m1", "👍"))
 		assertEquals(false, client.markRead("!invited:example.org"))
 		assertEquals(0, FakeMatrixSdkState.timelineCallCount)
 	}

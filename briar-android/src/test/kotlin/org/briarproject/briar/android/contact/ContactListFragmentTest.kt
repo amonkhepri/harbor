@@ -181,6 +181,23 @@ class ContactListFragmentTest {
 	}
 
 	@Test
+	fun testInvitedTelegramInboxItemReturnsNullConversationIntent() {
+		val item = FakeConnectorInboxThreadItem(
+			connectorSource = ConnectorSources.TELEGRAM,
+			connectorThreadId = "555",
+			title = "Telegram Chat",
+			isInvited = true,
+		)
+
+		val intent = ContactListFragment.createConnectorConversationIntent(
+			RuntimeEnvironment.getApplication(),
+			item,
+		)
+
+		assertNull(intent)
+	}
+
+	@Test
 	fun testInvitedItemClickDoesNotStartConversationActivity() {
 		val activity = Robolectric.buildActivity(TestActivity::class.java).setup().get()
 		val fragment = TestContactListFragment()

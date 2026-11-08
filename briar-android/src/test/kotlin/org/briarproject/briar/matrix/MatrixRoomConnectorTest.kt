@@ -442,6 +442,18 @@ class MatrixRoomConnectorTest {
 	}
 
 	@Test
+	fun `getRecentMessageReadResult for invited room returns load failed instead of empty success`() {
+		val connector = connector(
+			messageSnapshotClient = FakeMessageSnapshotClient(null),
+			authSession = FakeMatrixAuthSession(MatrixAuthState.READY),
+		)
+
+		val result = connector.getRecentMessageReadResult("!invited:example.org", 10)
+
+		assertEquals(LoadFailed, result)
+	}
+
+	@Test
 	fun `getRecentMessageReadResult maps receiptState from snapshot`() {
 		val messageSnapshotClient = FakeMessageSnapshotClient(
 			listOf(
