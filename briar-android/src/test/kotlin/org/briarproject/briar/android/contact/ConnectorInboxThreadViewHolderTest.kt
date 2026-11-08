@@ -138,6 +138,38 @@ class ConnectorInboxThreadViewHolderTest {
 		assertBadgeHidden(holder)
 	}
 
+	@Test
+	fun testInvitedItemRendersInvitationPreview() {
+		val holder = createHolder()
+		val previewView = holder.itemView.findViewById<TextView>(R.id.connectorThreadPreview)
+		val dateView = holder.itemView.findViewById<TextView>(R.id.connectorThreadDate)
+
+		holder.bind(FakeConnectorInboxThreadItem(isInvited = true, previewText = "")) { _, _ -> }
+		assertEquals("Invitation", previewView.text.toString())
+		assertEquals(android.view.View.GONE, dateView.visibility)
+		assertBadgeHidden(holder)
+
+		holder.bind(FakeConnectorInboxThreadItem(isInvited = true, previewText = "General Discussion")) { _, _ -> }
+		assertEquals("Invitation: General Discussion", previewView.text.toString())
+		assertEquals(android.view.View.GONE, dateView.visibility)
+		assertBadgeHidden(holder)
+	}
+
+	@Test
+	fun testRecycledRowClearsInvitationPreview() {
+		val holder = createHolder()
+		val previewView = holder.itemView.findViewById<TextView>(R.id.connectorThreadPreview)
+		val dateView = holder.itemView.findViewById<TextView>(R.id.connectorThreadDate)
+
+		holder.bind(FakeConnectorInboxThreadItem(isInvited = true)) { _, _ -> }
+		assertEquals("Invitation", previewView.text.toString())
+		assertEquals(android.view.View.GONE, dateView.visibility)
+
+		holder.bind(FakeConnectorInboxThreadItem(isInvited = false, previewText = "Regular message")) { _, _ -> }
+		assertEquals("Regular message", previewView.text.toString())
+		assertEquals(android.view.View.VISIBLE, dateView.visibility)
+	}
+
 	private fun createHolder(): ConnectorInboxThreadViewHolder {
 		RuntimeEnvironment.getApplication().setTheme(R.style.BriarTheme)
 		EmojiManager.install(GoogleEmojiProvider())

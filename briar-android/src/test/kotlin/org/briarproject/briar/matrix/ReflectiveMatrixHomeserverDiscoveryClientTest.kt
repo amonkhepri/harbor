@@ -331,6 +331,72 @@ class ReflectiveMatrixHomeserverDiscoveryClientTest {
 	}
 
 	@Test
+	fun `getInvitedRooms filters spaces and non-invited rooms, sorted by room id`() {
+		val client = newSessionClient()
+		client.login("https://matrix.example.org", "alice", "swordfish")
+		FakeMatrixSdkState.roomsToReturn = listOf(
+			FakeRoomSpec(
+				roomId = "!zzz:example.org",
+				displayName = "Zebra",
+				membership = Membership.INVITED,
+				topic = "Zebra Topic",
+			),
+			FakeRoomSpec(
+				roomId = "!aaa:example.org",
+				displayName = "Alpha",
+				membership = Membership.INVITED,
+			),
+			FakeRoomSpec(
+				roomId = "!space:example.org",
+				displayName = "A Space",
+				isSpace = true,
+				membership = Membership.INVITED,
+			),
+			FakeRoomSpec(roomId = "!joined:example.org", membership = Membership.JOINED),
+			FakeRoomSpec(roomId = "!left:example.org", membership = Membership.LEFT),
+		)
+
+		val result = client.getInvitedRooms(10)
+
+		assertEquals(
+			listOf("!aaa:example.org" to "Alpha", "!zzz:example.org" to "Zebra"),
+			result.map { it.roomId to it.displayName },
+		)
+		assertEquals(true, result[0].isInvited)
+		assertEquals(true, result[1].isInvited)
+		assertEquals(null, result[0].topic)
+		assertEquals("Zebra Topic", result[1].topic)
+		assertEquals(null, result[0].unreadCount)
+		assertEquals(null, result[1].unreadCount)
+		assertEquals(
+			"closes every room handle rooms() returns, not just the kept ones",
+			5,
+			FakeMatrixSdkState.roomCloseCount,
+		)
+	}
+
+	@Test
+	fun `timeline operations for invited room return safe failure without opening timeline`() {
+		val client = newSessionClient()
+		client.login("https://matrix.example.org", "alice", "swordfish")
+		FakeMatrixSdkState.roomsToReturn = listOf(
+			FakeRoomSpec(
+				roomId = "!invited:example.org",
+				displayName = "Invited Room",
+				membership = Membership.INVITED,
+			),
+		)
+
+		val messages = client.getRecentMessages("!invited:example.org", 10)
+		assertEquals(emptyList<Any>(), messages)
+		assertEquals(false, client.sendTextMessage("!invited:example.org", "hello"))
+		assertEquals(false, client.editTextMessage("!invited:example.org", "\$m1", "edited"))
+		assertEquals(false, client.deleteMessage("!invited:example.org", "\$m1"))
+		assertEquals(false, client.markRead("!invited:example.org"))
+		assertEquals(0, FakeMatrixSdkState.timelineCallCount)
+	}
+
+	@Test
 	fun `getJoinedRooms fails closed and closes every room after a runtime mapping mismatch`() {
 		val client = newSessionClient()
 		client.login("https://matrix.example.org", "alice", "swordfish")

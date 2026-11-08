@@ -148,7 +148,12 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 								}
 							}
 							val target = room
-							if (target == null || (typing && !wanted())) {
+							val targetMembership = try {
+								(target?.javaClass?.getMethod("membership")?.invoke(target) as? Enum<*>)?.name
+							} catch (e: Exception) {
+								null
+							}
+							if (target == null || targetMembership != "JOINED" || (typing && !wanted())) {
 								complete()
 							} else {
 								synchronized(lifecycleLock) {
@@ -697,6 +702,29 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 	}
 
 	@Synchronized
+	override fun getInvitedRooms(limit: Int): List<MatrixRoomSnapshot> {
+		val client = loginClient ?: return emptyList()
+		var rooms = emptyList<Any>()
+		return try {
+			@Suppress("UNCHECKED_CAST")
+			rooms = client.javaClass.getMethod("rooms").invoke(client) as List<Any>
+			rooms.mapNotNull(::toInvitedRoomSnapshot)
+				.sortedBy { it.roomId }
+				.take(limit.coerceAtLeast(0))
+		} catch (e: ClassCastException) {
+			emptyList()
+		} catch (e: InvocationTargetException) {
+			emptyList()
+		} catch (e: ReflectiveOperationException) {
+			emptyList()
+		} catch (e: LinkageError) {
+			emptyList()
+		} finally {
+			rooms.forEach(::closeQuietly)
+		}
+	}
+
+	@Synchronized
 	override fun getRoomTopic(roomId: String): String? {
 		val client = loginClient ?: return null
 		var room: Any? = null
@@ -725,6 +753,34 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 				?.takeIf { it.isNotEmpty() } ?: id
 			val (unreadCount, markedUnread) = readUnreadState(room)
 			MatrixRoomSnapshot(id, displayName, unreadCount, markedUnread, readTopic(room))
+		}
+	} catch (e: InvocationTargetException) {
+		null
+	} catch (e: ReflectiveOperationException) {
+		null
+	} catch (e: LinkageError) {
+		null
+	}
+
+	private fun toInvitedRoomSnapshot(room: Any): MatrixRoomSnapshot? = try {
+		val roomClass = room.javaClass
+		val isSpace = roomClass.getMethod("isSpace").invoke(room) as Boolean
+		val membership = roomClass.getMethod("membership").invoke(room)
+		val isInvited = (membership as? Enum<*>)?.name == "INVITED"
+		if (isSpace || !isInvited) {
+			null
+		} else {
+			val id = roomClass.getMethod("id").invoke(room) as String
+			val displayName = (roomClass.getMethod("displayName").invoke(room) as? String)
+				?.takeIf { it.isNotEmpty() } ?: id
+			MatrixRoomSnapshot(
+				roomId = id,
+				displayName = displayName,
+				unreadCount = null,
+				isMarkedUnread = null,
+				topic = readTopic(room),
+				isInvited = true,
+			)
 		}
 	} catch (e: InvocationTargetException) {
 		null
@@ -786,6 +842,10 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		return try {
 			room = client.javaClass.getMethod("getRoom", String::class.java).invoke(client, roomId)
 				?: throw SnapshotAdapterFailure()
+			val membership = room.javaClass.getMethod("membership").invoke(room) as? Enum<*>
+			if (membership?.name != "JOINED") {
+				return emptyList()
+			}
 			val loadedTimeline =
 				invokeCloseableValue(room, "timeline", emptyArray(), emptyArray(), ::closeQuietly)
 			timeline = loadedTimeline
@@ -850,6 +910,10 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		return try {
 			room = client.javaClass.getMethod("getRoom", String::class.java).invoke(client, roomId)
 				?: throw SnapshotAdapterFailure()
+			val membership = room.javaClass.getMethod("membership").invoke(room) as? Enum<*>
+			if (membership?.name != "JOINED") {
+				return false
+			}
 			val loadedTimeline =
 				invokeCloseableValue(room, "timeline", emptyArray(), emptyArray(), ::closeQuietly)
 			timeline = loadedTimeline
@@ -917,6 +981,10 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		return try {
 			room = client.javaClass.getMethod("getRoom", String::class.java).invoke(client, roomId)
 				?: throw SnapshotAdapterFailure()
+			val membership = room.javaClass.getMethod("membership").invoke(room) as? Enum<*>
+			if (membership?.name != "JOINED") {
+				return false
+			}
 			val loadedTimeline =
 				invokeCloseableValue(room, "timeline", emptyArray(), emptyArray(), ::closeQuietly)
 			timeline = loadedTimeline
@@ -1042,6 +1110,10 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		return try {
 			room = client.javaClass.getMethod("getRoom", String::class.java).invoke(client, roomId)
 				?: throw SnapshotAdapterFailure()
+			val membership = room.javaClass.getMethod("membership").invoke(room) as? Enum<*>
+			if (membership?.name != "JOINED") {
+				return false
+			}
 			if (!unread) {
 				val receiptTypeClass = Class.forName(RECEIPT_TYPE_CLASS_NAME)
 				val readReceiptType = receiptTypeClass.getField("READ_PRIVATE").get(null)
@@ -1070,6 +1142,10 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		return try {
 			room = client.javaClass.getMethod("getRoom", String::class.java).invoke(client, roomId)
 				?: throw SnapshotAdapterFailure()
+			val membership = room.javaClass.getMethod("membership").invoke(room) as? Enum<*>
+			if (membership?.name != "JOINED") {
+				return false
+			}
 			val loadedTimeline =
 				invokeCloseableValue(room, "timeline", emptyArray(), emptyArray(), ::closeQuietly)
 			timeline = loadedTimeline
@@ -1157,6 +1233,12 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 				client.javaClass.getMethod("getRoom", String::class.java).invoke(client, roomId)
 					?: throw SnapshotAdapterFailure()
 			room = loadedRoom
+			val membership = loadedRoom.javaClass.getMethod("membership").invoke(loadedRoom) as? Enum<*>
+			if (membership?.name != "JOINED") {
+				closeQuietly(loadedRoom)
+				inFlightReactions.remove(flightKey)
+				return false
+			}
 			val loadedTimeline =
 				invokeCloseableValue(loadedRoom, "timeline", emptyArray(), emptyArray(), ::closeQuietly)
 			timeline = loadedTimeline
@@ -1342,6 +1424,12 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 					client.javaClass.getMethod("getRoom", String::class.java).invoke(client, roomId)
 						?: throw SnapshotAdapterFailure()
 				)
+				val membership = loadedRoom.javaClass.getMethod("membership").invoke(loadedRoom) as? Enum<*>
+				if (membership?.name != "JOINED") {
+					closeQuietly(loadedRoom)
+					inFlightReactions.remove(flightKey)
+					return null
+				}
 				roomRef.set(loadedRoom)
 				val loadedTimeline = existingTimeline ?: (
 					invokeCloseableValue(loadedRoom, "timeline", emptyArray(), emptyArray(), ::closeQuietly)

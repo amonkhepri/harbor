@@ -35,7 +35,8 @@ class ConnectorInboxThreadViewHolder(view: View) : RecyclerView.ViewHolder(view)
 			sourceContentDescription(sourceIcon.resources, item)
 		badge.text = sourceLabel(item)
 		val unreadCount = item.unreadCount
-		if (item.connectorSource.id == ConnectorSources.MATRIX_ID &&
+		if (!item.isInvited &&
+			item.connectorSource.id == ConnectorSources.MATRIX_ID &&
 			unreadCount != null &&
 			unreadCount > 0
 		) {
@@ -43,7 +44,8 @@ class ConnectorInboxThreadViewHolder(view: View) : RecyclerView.ViewHolder(view)
 			unreadBadge.text = unreadText(unreadCount)
 			unreadBadge.contentDescription =
 				unreadContentDescription(unreadBadge.resources, unreadCount)
-		} else if (item.connectorSource.id == ConnectorSources.MATRIX_ID &&
+		} else if (!item.isInvited &&
+			item.connectorSource.id == ConnectorSources.MATRIX_ID &&
 			item.isMarkedUnread == true
 		) {
 			unreadBadge.visibility = View.VISIBLE
@@ -56,6 +58,15 @@ class ConnectorInboxThreadViewHolder(view: View) : RecyclerView.ViewHolder(view)
 			unreadBadge.contentDescription = null
 		}
 		preview.text = when {
+			item.isInvited ->
+				if (item.hasPreviewText() && item.previewText.isNotBlank()) {
+					preview.resources.getString(
+						R.string.connector_thread_invitation_with_topic,
+						previewText(preview.resources, item),
+					)
+				} else {
+					preview.resources.getString(R.string.connector_thread_invitation)
+				}
 			item.previewType == ConnectorMessageType.PHOTO ->
 				previewText(preview.resources, item, R.string.connector_message_photo)
 			item.previewType == ConnectorMessageType.FILE ->
@@ -135,11 +146,11 @@ class ConnectorInboxThreadViewHolder(view: View) : RecyclerView.ViewHolder(view)
 			)
 
 		fun dateVisibility(item: ConnectorInboxThreadItem): Int =
-			if (item.latestActivityMillis > 0) View.VISIBLE else View.GONE
+			if (!item.isInvited && item.latestActivityMillis > 0) View.VISIBLE else View.GONE
 
 		fun dateText(context: Context, item: ConnectorInboxThreadItem): CharSequence {
 			val latestActivityMillis = item.latestActivityMillis
-			if (latestActivityMillis <= 0) return ""
+			if (item.isInvited || latestActivityMillis <= 0) return ""
 			return formatDate(context, latestActivityMillis)
 		}
 

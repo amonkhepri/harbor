@@ -146,4 +146,35 @@ class GenericConnectorInboxThreadItemTest {
 		assertEquals(null, withoutCount.unreadCount)
 		assertEquals(null, withoutCount.isMarkedUnread)
 	}
+
+	@Test
+	fun testIsInvitedCarriesThroughFromConnectorThread() {
+		val invited = GenericConnectorInboxThreadItem(
+			ConnectorThread(
+				ConnectorSources.MATRIX,
+				"!room:matrix.example.org",
+				"Invited Room",
+				0,
+				"topic",
+				false,
+				ConnectorMessageType.TEXT,
+				isInvited = true,
+			),
+		)
+		assertEquals(true, invited.isInvited)
+
+		val notInvited = GenericConnectorInboxThreadItem(
+			ConnectorThread(
+				ConnectorSources.MATRIX,
+				"!room:matrix.example.org",
+				"Joined Room",
+				42,
+				"hello",
+				false,
+				ConnectorMessageType.TEXT,
+				isInvited = false,
+			),
+		)
+		assertEquals(false, notInvited.isInvited)
+	}
 }

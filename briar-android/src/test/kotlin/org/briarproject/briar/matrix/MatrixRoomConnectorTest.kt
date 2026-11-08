@@ -312,6 +312,77 @@ class MatrixRoomConnectorTest {
 	}
 
 	@Test
+	fun `getRecentThreads includes invitations with distinct invitation state without querying messages`() {
+		val roomSnapshotClient = FakeRoomSnapshotClient(
+			snapshots = listOf(MatrixRoomSnapshot("!joined:example.org", "Joined Room")),
+			invitedSnapshots = listOf(
+				MatrixRoomSnapshot(
+					"!invited:example.org",
+					"Invited Room",
+					topic = "Safe room topic",
+					isInvited = true,
+				),
+			),
+		)
+		val messageSnapshotClient = FakeMessageSnapshotClient(
+			listOf(
+				MatrixMessageSnapshot(
+					eventId = "\$m1:example.org",
+					senderId = "@alice:example.org",
+					bodyText = "Joined room latest message",
+					originServerTimestampSeconds = 100L,
+					isOutgoing = false,
+				),
+			),
+		)
+		val connector = connector(
+			roomSnapshotClient = roomSnapshotClient,
+			messageSnapshotClient = messageSnapshotClient,
+			authSession = FakeMatrixAuthSession(MatrixAuthState.READY),
+		)
+
+		val threads = connector.getRecentThreads(10)
+
+		assertEquals(2, threads.size)
+		val invitedThread = threads.first { it.threadId == "!invited:example.org" }
+		assertEquals("Invited Room", invitedThread.title)
+		assertEquals("Safe room topic", invitedThread.latestMessageText)
+		assertEquals(0, invitedThread.latestActivityDateSeconds)
+		assertEquals(true, invitedThread.isInvited)
+		assertEquals(null, invitedThread.unreadCount)
+		assertEquals(null, invitedThread.isMarkedUnread)
+		assertEquals("Safe room topic", invitedThread.topic)
+
+		val joinedThread = threads.first { it.threadId == "!joined:example.org" }
+		assertEquals(false, joinedThread.isInvited)
+		assertEquals("Joined room latest message", joinedThread.latestMessageText)
+		assertEquals(100, joinedThread.latestActivityDateSeconds)
+
+		// Message reading was queried for joined room, but not for invited room
+		assertEquals("!joined:example.org", messageSnapshotClient.lastRequestedRoomId)
+	}
+
+	@Test
+	fun `getRecentThreads deduplicates invitations if reported in both joined and invited`() {
+		val roomSnapshotClient = FakeRoomSnapshotClient(
+			snapshots = listOf(MatrixRoomSnapshot("!room:example.org", "Joined Version")),
+			invitedSnapshots = listOf(
+				MatrixRoomSnapshot("!room:example.org", "Invited Version", isInvited = true),
+			),
+		)
+		val connector = connector(
+			roomSnapshotClient = roomSnapshotClient,
+			messageSnapshotClient = FakeMessageSnapshotClient(emptyList()),
+			authSession = FakeMatrixAuthSession(MatrixAuthState.READY),
+		)
+
+		val threads = connector.getRecentThreads(10)
+
+		assertEquals(1, threads.size)
+		assertEquals("!room:example.org", threads.single().threadId)
+	}
+
+	@Test
 	fun `getRecentMessageReadResult maps snapshots to connector-neutral messages`() {
 		val messageSnapshotClient = FakeMessageSnapshotClient(
 			listOf(
@@ -722,17 +793,26 @@ class MatrixRoomConnectorTest {
 		recentThreadsBudgetMs,
 	)
 
-	private class FakeRoomSnapshotClient(private val snapshots: List<MatrixRoomSnapshot>) :
-		MatrixRoomSnapshotClient {
+	private class FakeRoomSnapshotClient(
+		private val snapshots: List<MatrixRoomSnapshot>,
+		private val invitedSnapshots: List<MatrixRoomSnapshot> = emptyList(),
+	) : MatrixRoomSnapshotClient {
 		override fun getRoomTopic(roomId: String): String? =
-			snapshots.firstOrNull { it.roomId == roomId }?.topic
+			(snapshots + invitedSnapshots).firstOrNull { it.roomId == roomId }?.topic
 
 		var lastRequestedLimit: Int? = null
+			private set
+		var lastRequestedInvitedLimit: Int? = null
 			private set
 
 		override fun getJoinedRooms(limit: Int): List<MatrixRoomSnapshot> {
 			lastRequestedLimit = limit
 			return snapshots
+		}
+
+		override fun getInvitedRooms(limit: Int): List<MatrixRoomSnapshot> {
+			lastRequestedInvitedLimit = limit
+			return invitedSnapshots
 		}
 	}
 

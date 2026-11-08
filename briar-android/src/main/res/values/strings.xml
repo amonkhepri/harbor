@@ -145,6 +145,8 @@
 	<string name="connector_thread_title_fallback">Chat</string>
 	<string name="connector_thread_preview_empty">No recent text</string>
 	<string name="connector_thread_preview_outgoing">Outgoing: %1$s</string>
+	<string name="connector_thread_invitation">Invitation</string>
+	<string name="connector_thread_invitation_with_topic">Invitation: %1$s</string>
 	<plurals name="connector_thread_unread_messages">
 		<item quantity="one">%d unread message</item>
 		<item quantity="other">%d unread messages</item>

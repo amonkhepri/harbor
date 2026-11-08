@@ -98,7 +98,10 @@ class MatrixRoomConnector @JvmOverloads constructor(
 		// No bounded SDK refresh exists using the verified sdk-android 26.08.05 call sequence.
 		// Stopping here for scope splitting instead of inventing Fake/V2 Sync APIs.
 		val deadlineMs = clock.currentTimeMillis() + recentThreadsBudgetMs
-		return roomSnapshotClient.getJoinedRooms(limit).map { snapshot ->
+		val joinedSnapshots = roomSnapshotClient.getJoinedRooms(limit)
+		val invitedSnapshots = roomSnapshotClient.getInvitedRooms(limit)
+
+		val joinedThreads = joinedSnapshots.map { snapshot ->
 			val latest = if (clock.currentTimeMillis() < deadlineMs) {
 				messageSnapshotClient.getRecentMessages(snapshot.roomId, 1)?.lastOrNull()
 			} else {
@@ -117,8 +120,35 @@ class MatrixRoomConnector @JvmOverloads constructor(
 				unreadCount = snapshot.unreadCount,
 				isMarkedUnread = snapshot.isMarkedUnread,
 				topic = snapshot.topic,
+				isInvited = false,
 			)
 		}
+
+		val invitedThreads = invitedSnapshots.map { snapshot ->
+			ConnectorThread(
+				source = source,
+				threadId = snapshot.roomId,
+				title = snapshot.displayName,
+				latestActivityDateSeconds = 0,
+				latestMessageText = snapshot.topic ?: "",
+				isLatestMessageOutgoing = false,
+				latestMessageType = ConnectorMessageType.TEXT,
+				unreadCount = null,
+				isMarkedUnread = null,
+				topic = snapshot.topic,
+				isInvited = true,
+			)
+		}
+
+		val seen = HashSet<String>()
+		val result = ArrayList<ConnectorThread>()
+		for (thread in invitedThreads + joinedThreads) {
+			if (seen.add(thread.threadId)) {
+				result.add(thread)
+				if (result.size >= limit) break
+			}
+		}
+		return result
 	}
 
 	override fun getRecentMessageReadResult(threadId: String, limit: Int): ConnectorMessageReadResult {

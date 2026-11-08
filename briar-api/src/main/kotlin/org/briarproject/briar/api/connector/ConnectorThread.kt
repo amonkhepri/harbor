@@ -11,4 +11,5 @@ data class ConnectorThread(
 	val unreadCount: Int? = null,
 	val isMarkedUnread: Boolean? = null,
 	val topic: String? = null,
+	val isInvited: Boolean = false,
 )
