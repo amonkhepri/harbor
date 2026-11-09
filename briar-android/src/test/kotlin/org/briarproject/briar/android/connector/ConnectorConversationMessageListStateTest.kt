@@ -253,6 +253,37 @@ class ConnectorConversationMessageListStateTest {
 	}
 
 	@Test
+	fun timelineDaysSurviveDaylightSavingTransitions() {
+		val zone = TimeZone.getTimeZone("Europe/Berlin")
+		val hour = 3_600_000L
+		// 2023-03-26 is a 23-hour local day; its local midnight is 2023-03-25T23:00:00Z.
+		val springDay = 1_679_785_200_000L
+		val springForward = listOf(
+			messageItem("s0").copy(dateMillis = springDay - 1_000L),
+			messageItem("s1").copy(dateMillis = springDay + hour),
+			messageItem("s2").copy(dateMillis = springDay + 22 * hour),
+			messageItem("s3").copy(dateMillis = springDay + 23 * hour),
+		)
+		// 2023-10-29 is a 25-hour local day; its local midnight is 2023-10-28T22:00:00Z.
+		val fallDay = 1_698_530_400_000L
+		val fallBack = listOf(
+			messageItem("f0").copy(dateMillis = fallDay + hour),
+			messageItem("f1").copy(dateMillis = fallDay + 3 * hour),
+			messageItem("f2").copy(dateMillis = fallDay + 24 * hour),
+			messageItem("f3").copy(dateMillis = fallDay + 25 * hour),
+		)
+
+		assertEquals(
+			listOf(true, false, true, false, false, true, false),
+			springForward.toTimelineRows(zone).map { it is ConnectorConversationRow.DaySeparator },
+		)
+		assertEquals(
+			listOf(true, false, false, false, true, false),
+			fallBack.toTimelineRows(zone).map { it is ConnectorConversationRow.DaySeparator },
+		)
+	}
+
+	@Test
 	fun undatedRowsNeverStartADay() {
 		val dated = messageItem("a").copy(dateMillis = MIDNIGHT_UTC)
 		val undated = messageItem("b").copy(dateMillis = 0L)
