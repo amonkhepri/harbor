@@ -3,6 +3,7 @@ package org.briarproject.briar.matrix
 import org.briarproject.briar.api.matrix.MatrixAuthSession.RecoverableErrorDetail.HOMESERVER_DISCOVERY_FAILED
 import org.briarproject.briar.api.matrix.MatrixAuthSession.RecoverableErrorDetail.INVALID_HOMESERVER
 import org.briarproject.briar.api.matrix.MatrixAuthSession.RecoverableErrorDetail.NONE
+import org.briarproject.briar.api.matrix.MatrixAuthSession.RecoverableErrorDetail.SESSION_EXPIRED
 import org.briarproject.briar.api.matrix.MatrixHomeserverDiscoveryClient.DiscoveryResult
 import org.briarproject.briar.matrix.MatrixLoginClient.RestoreResult
 import org.junit.After
@@ -554,14 +555,47 @@ class ReflectiveMatrixHomeserverDiscoveryClientTest {
 		storeConfiguration.directory.copyRecursively(coldStore.directory, overwrite = true)
 
 		val freshClient = newSessionClient()
+		var expiredSignalled = false
+		freshClient.setOnSessionExpiredListener { expiredSignalled = true }
 		val restoreResult = freshClient.restore(coldStore)
 
 		assertTrue(
 			"Expected Failed result for transient error, got $restoreResult",
 			restoreResult is MatrixLoginClient.RestoreResult.Failed,
 		)
+		assertFalse("Transient failure must not force reconnect", expiredSignalled)
 		val file = java.io.File(coldStore.directory, "session")
 		assertTrue("Session file should NOT be deleted on transient error", file.exists())
+	}
+
+	@Test
+	fun `restore with unauthorized error marks session expired and retains homeserver url`() {
+		val storeConfiguration = fakeStoreConfiguration()
+		val client = newSessionClient()
+		client.login("https://matrix.example.org", "alice", "swordfish", storeConfiguration)
+		client.close()
+
+		FakeMatrixSdkState.restoreSessionException =
+			RuntimeException("M_UNKNOWN_TOKEN: The access token was not recognized")
+
+		val coldStore = MatrixStoreConfiguration(
+			testFolder.newFolder("cold-expired"),
+			storeConfiguration.databaseName,
+			storeConfiguration.copyEncryptionKey(),
+		)
+		storeConfiguration.directory.copyRecursively(coldStore.directory, overwrite = true)
+
+		val freshClient = newSessionClient()
+		var listenerCalled = false
+		freshClient.setOnSessionExpiredListener { listenerCalled = true }
+
+		val restoreResult = freshClient.restore(coldStore)
+
+		assertEquals(
+			RestoreResult.Failed(SESSION_EXPIRED, "https://matrix.example.org"),
+			restoreResult,
+		)
+		assertTrue(listenerCalled)
 	}
 
 	/** Polls until [condition] holds or [timeoutMs] elapses, for asserting on the fake's background completion thread. */

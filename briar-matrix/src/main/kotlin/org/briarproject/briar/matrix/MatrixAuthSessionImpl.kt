@@ -2,11 +2,13 @@ package org.briarproject.briar.matrix
 
 import org.briarproject.briar.api.matrix.MatrixAuthSession
 import org.briarproject.briar.api.matrix.MatrixAuthSession.RecoverableErrorDetail.NONE
+import org.briarproject.briar.api.matrix.MatrixAuthSession.RecoverableErrorDetail.SESSION_EXPIRED
 import org.briarproject.briar.api.matrix.MatrixAuthSession.Snapshot
 import org.briarproject.briar.api.matrix.MatrixAuthState
 import org.briarproject.briar.api.matrix.MatrixHomeserverDiscoveryClient
 import org.briarproject.briar.api.matrix.MatrixHomeserverDiscoveryClient.DiscoveryResult
 import org.briarproject.briar.matrix.MatrixLoginClient.RestoreResult
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Matrix password-auth state machine. When [storeConfigurationProvider] supplies a
@@ -24,13 +26,29 @@ class MatrixAuthSessionImpl(
 	private var snapshot = CLOSED_SNAPSHOT
 	private var isClosed = false
 
+	/**
+	 * Set lock-free from the login client's expiry callback (which may hold the client's
+	 * own monitor) and folded into [snapshot] on the next read, avoiding lock-order inversion.
+	 */
+	private val pendingExpiry = AtomicBoolean(false)
+
+	init {
+		loginClient.setOnSessionExpiredListener(::expireSession)
+	}
+
 	@Synchronized
-	override fun getSnapshot(): Snapshot = snapshot
+	override fun getSnapshot(): Snapshot {
+		if (snapshot.authState == MatrixAuthState.READY && pendingExpiry.getAndSet(false)) {
+			snapshot = Snapshot(MatrixAuthState.RECOVERABLE_ERROR, SESSION_EXPIRED, snapshot.homeserverUrl)
+		}
+		return snapshot
+	}
 
 	@Synchronized
 	override fun start() {
 		if (isClosed) return
 		if (snapshot.authState != MatrixAuthState.CLOSED) return
+		pendingExpiry.set(false)
 		val storeConfiguration = storeConfigurationProvider?.getStoreConfiguration()
 		snapshot = if (storeConfiguration == null) {
 			HOMESERVER_SNAPSHOT
@@ -38,7 +56,11 @@ class MatrixAuthSessionImpl(
 			when (val result = loginClient.restore(storeConfiguration)) {
 				is RestoreResult.Restored -> Snapshot(MatrixAuthState.READY, NONE, result.homeserverUrl)
 				is RestoreResult.NotFound -> HOMESERVER_SNAPSHOT
-				is RestoreResult.Failed -> Snapshot(MatrixAuthState.RECOVERABLE_ERROR, result.detail)
+				is RestoreResult.Failed -> Snapshot(
+					MatrixAuthState.RECOVERABLE_ERROR,
+					result.detail,
+					result.homeserverUrl ?: snapshot.homeserverUrl,
+				)
 			}
 		}
 	}
@@ -66,6 +88,7 @@ class MatrixAuthSessionImpl(
 		) {
 			return
 		}
+		pendingExpiry.set(false)
 		val storeConfiguration = storeConfigurationProvider?.newStoreConfiguration()
 		val result = loginClient.login(homeserverUrl, username, password, storeConfiguration)
 		snapshot = if (result == NONE) {
@@ -89,6 +112,11 @@ class MatrixAuthSessionImpl(
 				snapshot = HOMESERVER_SNAPSHOT
 			}
 		}
+	}
+
+	/** Marks a READY session expired; homeserver URL is kept so reconnect skips discovery. */
+	override fun expireSession() {
+		pendingExpiry.set(true)
 	}
 
 	@Synchronized

@@ -13,9 +13,12 @@ import org.briarproject.briar.api.connector.ConnectorReactionRemover
 import org.briarproject.briar.api.connector.ConnectorReactionSender
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult.LoadFailed
+import org.briarproject.briar.api.connector.ConnectorMessageReadResult.SessionExpired
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult.Success
 import org.briarproject.briar.api.connector.ConnectorMessageType
+import org.briarproject.briar.api.connector.ConnectorNavigationContext
 import org.briarproject.briar.api.connector.ConnectorReadMarker
+import org.briarproject.briar.api.connector.ConnectorReconnectAction
 import org.briarproject.briar.api.connector.ConnectorRoomLeaver
 import org.briarproject.briar.api.connector.ConnectorRoomObserver
 import org.briarproject.briar.api.connector.ConnectorSource
@@ -28,6 +31,7 @@ import org.briarproject.briar.api.connector.ConnectorUnreadMarker
 import org.briarproject.briar.api.connector.ConnectorTypingSender
 import org.briarproject.briar.api.connector.ConnectorTypingObserver
 import org.briarproject.briar.api.matrix.MatrixAuthSession
+import org.briarproject.briar.api.matrix.MatrixAuthSession.RecoverableErrorDetail.SESSION_EXPIRED
 import org.briarproject.briar.api.matrix.MatrixAuthState
 import org.briarproject.briar.api.matrix.MatrixConnector
 
@@ -79,12 +83,27 @@ class MatrixRoomConnector @JvmOverloads constructor(
 	ConnectorReactionRemover,
 	ConnectorRoomObserver,
 	ConnectorTypingObserver,
-	ConnectorThumbnailLoader {
+	ConnectorThumbnailLoader,
+	ConnectorReconnectAction {
 	override val source: ConnectorSource = ConnectorSources.MATRIX
 
 	override fun isEnabled(): Boolean = true
 
-	override fun isAuthorized(): Boolean = authSession.getSnapshot().authState == MatrixAuthState.READY
+	override fun isSessionExpired(): Boolean = authSession.getSnapshot().errorDetail == SESSION_EXPIRED
+
+	override fun isAuthorized(): Boolean =
+		!isSessionExpired() && authSession.getSnapshot().authState == MatrixAuthState.READY
+
+	override fun prepareReconnect(
+		navigationContext: ConnectorNavigationContext?,
+	): ConnectorReconnectAction.PreparedReconnect? {
+		if (!isEnabled() || !isSessionExpired()) return null
+		return object : ConnectorReconnectAction.PreparedReconnect {
+			override val navigationContext: ConnectorNavigationContext? = navigationContext
+			override fun isCurrent(): Boolean = isSessionExpired()
+			override fun reconnect(): Boolean = isCurrent()
+		}
+	}
 
 	override fun getThreadTopic(threadId: String): String? = if (isAuthorized()) {
 		roomSnapshotClient.getRoomTopic(threadId)
@@ -162,8 +181,10 @@ class MatrixRoomConnector @JvmOverloads constructor(
 	}
 
 	override fun getRecentMessageReadResult(threadId: String, limit: Int): ConnectorMessageReadResult {
+		if (isSessionExpired()) return SessionExpired
 		if (!isAuthorized()) return LoadFailed
-		val snapshots = messageSnapshotClient.getRecentMessages(threadId, limit) ?: return LoadFailed
+		val snapshots = messageSnapshotClient.getRecentMessages(threadId, limit)
+			?: return if (isSessionExpired()) SessionExpired else LoadFailed
 		return Success(
 			snapshots.map { snapshot ->
 				ConnectorMessage(

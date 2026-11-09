@@ -116,6 +116,7 @@ class MatrixSetupActivity : BriarActivity() {
 			error == RecoverableErrorDetail.DEVICE_KEYSTORE_UNAVAILABLE ||
 				error == RecoverableErrorDetail.PERSISTED_SESSION_IDENTITY_UNVERIFIED ->
 				R.string.matrix_store_failed
+			error == RecoverableErrorDetail.SESSION_EXPIRED -> R.string.matrix_session_expired
 			step == MatrixSetupStep.UNAVAILABLE -> R.string.matrix_unavailable
 			state.actionFailed || (error != null && error != RecoverableErrorDetail.NONE) ->
 				R.string.matrix_setup_failed

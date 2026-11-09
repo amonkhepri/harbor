@@ -33,6 +33,8 @@ import org.briarproject.briar.android.connector.ConnectorConversationAvailabilit
 import org.briarproject.briar.android.connector.ConnectorConversationAvailabilityState.EMPTY
 import org.briarproject.briar.android.connector.ConnectorConversationAvailabilityState.LOAD_FAILED
 import org.briarproject.briar.android.connector.ConnectorConversationAvailabilityState.LOADING
+import org.briarproject.briar.android.connector.ConnectorConversationAvailabilityState.SESSION_EXPIRED
+import org.briarproject.briar.android.matrix.MatrixSetupActivity
 import org.briarproject.briar.android.util.ActivityLaunchers.GetImageAdvanced
 import org.briarproject.briar.android.util.ActivityLaunchers.OpenImageDocumentAdvanced
 import org.briarproject.briar.android.util.BriarSnackbarBuilder
@@ -59,7 +61,9 @@ import org.briarproject.briar.api.connector.ConnectorReactionRemover
 import org.briarproject.briar.api.connector.ConnectorReactionSender
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult
 import org.briarproject.briar.api.connector.ConnectorMessageType
+import org.briarproject.briar.api.connector.ConnectorNavigationContext
 import org.briarproject.briar.api.connector.ConnectorReadMarker
+import org.briarproject.briar.api.connector.ConnectorReconnectAction
 import org.briarproject.briar.api.connector.ConnectorRoomLeaver
 import org.briarproject.briar.api.connector.ConnectorRoomObserver
 import org.briarproject.briar.api.connector.ConnectorTypingObserver
@@ -289,6 +293,8 @@ class ConnectorConversationActivity : BriarActivity() {
 				R.string.connector_conversation_disabled
 			ACCOUNT_UNAVAILABLE ->
 				R.string.connector_conversation_account_unavailable
+			SESSION_EXPIRED ->
+				R.string.connector_conversation_session_expired
 			LOAD_FAILED ->
 				R.string.connector_conversation_load_failed
 			EMPTY ->
@@ -698,6 +704,11 @@ class ConnectorConversationActivity : BriarActivity() {
 	override fun onResume() {
 		super.onResume()
 		composerResumed = true
+		if (connector?.isSessionExpired() == false &&
+			messageState.visibleStatusText != null
+		) {
+			loadMessages(showLoading = false)
+		}
 	}
 
 	override fun onPause() {
@@ -826,10 +837,15 @@ class ConnectorConversationActivity : BriarActivity() {
 					return@execute
 				}
 				if (!activeConnector.isAuthorized()) {
+					val availability = if (activeConnector.isSessionExpired()) {
+						SESSION_EXPIRED
+					} else {
+						ACCOUNT_UNAVAILABLE
+					}
 					showMessages(
 						loadGeneration,
 						ConnectorConversationMessageListState(),
-						ACCOUNT_UNAVAILABLE,
+						availability,
 					)
 					return@execute
 				}
@@ -856,6 +872,13 @@ class ConnectorConversationActivity : BriarActivity() {
 						if (isInitialOpen || result.messages.isNotEmpty()) {
 							markThreadRead(loadGeneration)
 						}
+					}
+					ConnectorMessageReadResult.SessionExpired -> {
+						showMessages(
+							loadGeneration,
+							ConnectorConversationMessageListState(),
+							SESSION_EXPIRED,
+						)
 					}
 					ConnectorMessageReadResult.LoadFailed -> {
 						showMessages(
@@ -1038,7 +1061,14 @@ class ConnectorConversationActivity : BriarActivity() {
 					getString(emptyTextForState(availabilityState), sourceName),
 				)
 				submitMessageState(nextState)
-				if (availabilityState == LOAD_FAILED) {
+				if (availabilityState == SESSION_EXPIRED) {
+					lastLoadFailed = false
+					retryRequested = false
+					loadFailedSnackbar?.dismiss()
+					loadFailedSnackbar = null
+					list.setEmptyAction(R.string.connector_reconnect)
+					list.setEmptyActionListener { launchReconnect() }
+				} else if (availabilityState == LOAD_FAILED) {
 					showLoadFailedFeedback(nextState.messages.isEmpty())
 				} else {
 					lastLoadFailed = false
@@ -1046,6 +1076,7 @@ class ConnectorConversationActivity : BriarActivity() {
 					loadFailedSnackbar?.dismiss()
 					loadFailedSnackbar = null
 					list.setEmptyAction("")
+					list.setEmptyActionListener(null)
 				}
 			} finally {
 				roomUpdateCoalescer?.onRefreshCompleted()
@@ -1068,6 +1099,25 @@ class ConnectorConversationActivity : BriarActivity() {
 				.setAction(R.string.connector_conversation_retry_refresh) { retryRefresh() }
 				.make(list, text, Snackbar.LENGTH_LONG)
 				.also { it.show() }
+		}
+	}
+
+	private fun launchReconnect() {
+		val activeConnector = connector ?: return
+		val reconnectAction = activeConnector as? ConnectorReconnectAction
+		val navContext = ConnectorNavigationContext(
+			source = activeConnector.source,
+			threadId = threadId,
+			threadTitle = intent.getStringExtra(THREAD_TITLE),
+		)
+		val prepared = reconnectAction?.prepareReconnect(navContext)
+		if (prepared?.reconnect() != true) {
+			// Session already restored elsewhere; just refresh this thread.
+			loadMessages(showLoading = false)
+			return
+		}
+		if (activeConnector.source.id == ConnectorSources.MATRIX_ID) {
+			startActivity(Intent(this, MatrixSetupActivity::class.java))
 		}
 	}
 
@@ -1438,18 +1488,22 @@ class ConnectorConversationActivity : BriarActivity() {
 			}
 			loadMessages(showLoading = false)
 		} else {
+			val expired = connector?.isSessionExpired() == true
+			if (expired) loadMessages(showLoading = false)
 			val snackbar = BriarSnackbarBuilder()
-			if (!clearComposeText) {
+			if (expired) {
+				snackbar.setAction(R.string.connector_reconnect) { launchReconnect() }
+			} else if (!clearComposeText) {
 				snackbar.setAction(R.string.connector_image_retry) {
 					onImageChosen(imageUpload.pendingImage?.let(Uri::parse))
 				}
 			}
 			snackbar.make(
 				list,
-				if (clearComposeText) {
-					R.string.connector_conversation_send_failed
-				} else {
-					R.string.connector_image_failed
+				when {
+					expired -> getString(R.string.connector_conversation_session_expired, sourceName)
+					clearComposeText -> getString(R.string.connector_conversation_send_failed)
+					else -> getString(R.string.connector_image_failed)
 				},
 				if (clearComposeText) Snackbar.LENGTH_LONG else Snackbar.LENGTH_INDEFINITE,
 			).show()

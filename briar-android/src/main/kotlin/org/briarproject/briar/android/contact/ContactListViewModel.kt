@@ -27,6 +27,7 @@ import org.briarproject.briar.android.contact.ConnectorInboxAvailabilityState.EM
 import org.briarproject.briar.android.contact.ConnectorInboxAvailabilityState.LOAD_FAILED
 import org.briarproject.briar.android.contact.ConnectorInboxAvailabilityState.LOADING
 import org.briarproject.briar.android.contact.ConnectorInboxAvailabilityState.NONE
+import org.briarproject.briar.android.contact.ConnectorInboxAvailabilityState.SESSION_EXPIRED
 import java.util.concurrent.Executor
 import javax.inject.Inject
 
@@ -123,12 +124,20 @@ internal class ContactListViewModel @Inject constructor(
 			connectors.forEach { connector ->
 				try {
 					if (connector.source == ConnectorSources.MATRIX) matrixAuthSession.start()
+					if (connector.isSessionExpired()) {
+						states[connector.source] = SESSION_EXPIRED
+						return@forEach
+					}
 					if (!connector.isAuthorized()) {
 						states[connector.source] = ACCOUNT_UNAVAILABLE
 						return@forEach
 					}
 					val threads = connector.getRecentThreads(20)
-					states[connector.source] = if (threads.isEmpty()) EMPTY else NONE
+					states[connector.source] = when {
+						threads.isNotEmpty() -> NONE
+						connector.isSessionExpired() -> SESSION_EXPIRED
+						else -> EMPTY
+					}
 					threads.mapTo(items, ::GenericConnectorInboxThreadItem)
 				} catch (e: RuntimeException) {
 					states[connector.source] = LOAD_FAILED

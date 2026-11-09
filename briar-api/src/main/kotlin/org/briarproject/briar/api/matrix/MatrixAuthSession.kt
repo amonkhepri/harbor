@@ -25,6 +25,7 @@ interface MatrixAuthSession {
 		UNSUPPORTED_AUTH_STEP,
 		DEVICE_KEYSTORE_UNAVAILABLE,
 		PERSISTED_SESSION_IDENTITY_UNVERIFIED,
+		SESSION_EXPIRED,
 	}
 
 	fun getSnapshot(): Snapshot
@@ -32,5 +33,6 @@ interface MatrixAuthSession {
 	fun submitHomeserver(homeserverUrl: String)
 	fun submitCredentials(username: String, password: String)
 	fun logout()
+	fun expireSession() {}
 	fun close()
 }

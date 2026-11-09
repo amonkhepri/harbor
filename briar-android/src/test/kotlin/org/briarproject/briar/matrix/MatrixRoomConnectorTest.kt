@@ -4,10 +4,12 @@ import org.briarproject.bramble.api.system.Clock
 import org.briarproject.bramble.test.SettableClock
 import org.briarproject.briar.api.connector.ConnectorAttachmentMetadata
 import org.briarproject.briar.api.connector.ConnectorMessage
+import org.briarproject.briar.api.connector.ConnectorMessageReadResult
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult.LoadFailed
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult.Success
 import org.briarproject.briar.api.connector.ConnectorMessageReceiptState
 import org.briarproject.briar.api.connector.ConnectorMessageType
+import org.briarproject.briar.api.connector.ConnectorNavigationContext
 import org.briarproject.briar.api.connector.ConnectorReactionSummary
 import org.briarproject.briar.api.connector.ConnectorSources
 import org.briarproject.briar.api.matrix.MatrixAuthSession
@@ -1117,12 +1119,49 @@ class MatrixRoomConnectorTest {
 		}
 	}
 
-	private class FakeMatrixAuthSession(var state: MatrixAuthState) : MatrixAuthSession {
-		override fun getSnapshot(): MatrixAuthSession.Snapshot = MatrixAuthSession.Snapshot(state, NONE)
+	@Test
+	fun `expired session fences reads and offers reconnect with navigation context`() {
+		val auth = FakeMatrixAuthSession(MatrixAuthState.READY)
+		val connector = connector(authSession = auth)
+
+		assertTrue(connector.isAuthorized())
+		assertFalse(connector.isSessionExpired())
+		assertNull(connector.prepareReconnect(null))
+
+		auth.expireSession()
+
+		assertFalse(connector.isAuthorized())
+		assertTrue(connector.isSessionExpired())
+		assertEquals(emptyList<Any>(), connector.getRecentThreads(10))
+		assertEquals(
+			ConnectorMessageReadResult.SessionExpired,
+			connector.getRecentMessageReadResult("!room:example", 10),
+		)
+
+		val navContext = ConnectorNavigationContext(ConnectorSources.MATRIX, "!room:example", "Room")
+		val prepared = connector.prepareReconnect(navContext)!!
+		assertEquals(navContext, prepared.navigationContext)
+		assertTrue(prepared.reconnect())
+
+		// Successful re-login invalidates the prepared action and restores access.
+		auth.errorDetail = NONE
+		assertFalse(prepared.reconnect())
+		assertTrue(connector.isAuthorized())
+	}
+
+	private class FakeMatrixAuthSession(
+		var state: MatrixAuthState,
+		var errorDetail: MatrixAuthSession.RecoverableErrorDetail = NONE,
+	) : MatrixAuthSession {
+		override fun getSnapshot(): MatrixAuthSession.Snapshot =
+			MatrixAuthSession.Snapshot(state, errorDetail)
 		override fun start() {}
 		override fun submitHomeserver(homeserverUrl: String) {}
 		override fun submitCredentials(username: String, password: String) {}
 		override fun logout() {}
+		override fun expireSession() {
+			errorDetail = MatrixAuthSession.RecoverableErrorDetail.SESSION_EXPIRED
+		}
 		override fun close() {}
 	}
 }

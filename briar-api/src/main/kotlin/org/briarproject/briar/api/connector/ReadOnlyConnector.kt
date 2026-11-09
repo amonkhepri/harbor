@@ -13,4 +13,6 @@ interface ReadOnlyConnector {
 	fun getThreadTopic(threadId: String): String? = null
 
 	fun getRecentMessageReadResult(threadId: String, limit: Int): ConnectorMessageReadResult
+
+	fun isSessionExpired(): Boolean = false
 }

@@ -95,6 +95,41 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 	private val lifecycleLock = Any()
 	private var activeGeneration: Any? = null
 	private var activeStore: MatrixStoreConfiguration? = null
+
+	@Volatile
+	private var onSessionExpiredListener: (() -> Unit)? = null
+
+	override fun setOnSessionExpiredListener(listener: (() -> Unit)?) {
+		onSessionExpiredListener = listener
+	}
+
+	/** Signals an SDK unknown/missing-token result; never logs the throwable or token. */
+	private fun handleSessionExpired() {
+		onSessionExpiredListener?.invoke()
+	}
+
+	/**
+	 * True only for SDK results proving the access token is no longer accepted
+	 * (`M_UNKNOWN_TOKEN` / `M_MISSING_TOKEN`). Network, server and permission
+	 * failures stay transient so they never force a reconnect.
+	 */
+	private fun isUnauthorized(throwable: Throwable): Boolean {
+		val target = (throwable as? InvocationTargetException)?.targetException ?: throwable
+		if (target is IOException || target is InterruptedException) return false
+		if (target.javaClass.simpleName in EXPIRED_TOKEN_NAMES) return true
+		if (target.javaClass.simpleName == "MatrixApi") {
+			try {
+				val kind = target.javaClass.getMethod("getKind").invoke(target)
+				if (kind?.javaClass?.simpleName in EXPIRED_TOKEN_NAMES) return true
+				val code = target.javaClass.getMethod("getCode").invoke(target) as? String
+				if (code in EXPIRED_TOKEN_CODES) return true
+			} catch (_: ReflectiveOperationException) {
+			}
+		}
+		val msg = target.message.orEmpty()
+		return EXPIRED_TOKEN_CODES.any { msg.contains(it) }
+	}
+
 	private val activeDownloadDirs = java.util.Collections.newSetFromMap(
 		java.util.concurrent.ConcurrentHashMap<File, Boolean>(),
 	)
@@ -344,9 +379,11 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		var success = false
 		var claimedStore = false
 		var failureDetail: RecoverableErrorDetail? = null
+		var savedHomeserverUrl: String? = null
 		return try {
 			val sessionClass = Class.forName(SESSION_CLASS_NAME)
 			val session = readSessionFile(file, sessionClass, storeConfiguration)
+			savedHomeserverUrl = sessionClass.getMethod("getHomeserverUrl").invoke(session) as? String
 			claimStore(storeConfiguration)
 			claimedStore = true
 			val builderClass = Class.forName(CLIENT_BUILDER_CLASS_NAME)
@@ -354,7 +391,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			builder = track(
 				builders,
 				builderClass.getMethod("homeserverUrl", String::class.java)
-					.invoke(builder, sessionClass.getMethod("getHomeserverUrl").invoke(session)),
+					.invoke(builder, savedHomeserverUrl),
 			)
 			builder = track(builders, applyStore(builders, builder, builderClass, storeConfiguration))
 			builder =
@@ -376,9 +413,15 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		} catch (e: DiscoveryAdapterFailure) {
 			MatrixLoginClient.RestoreResult.NotFound
 		} catch (e: InvocationTargetException) {
-			val mapped = mapThrowable(e.targetException ?: e)
+			val target = e.targetException ?: e
+			val mapped = if (isUnauthorized(target)) {
+				handleSessionExpired()
+				RecoverableErrorDetail.SESSION_EXPIRED
+			} else {
+				mapThrowable(target)
+			}
 			failureDetail = mapped
-			MatrixLoginClient.RestoreResult.Failed(mapped)
+			MatrixLoginClient.RestoreResult.Failed(mapped, savedHomeserverUrl)
 		} catch (e: ReflectiveOperationException) {
 			MatrixLoginClient.RestoreResult.NotFound
 		} catch (e: LinkageError) {
@@ -691,6 +734,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		} catch (e: ClassCastException) {
 			emptyList()
 		} catch (e: InvocationTargetException) {
+			if (isUnauthorized(e)) handleSessionExpired()
 			emptyList()
 		} catch (e: ReflectiveOperationException) {
 			emptyList()
@@ -714,6 +758,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		} catch (e: ClassCastException) {
 			emptyList()
 		} catch (e: InvocationTargetException) {
+			if (isUnauthorized(e)) handleSessionExpired()
 			emptyList()
 		} catch (e: ReflectiveOperationException) {
 			emptyList()
@@ -869,6 +914,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			Thread.currentThread().interrupt()
 			initialSnapshot
 		} catch (e: Exception) {
+			if (isUnauthorized(e)) handleSessionExpired()
 			initialSnapshot
 		} catch (e: LinkageError) {
 			initialSnapshot
@@ -941,6 +987,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			Thread.currentThread().interrupt()
 			false
 		} catch (e: Exception) {
+			if (isUnauthorized(e)) handleSessionExpired()
 			false
 		} catch (e: LinkageError) {
 			false
@@ -1019,6 +1066,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			Thread.currentThread().interrupt()
 			false
 		} catch (e: Exception) {
+			if (isUnauthorized(e)) handleSessionExpired()
 			false
 		} catch (e: LinkageError) {
 			false
@@ -1094,6 +1142,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 					Thread.currentThread().interrupt()
 					false
 				} catch (e: Exception) {
+					if (isUnauthorized(e)) handleSessionExpired()
 					false
 				} catch (e: LinkageError) {
 					false
@@ -1126,6 +1175,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			Thread.currentThread().interrupt()
 			false
 		} catch (e: Exception) {
+			if (isUnauthorized(e)) handleSessionExpired()
 			false
 		} catch (e: LinkageError) {
 			false
@@ -1167,6 +1217,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			Thread.currentThread().interrupt()
 			false
 		} catch (e: Exception) {
+			if (isUnauthorized(e)) handleSessionExpired()
 			false
 		} catch (e: LinkageError) {
 			false
@@ -1605,6 +1656,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			Thread.currentThread().interrupt()
 			false
 		} catch (e: Exception) {
+			if (isUnauthorized(e)) handleSessionExpired()
 			false
 		} catch (e: LinkageError) {
 			false
@@ -2993,6 +3045,8 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 
 	private companion object {
 		val ATTACHMENT_TYPE_NAMES = setOf("File", "Image", "Video", "Audio")
+		val EXPIRED_TOKEN_NAMES = setOf("UnknownToken", "MissingToken")
+		val EXPIRED_TOKEN_CODES = setOf("M_UNKNOWN_TOKEN", "M_MISSING_TOKEN")
 		val openedStores = HashSet<String>()
 		const val CLIENT_BUILDER_CLASS_NAME = "org.matrix.rustcomponents.sdk.ClientBuilder"
 		const val SQLITE_STORE_BUILDER_CLASS_NAME = "org.matrix.rustcomponents.sdk.SqliteStoreBuilder"

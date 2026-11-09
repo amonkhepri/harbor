@@ -74,6 +74,7 @@ class ContactListFragmentTest {
 		mapOf(
 			NONE to R.string.no_contacts,
 			LOADING to R.string.connector_inbox_loading,
+			ConnectorInboxAvailabilityState.SESSION_EXPIRED to R.string.connector_inbox_session_expired,
 			ACCOUNT_UNAVAILABLE to R.string.connector_inbox_account_unavailable,
 			EMPTY to R.string.connector_inbox_empty,
 			LOAD_FAILED to R.string.connector_inbox_load_failed,
@@ -85,7 +86,11 @@ class ContactListFragmentTest {
 	@Test
 	fun testTelegramAvailabilityDoesNotAddEmptyAction() {
 		ConnectorInboxAvailabilityState.values().forEach { state ->
-			val expected = if (state == NONE) R.string.no_contacts_action else 0
+			val expected = when (state) {
+				NONE -> R.string.no_contacts_action
+				ConnectorInboxAvailabilityState.SESSION_EXPIRED -> R.string.connector_reconnect
+				else -> 0
+			}
 			assertEquals(expected, ContactListFragment.emptyActionTextForState(state))
 		}
 	}
@@ -98,6 +103,15 @@ class ContactListFragmentTest {
 			LOADING,
 			ContactListFragment.aggregateAvailabilityState(
 				mapOf(ConnectorSources.TELEGRAM to EMPTY, ConnectorSources.MATRIX to LOADING),
+			),
+		)
+		assertEquals(
+			ConnectorInboxAvailabilityState.SESSION_EXPIRED,
+			ContactListFragment.aggregateAvailabilityState(
+				mapOf(
+					ConnectorSources.TELEGRAM to ACCOUNT_UNAVAILABLE,
+					ConnectorSources.MATRIX to ConnectorInboxAvailabilityState.SESSION_EXPIRED,
+				),
 			),
 		)
 		assertEquals(

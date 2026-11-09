@@ -269,6 +269,32 @@ class MatrixAuthSessionImplTest {
 		assertEquals(MatrixAuthState.CLOSED, session.getSnapshot().authState)
 	}
 
+	@Test
+	fun `client expiry signal exposes reconnect state and re-login restores ready`() {
+		val loginClient = FakeLoginClient(NONE)
+		val session = MatrixAuthSessionImpl(
+			FakeDiscoveryClient(DiscoveryResult.Resolved("https://matrix.example.org")),
+			loginClient,
+		)
+
+		session.start()
+		session.submitHomeserver("matrix.example.org")
+		session.submitCredentials("user", "pass")
+		assertEquals(MatrixAuthState.READY, session.getSnapshot().authState)
+
+		loginClient.triggerSessionExpired()
+		val snapshot = session.getSnapshot()
+		assertEquals(MatrixAuthState.RECOVERABLE_ERROR, snapshot.authState)
+		assertEquals(RecoverableErrorDetail.SESSION_EXPIRED, snapshot.errorDetail)
+		assertEquals("https://matrix.example.org", snapshot.homeserverUrl)
+
+		// Reconnect: credentials can be re-submitted against the retained homeserver.
+		session.submitCredentials("user", "pass")
+		assertEquals(MatrixAuthState.READY, session.getSnapshot().authState)
+		assertEquals(NONE, session.getSnapshot().errorDetail)
+		assertEquals(2, loginClient.loginCount)
+	}
+
 	private fun fakeStoreConfiguration(): MatrixStoreConfiguration = MatrixStoreConfiguration(
 		testFolder.newFolder("matrix-sdk"),
 		"matrix-sdk",
@@ -297,6 +323,16 @@ class MatrixAuthSessionImplTest {
 	private class FakeLoginClient(private val result: RecoverableErrorDetail) : MatrixLoginClient {
 		var loginCount = 0
 		var closeCount = 0
+		private var sessionExpiredListener: (() -> Unit)? = null
+
+		override fun setOnSessionExpiredListener(listener: (() -> Unit)?) {
+			sessionExpiredListener = listener
+		}
+
+		fun triggerSessionExpired() {
+			sessionExpiredListener?.invoke()
+		}
+
 		override fun login(
 			homeserverUrl: String,
 			username: String,

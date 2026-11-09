@@ -333,6 +333,23 @@ class ContactListViewModelTest {
 	}
 
 	@Test
+	fun testExpiredSessionExposesSessionExpiredState() {
+		val connector = mock(ReadOnlyConnector::class.java)
+		`when`(connector.source).thenReturn(ConnectorSources.MATRIX)
+		`when`(connector.isEnabled()).thenReturn(true)
+		`when`(connector.isAuthorized()).thenReturn(false)
+		`when`(connector.isSessionExpired()).thenReturn(true)
+		val viewModel = createViewModel(connector)
+
+		viewModel.loadConnectorThreads()
+
+		assertEquals(
+			ConnectorInboxAvailabilityState.SESSION_EXPIRED,
+			getOrAwaitValue(viewModel.connectorAvailabilityStates)[ConnectorSources.MATRIX],
+		)
+	}
+
+	@Test
 	fun testLoadsRegisteredConnectorsIntoSourceQualifiedRows() {
 		val telegram = connector(ConnectorSources.TELEGRAM, connectorThread())
 		val matrixThread = connectorThread(ConnectorSources.MATRIX, "!room:example")

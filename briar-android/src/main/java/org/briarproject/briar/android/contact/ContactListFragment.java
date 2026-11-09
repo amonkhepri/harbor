@@ -23,6 +23,7 @@ import org.briarproject.briar.android.contact.add.remote.AddContactActivity;
 import org.briarproject.briar.android.contact.add.remote.PendingContactListActivity;
 import org.briarproject.briar.android.conversation.ConversationActivity;
 import org.briarproject.briar.android.fragment.BaseFragment;
+import org.briarproject.briar.android.matrix.MatrixSetupActivity;
 import org.briarproject.briar.android.util.BriarSnackbarBuilder;
 import org.briarproject.briar.android.view.BriarRecyclerView;
 import org.briarproject.briar.api.connector.ConnectorSource;
@@ -113,6 +114,11 @@ public class ContactListFragment extends BaseFragment
 		list.setEmptyImage(R.drawable.il_empty_state_contact_list);
 		list.setEmptyText(getString(R.string.no_contacts));
 		list.setEmptyAction(getString(R.string.no_contacts_action));
+		list.setEmptyActionListener(v -> {
+			if (connectorAvailabilityState == ConnectorInboxAvailabilityState.SESSION_EXPIRED) {
+				startActivity(new Intent(getContext(), MatrixSetupActivity.class));
+			}
+		});
 
 		viewModel.getContactListItems()
 				.observe(getViewLifecycleOwner(), result -> {
@@ -359,6 +365,7 @@ public class ContactListFragment extends BaseFragment
 			Map<ConnectorSource, ConnectorInboxAvailabilityState> states) {
 		for (ConnectorInboxAvailabilityState candidate : Arrays.asList(
 				ConnectorInboxAvailabilityState.LOADING,
+				ConnectorInboxAvailabilityState.SESSION_EXPIRED,
 				ConnectorInboxAvailabilityState.LOAD_FAILED,
 				ConnectorInboxAvailabilityState.ACCOUNT_UNAVAILABLE,
 				ConnectorInboxAvailabilityState.EMPTY)) {
@@ -371,6 +378,8 @@ public class ContactListFragment extends BaseFragment
 		switch (state) {
 			case LOADING:
 				return R.string.connector_inbox_loading;
+			case SESSION_EXPIRED:
+				return R.string.connector_inbox_session_expired;
 			case ACCOUNT_UNAVAILABLE:
 				return R.string.connector_inbox_account_unavailable;
 			case EMPTY:
@@ -383,7 +392,13 @@ public class ContactListFragment extends BaseFragment
 	}
 
 	static int emptyActionTextForState(ConnectorInboxAvailabilityState state) {
-		return state == ConnectorInboxAvailabilityState.NONE ?
-				R.string.no_contacts_action : 0;
+		switch (state) {
+			case NONE:
+				return R.string.no_contacts_action;
+			case SESSION_EXPIRED:
+				return R.string.connector_reconnect;
+			default:
+				return 0;
+		}
 	}
 }

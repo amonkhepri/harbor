@@ -26,9 +26,14 @@ interface MatrixLoginClient {
 	fun logout()
 	fun close()
 
+	fun setOnSessionExpiredListener(listener: (() -> Unit)?) {}
+
 	sealed class RestoreResult {
 		data class Restored(val homeserverUrl: String) : RestoreResult()
 		object NotFound : RestoreResult()
-		data class Failed(val detail: RecoverableErrorDetail) : RestoreResult()
+		data class Failed @JvmOverloads constructor(
+			val detail: RecoverableErrorDetail,
+			val homeserverUrl: String? = null,
+		) : RestoreResult()
 	}
 }

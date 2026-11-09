@@ -171,6 +171,7 @@ internal enum class ConnectorConversationAvailabilityState {
 	LOADING,
 	DISABLED,
 	ACCOUNT_UNAVAILABLE,
+	SESSION_EXPIRED,
 	EMPTY,
 	LOAD_FAILED,
 }
@@ -202,4 +203,5 @@ internal fun ConnectorConversationMessageListState.withAvailabilityState(
 
 private fun ConnectorConversationAvailabilityState.shouldKeepPreviousMessages(): Boolean =
 	this == ConnectorConversationAvailabilityState.ACCOUNT_UNAVAILABLE ||
+		this == ConnectorConversationAvailabilityState.SESSION_EXPIRED ||
 		this == ConnectorConversationAvailabilityState.LOAD_FAILED
