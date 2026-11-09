@@ -31,7 +31,20 @@ import org.briarproject.briar.matrix.MatrixStoreConfiguration
 import org.briarproject.briar.matrix.MatrixStoreConfigurationProvider
 import org.briarproject.briar.matrix.DirectMatrixClientSessionDelegateFactory
 import org.briarproject.briar.matrix.ReflectiveMatrixHomeserverDiscoveryClient
+import org.briarproject.briar.android.AndroidExecutorTestImpl
+import org.briarproject.briar.api.connector.ConnectorRoomObserver
+import org.briarproject.briar.api.connector.ConnectorRoomObserver.RoomSubscription
+import org.briarproject.briar.api.matrix.MatrixAuthSession.RecoverableErrorDetail
+import org.briarproject.briar.api.matrix.MatrixAuthSession.Snapshot
 import org.junit.After
+import org.matrix.rustcomponents.sdk.EventOrTransactionId
+import org.matrix.rustcomponents.sdk.FakeTimelineEventSpec
+import org.matrix.rustcomponents.sdk.TimelineDiff
+import org.matrix.rustcomponents.sdk.TimelineItem
+import org.mockito.Mockito.RETURNS_DEFAULTS
+import org.mockito.Mockito.times
+import org.mockito.Mockito.verify
+import org.mockito.Mockito.withSettings
 import org.junit.rules.TemporaryFolder
 import org.matrix.rustcomponents.sdk.FakeMatrixSdkState
 import org.matrix.rustcomponents.sdk.FakeRoomSpec
@@ -247,6 +260,7 @@ class ContactListViewModelTest {
 		override fun execute(command: Runnable) {
 			tasks.addLast(command)
 		}
+		val size get() = tasks.size
 		fun runNext() {
 			val task = FutureTask(tasks.removeFirst(), Unit)
 			Thread(task, "inbox-test-io").start()
@@ -443,6 +457,187 @@ class ContactListViewModelTest {
 		assertEquals(InboxSourceFilter.Matrix, getOrAwaitValue(viewModel.sourceFilter))
 	}
 
+	/** Records observeRoom calls so tests can fire or inspect individual subscriptions. */
+	private class ObservedRooms {
+		val callbacks = ArrayList<Pair<String, () -> Unit>>()
+		val cancelled = ArrayList<String>()
+
+		fun fire(threadId: String) = callbacks.last { it.first == threadId }.second()
+
+		fun observe(threadId: String, onUpdate: () -> Unit): RoomSubscription {
+			callbacks.add(threadId to onUpdate)
+			return object : RoomSubscription {
+				override fun cancel() {
+					cancelled.add(threadId)
+				}
+
+				override fun close() = cancel()
+			}
+		}
+	}
+
+	private fun observableConnector(source: ConnectorSource, rooms: ObservedRooms) = mock(
+		ReadOnlyConnector::class.java,
+		withSettings().extraInterfaces(ConnectorRoomObserver::class.java).defaultAnswer {
+			if (it.method.name == "observeRoom") {
+				@Suppress("UNCHECKED_CAST")
+				rooms.observe(it.getArgument(0), it.getArgument(1) as () -> Unit)
+			} else {
+				RETURNS_DEFAULTS.answer(it)
+			}
+		},
+	).also { connector ->
+		`when`(connector.source).thenReturn(source)
+		`when`(connector.isEnabled()).thenReturn(true)
+		`when`(connector.isAuthorized()).thenReturn(true)
+	}
+
+	private fun immediateUi() = AndroidExecutorTestImpl(ImmediateExecutor())
+
+	@Test
+	fun `remote room activity refreshes inbox order and preview once`() {
+		val rooms = ObservedRooms()
+		val connector = observableConnector(ConnectorSources.MATRIX, rooms)
+		val a = connectorThread(ConnectorSources.MATRIX, "!a:example").copy(latestMessageText = "old")
+		val b = connectorThread(ConnectorSources.MATRIX, "!b:example")
+		val newer = a.copy(latestActivityDateSeconds = 99, latestMessageText = "new")
+		`when`(connector.getRecentThreads(20)).thenReturn(listOf(b, a), listOf(newer, b))
+		val viewModel = createViewModel(connector, androidExecutor = immediateUi())
+
+		viewModel.loadConnectorThreads()
+		assertEquals(listOf("!b:example", "!a:example"), rooms.callbacks.map { it.first })
+		rooms.fire("!a:example")
+
+		val items = getOrAwaitValue(viewModel.connectorThreadItems)
+		assertEquals(listOf("matrix:!a:example", "matrix:!b:example"), items.map { it.stableId })
+		assertEquals("new", items.first().previewText)
+		verify(connector, times(2)).getRecentThreads(20)
+		// Rows still present keep their subscription instead of re-subscribing.
+		assertEquals(2, rooms.callbacks.size)
+		assertEquals(emptyList<String>(), rooms.cancelled)
+	}
+
+	@Test
+	fun `failed remote refresh preserves prior rows and keeps observing`() {
+		val rooms = ObservedRooms()
+		val connector = observableConnector(ConnectorSources.MATRIX, rooms)
+		val thread = connectorThread(ConnectorSources.MATRIX, "!a:example")
+		`when`(connector.getRecentThreads(20)).thenReturn(listOf(thread))
+			.thenThrow(IllegalStateException())
+		val viewModel = createViewModel(connector, androidExecutor = immediateUi())
+
+		viewModel.loadConnectorThreads()
+		val loaded = getOrAwaitValue(viewModel.connectorThreadItems)
+		rooms.fire("!a:example")
+
+		assertEquals(loaded, getOrAwaitValue(viewModel.connectorThreadItems))
+		assertEquals(
+			LOAD_FAILED,
+			getOrAwaitValue(viewModel.connectorAvailabilityStates)[ConnectorSources.MATRIX],
+		)
+		assertEquals(emptyList<String>(), rooms.cancelled)
+	}
+
+	@Test
+	fun `remote activity during a load coalesces into one follow-up refresh`() {
+		val rooms = ObservedRooms()
+		val connector = observableConnector(ConnectorSources.MATRIX, rooms)
+		`when`(connector.getRecentThreads(20))
+			.thenReturn(listOf(connectorThread(ConnectorSources.MATRIX, "!a:example")))
+		val io = QueuedIoExecutor()
+		val viewModel = createViewModel(connector, ioExecutor = io, androidExecutor = immediateUi())
+
+		viewModel.loadConnectorThreads()
+		io.runNext()
+		rooms.fire("!a:example")
+		assertEquals(1, io.size)
+		rooms.fire("!a:example")
+		rooms.fire("!a:example")
+		assertEquals(1, io.size)
+		io.runNext()
+		assertEquals(1, io.size)
+		io.runNext()
+
+		assertEquals(0, io.size)
+		verify(connector, times(3)).getRecentThreads(20)
+	}
+
+	@Test
+	fun `stale session subscriptions are replaced and their callbacks ignored`() {
+		val rooms = ObservedRooms()
+		val connector = observableConnector(ConnectorSources.MATRIX, rooms)
+		`when`(connector.getRecentThreads(20))
+			.thenReturn(listOf(connectorThread(ConnectorSources.MATRIX, "!a:example")))
+		val session = mock(MatrixAuthSession::class.java)
+		`when`(session.getSnapshot()).thenReturn(
+			Snapshot(MatrixAuthState.READY, RecoverableErrorDetail.NONE, "https://a"),
+			Snapshot(MatrixAuthState.READY, RecoverableErrorDetail.NONE, "https://a"),
+		)
+		val viewModel = createViewModel(
+			connector,
+			matrixAuthSession = session,
+			androidExecutor = immediateUi(),
+		)
+
+		viewModel.loadConnectorThreads()
+		val staleCallback = rooms.callbacks.single().second
+		// Same room, new session snapshot instance (e.g. sign-out then sign-in again).
+		viewModel.loadConnectorThreads()
+		assertEquals(listOf("!a:example"), rooms.cancelled)
+		assertEquals(2, rooms.callbacks.size)
+
+		staleCallback()
+		verify(connector, times(2)).getRecentThreads(20)
+		rooms.fire("!a:example")
+		verify(connector, times(3)).getRecentThreads(20)
+
+		// Deauthorization cancels observation and later callbacks do not refresh.
+		`when`(connector.isAuthorized()).thenReturn(false)
+		viewModel.loadConnectorThreads()
+		assertEquals(listOf("!a:example", "!a:example"), rooms.cancelled)
+		rooms.fire("!a:example")
+		verify(connector, times(3)).getRecentThreads(20)
+	}
+
+	@Test
+	fun `simulated Matrix remote event refreshes inbox through the room observer seam`() {
+		val fixture = MatrixInboxFixture()
+		fixture.saveSession()
+		clearOpenedStoresGuard()
+		val session = fixture.session()
+		val viewModel = createViewModel(
+			fixture.connector(session),
+			matrixAuthSession = session,
+			androidExecutor = immediateUi(),
+		)
+
+		viewModel.loadConnectorThreads()
+		assertEquals("matrix:!room:example", viewModel.connectorThreadItems.value?.single()?.stableId)
+		FakeMatrixSdkState.roomsToReturn = listOf(
+			FakeRoomSpec("!new:example", "New"),
+			FakeRoomSpec("!room:example", "Room"),
+		)
+		FakeMatrixSdkState.simulateRemoteEvent(
+			listOf(
+				TimelineDiff.PushBack(
+					TimelineItem(
+						FakeTimelineEventSpec(
+							EventOrTransactionId.EventId("\$remote:example"),
+							"@bob:example",
+							"hello",
+							1_700_000_000_000uL,
+						),
+					),
+				),
+			),
+		)
+
+		assertEquals(
+			setOf("matrix:!new:example", "matrix:!room:example"),
+			viewModel.connectorThreadItems.value?.map { it.stableId }?.toSet(),
+		)
+	}
+
 	private fun connector(source: ConnectorSource, thread: ConnectorThread) =
 		mock(ReadOnlyConnector::class.java).also { connector ->
 			`when`(connector.source).thenReturn(source)
@@ -468,12 +663,13 @@ class ContactListViewModelTest {
 		vararg registeredConnectors: ReadOnlyConnector,
 		matrixAuthSession: MatrixAuthSession = mock(MatrixAuthSession::class.java),
 		ioExecutor: Executor = ImmediateExecutor(),
+		androidExecutor: AndroidExecutor = mock(AndroidExecutor::class.java),
 	) = ContactListViewModel(
 		mock(Application::class.java),
 		ImmediateExecutor(),
 		mock(LifecycleManager::class.java),
 		mock(TransactionManager::class.java),
-		mock(AndroidExecutor::class.java),
+		androidExecutor,
 		mock(ContactManager::class.java),
 		mock(AuthorManager::class.java),
 		mock(ConversationManager::class.java),

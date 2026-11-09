@@ -1,6 +1,7 @@
 package org.briarproject.briar.android.contact
 
 import android.app.Application
+import androidx.annotation.UiThread
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import org.briarproject.bramble.api.connection.ConnectionRegistry
@@ -72,10 +73,20 @@ internal class ContactListViewModel @Inject constructor(
 		_connectorAvailabilityStates
 	val sourceFilter: LiveData<InboxSourceFilter> = _sourceFilter
 
+	private val roomObservers = ConnectorInboxRoomObservers(::onRemoteConnectorActivity)
+
+	/** Set on the UI thread when remote activity arrives while a load is in flight. */
+	private var remoteRefreshPending = false
+
 	fun setSourceFilter(filter: InboxSourceFilter) {
 		if (_sourceFilter.value != filter) {
 			_sourceFilter.value = filter
 		}
+	}
+
+	override fun onCleared() {
+		super.onCleared()
+		roomObservers.close()
 	}
 
 	override fun eventOccurred(event: Event) {
@@ -103,7 +114,8 @@ internal class ContactListViewModel @Inject constructor(
 
 	fun loadConnectorThreads() {
 		if (_connectorAvailabilityStates.value.orEmpty().values.any { it == LOADING }) return
-		val connectors = connectorRegistry.connectors.filter { it.isEnabled() }
+		val (connectors, disabled) = connectorRegistry.connectors.partition { it.isEnabled() }
+		disabled.forEach { roomObservers.clear(it.source) }
 		if (connectors.isEmpty()) {
 			_connectorAvailabilityStates.value = emptyMap()
 			_connectorThreadItems.value = emptyList()
@@ -126,12 +138,15 @@ internal class ContactListViewModel @Inject constructor(
 					if (connector.source == ConnectorSources.MATRIX) matrixAuthSession.start()
 					if (connector.isSessionExpired()) {
 						states[connector.source] = SESSION_EXPIRED
+						roomObservers.clear(connector.source)
 						return@forEach
 					}
 					if (!connector.isAuthorized()) {
 						states[connector.source] = ACCOUNT_UNAVAILABLE
+						roomObservers.clear(connector.source)
 						return@forEach
 					}
+					val fence = sessionFence(connector.source)
 					val threads = connector.getRecentThreads(20)
 					states[connector.source] = when {
 						threads.isNotEmpty() -> NONE
@@ -139,6 +154,7 @@ internal class ContactListViewModel @Inject constructor(
 						else -> EMPTY
 					}
 					threads.mapTo(items, ::GenericConnectorInboxThreadItem)
+					roomObservers.update(connector, fence, threads)
 				} catch (e: RuntimeException) {
 					states[connector.source] = LOAD_FAILED
 					items.addAll(previousItems[connector.source].orEmpty())
@@ -146,6 +162,38 @@ internal class ContactListViewModel @Inject constructor(
 			}
 			_connectorThreadItems.postValue(items)
 			_connectorAvailabilityStates.postValue(states)
+			// Queued after the posted values, so the LOADING guard is already cleared.
+			androidExecutor.runOnUiThread(Runnable(::runPendingRemoteRefresh))
 		}
+	}
+
+	/**
+	 * Identity of the current Matrix auth snapshot. Every sign-in, restore or expiry
+	 * installs a new snapshot instance, so subscriptions made under an older session are
+	 * replaced instead of silently outliving it. Sign-out is fenced by the unauthorized path.
+	 */
+	private fun sessionFence(source: ConnectorSource): Any? =
+		if (source == ConnectorSources.MATRIX) matrixAuthSession.getSnapshot() else null
+
+	/** Called from SDK callback threads; coalesces onto the UI thread. */
+	private fun onRemoteConnectorActivity() {
+		androidExecutor.runOnUiThread(Runnable(::refreshAfterRemoteActivity))
+	}
+
+	@UiThread
+	private fun refreshAfterRemoteActivity() {
+		if (roomObservers.isClosed) return
+		if (_connectorAvailabilityStates.value.orEmpty().values.any { it == LOADING }) {
+			remoteRefreshPending = true
+		} else {
+			loadConnectorThreads()
+		}
+	}
+
+	@UiThread
+	private fun runPendingRemoteRefresh() {
+		if (!remoteRefreshPending) return
+		remoteRefreshPending = false
+		if (!roomObservers.isClosed) loadConnectorThreads()
 	}
 }
