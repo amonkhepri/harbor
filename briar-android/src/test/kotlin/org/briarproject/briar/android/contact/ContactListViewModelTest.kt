@@ -42,6 +42,8 @@ import org.matrix.rustcomponents.sdk.FakeTimelineEventSpec
 import org.matrix.rustcomponents.sdk.TimelineDiff
 import org.matrix.rustcomponents.sdk.TimelineItem
 import org.mockito.Mockito.RETURNS_DEFAULTS
+import org.mockito.ArgumentMatchers.any
+import org.mockito.Mockito.never
 import org.mockito.Mockito.times
 import org.mockito.Mockito.verify
 import org.mockito.Mockito.withSettings
@@ -560,6 +562,52 @@ class ContactListViewModelTest {
 
 		assertEquals(0, io.size)
 		verify(connector, times(3)).getRecentThreads(20)
+	}
+
+	@Test
+	fun `event burst during a load yields one follow-up and the refresh never re-triggers itself`() {
+		val rooms = ObservedRooms()
+		val connector = observableConnector(ConnectorSources.MATRIX, rooms)
+		`when`(connector.getRecentThreads(20))
+			.thenReturn(listOf(connectorThread(ConnectorSources.MATRIX, "!a:example")))
+		val io = QueuedIoExecutor()
+		val viewModel = createViewModel(connector, ioExecutor = io, androidExecutor = immediateUi())
+
+		viewModel.loadConnectorThreads()
+		io.runNext()
+		// An own send produces a burst of timeline updates (local echo, send ack, remote echo).
+		rooms.fire("!a:example")
+		assertEquals(1, io.size)
+		repeat(50) { rooms.fire("!a:example") }
+		assertEquals(1, io.size)
+		io.runNext()
+		assertEquals(1, io.size)
+		io.runNext()
+
+		// Reloading the same rooms keeps the existing subscriptions: no re-subscribe, which
+		// is the only path that could feed the refresh back into itself.
+		assertEquals(0, io.size)
+		verify(connector, times(3)).getRecentThreads(20)
+		assertEquals(1, rooms.callbacks.size)
+		assertEquals(emptyList<String>(), rooms.cancelled)
+	}
+
+	@Test
+	fun `default-off connectors load without observers or queued UI refreshes`() {
+		val rooms = ObservedRooms()
+		val matrix = observableConnector(ConnectorSources.MATRIX, rooms)
+		`when`(matrix.isEnabled()).thenReturn(false)
+		val androidExecutor = mock(AndroidExecutor::class.java)
+		val viewModel = createViewModel(matrix, androidExecutor = androidExecutor)
+
+		viewModel.loadConnectorThreads()
+		viewModel.loadConnectorThreads()
+
+		assertEquals(emptyList<Pair<String, () -> Unit>>(), rooms.callbacks)
+		assertEquals(emptyMap<ConnectorSource, ConnectorInboxAvailabilityState>(),
+			viewModel.connectorAvailabilityStates.value)
+		verify(matrix, never()).getRecentThreads(20)
+		verify(androidExecutor, never()).runOnUiThread(any(Runnable::class.java))
 	}
 
 	@Test
