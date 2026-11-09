@@ -57,6 +57,24 @@ class ConnectorConversationSearchStateTest {
 		assertEquals(messages[0].stableId, selected.withMessages(listOf(messages[0], deleted)).selectedId)
 	}
 
+	@Test
+	fun selectedRowIndexAccountsForDaySeparators() {
+		val day = 86_400_000L
+		val messages = listOf(
+			item("1", "x").copy(dateMillis = day),
+			item("2", "hit").copy(dateMillis = day + 1_000L),
+			item("3", "hit").copy(dateMillis = 3 * day),
+		)
+		val rows = messages.toTimelineRows()
+		val state = ConnectorConversationSearchState().withQuery("hit", messages)
+
+		// Rows: sep, 1, 2, sep, 3 -- the message index would point at the wrong row.
+		assertEquals(2, state.selectedRowIndex(rows))
+		assertEquals(4, state.next().selectedRowIndex(rows))
+		assertEquals(-1, ConnectorConversationSearchState().selectedRowIndex(rows))
+		assertEquals(-1, state.selectedRowIndex(emptyList()))
+	}
+
 	private fun item(id: String, text: String) = ConnectorConversationMessageItem(
 		ConnectorSources.MATRIX,
 		"room",

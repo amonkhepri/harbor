@@ -13,6 +13,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.briarproject.briar.api.connector.ConnectorSources
 import java.io.File
+import java.util.TimeZone
 
 class ConnectorConversationMessageListStateTest {
 
@@ -210,7 +211,86 @@ class ConnectorConversationMessageListStateTest {
 		assertEquals(null, reconciled.messages[2].downloadedFile)
 	}
 
+	@Test
+	fun timelineRowsOfEmptyListAreEmpty() {
+		val rows = emptyList<ConnectorConversationMessageItem>().toTimelineRows(UTC)
+
+		assertEquals(emptyList<ConnectorConversationRow>(), rows)
+	}
+
+	@Test
+	fun timelineRowsInsertOneSeparatorPerLocalDayBoundary() {
+		val before = messageItem("a").copy(dateMillis = MIDNIGHT_UTC - 1_000L)
+		val sameDay = messageItem("b").copy(dateMillis = MIDNIGHT_UTC - 500L)
+		val after = messageItem("c").copy(dateMillis = MIDNIGHT_UTC)
+
+		val rows = listOf(before, sameDay, after).toTimelineRows(UTC)
+
+		assertEquals(
+			listOf(
+				ConnectorConversationRow.DaySeparator(MIDNIGHT_UTC - DAY),
+				ConnectorConversationRow.Message(before),
+				ConnectorConversationRow.Message(sameDay),
+				ConnectorConversationRow.DaySeparator(MIDNIGHT_UTC),
+				ConnectorConversationRow.Message(after),
+			),
+			rows,
+		)
+	}
+
+	@Test
+	fun timelineBoundaryFollowsTheLocalTimeZone() {
+		val items = listOf(
+			messageItem("a").copy(dateMillis = MIDNIGHT_UTC - 1_000L),
+			messageItem("b").copy(dateMillis = MIDNIGHT_UTC),
+		)
+
+		// Two hours east of UTC both messages fall on the same local day.
+		val rows = items.toTimelineRows(TimeZone.getTimeZone("GMT+02:00"))
+
+		assertEquals(1, rows.count { it is ConnectorConversationRow.DaySeparator })
+		assertTrue(rows.first() is ConnectorConversationRow.DaySeparator)
+	}
+
+	@Test
+	fun undatedRowsNeverStartADay() {
+		val dated = messageItem("a").copy(dateMillis = MIDNIGHT_UTC)
+		val undated = messageItem("b").copy(dateMillis = 0L)
+
+		val rows = listOf(undated, dated, undated.copy(connectorMessageId = "c")).toTimelineRows(UTC)
+
+		assertEquals(
+			listOf(false, true, false, false),
+			rows.map { it is ConnectorConversationRow.DaySeparator },
+		)
+	}
+
+	@Test
+	fun prependedHistoryKeepsExistingSeparatorAndMessageRowIds() {
+		val today = messageItem("today").copy(dateMillis = MIDNIGHT_UTC + 1_000L)
+		val sameDayOlder = messageItem("older").copy(dateMillis = MIDNIGHT_UTC + 500L)
+		val yesterday = messageItem("yesterday").copy(dateMillis = MIDNIGHT_UTC - 1_000L)
+
+		val first = listOf(today).toTimelineRows(UTC)
+		val sameDayPage = listOf(sameDayOlder, today).toTimelineRows(UTC)
+		val olderDayPage = listOf(yesterday, sameDayOlder, today).toTimelineRows(UTC)
+
+		// Same-day history leaves today's separator identical, so scroll anchoring is unaffected.
+		assertEquals(first.first(), sameDayPage.first())
+		assertEquals(3, sameDayPage.size)
+		assertEquals(first.first().rowId, olderDayPage[2].rowId)
+		assertEquals(
+			listOf(true, false, true, false, false),
+			olderDayPage.map { it is ConnectorConversationRow.DaySeparator },
+		)
+		assertEquals(today.stableId, olderDayPage.last().rowId)
+	}
+
 	companion object {
+		private val UTC = TimeZone.getTimeZone("UTC")
+		private const val DAY = 86_400_000L
+		// 2023-11-15T00:00:00Z
+		private const val MIDNIGHT_UTC = 1_700_006_400_000L
 		private val CONNECTOR_SOURCE = ConnectorSource("sample", "Sample")
 	}
 }

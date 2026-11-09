@@ -41,6 +41,42 @@ import java.time.Duration
 class ConnectorConversationAdapterTest {
 
 	@Test
+	fun daySeparatorsUseTheirOwnViewTypeAndRenderTheDate() {
+		val context = RuntimeEnvironment.getApplication()
+		val adapter = ConnectorConversationAdapter()
+		val day = 86_400_000L
+		val rows = listOf(
+			ConnectorConversationMessageItem(
+				ConnectorSources.MATRIX, "!room:example.org", "\$a", 5 * day, false, "one",
+				ConnectorMessageType.TEXT,
+			),
+			ConnectorConversationMessageItem(
+				ConnectorSources.MATRIX, "!room:example.org", "\$b", 6 * day, false, "two",
+				ConnectorMessageType.TEXT,
+			),
+		).toTimelineRows()
+		adapter.submitList(rows)
+
+		assertEquals(4, adapter.itemCount)
+		assertEquals(
+			listOf(true, false, true, false),
+			(0 until 4).map { adapter.getItemViewType(it) == adapter.getItemViewType(0) },
+		)
+		val parent = FrameLayout(context)
+		val holder = adapter.onCreateViewHolder(parent, adapter.getItemViewType(0))
+		adapter.onBindViewHolder(holder, 0)
+		val label = holder.itemView.findViewById<TextView>(R.id.connectorDaySeparatorText)
+		assertEquals(
+			org.briarproject.briar.android.util.UiUtils.formatDateFull(
+				context,
+				(rows[0] as ConnectorConversationRow.DaySeparator).dayStartMillis,
+			),
+			label.text.toString(),
+		)
+		assertTrue(adapter.onCreateViewHolder(parent, adapter.getItemViewType(1)) is ConnectorConversationAdapter.MessageViewHolder)
+	}
+
+	@Test
 	fun testEditedMessageRendersVisibleMarker() {
 		val view = LayoutInflater.from(RuntimeEnvironment.getApplication())
 			.inflate(R.layout.list_item_connector_message, null)
