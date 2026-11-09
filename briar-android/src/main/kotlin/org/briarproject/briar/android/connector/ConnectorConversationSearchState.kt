@@ -30,6 +30,12 @@ internal data class ConnectorConversationSearchState(
 		return copy(matchIds = matches, selectedId = selected)
 	}
 
+	/** Adapter position of the selected match, or -1; separators shift it away from the message index. */
+	fun selectedRowIndex(rows: List<ConnectorConversationRow>): Int {
+		val id = selectedId ?: return -1
+		return rows.indexOfFirst { it is ConnectorConversationRow.Message && it.rowId == id }
+	}
+
 	fun next(): ConnectorConversationSearchState = move(1)
 	fun previous(): ConnectorConversationSearchState = move(-1)
 

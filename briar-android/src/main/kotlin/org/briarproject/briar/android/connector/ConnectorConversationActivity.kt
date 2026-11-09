@@ -1223,7 +1223,8 @@ class ConnectorConversationActivity : BriarActivity() {
 
 	private fun submitMessageState(state: ConnectorConversationMessageListState) {
 		list.setEmptyText(state.emptyText)
-		adapter.submitList(state.messages) {
+		val rows = state.messages.toTimelineRows()
+		adapter.submitList(rows) {
 			if (!state.isLoading) list.showData()
 			val savedLayoutManagerState = layoutManagerState
 			if (savedLayoutManagerState != null) {
@@ -1232,7 +1233,7 @@ class ConnectorConversationActivity : BriarActivity() {
 				layoutManager.onRestoreInstanceState(savedLayoutManagerState)
 				layoutManagerState = null
 			} else if (!list.recyclerView.canScrollVertically(1)) {
-				list.scrollToPosition(state.messages.lastIndex)
+				list.scrollToPosition(rows.lastIndex)
 			}
 		}
 		if (state.isLoading && state.messages.isEmpty()) list.showProgressBar()
@@ -1290,8 +1291,8 @@ class ConnectorConversationActivity : BriarActivity() {
 	}
 
 	private fun scrollToSelectedMatch() {
-		val id = searchState.selectedId ?: return
-		val index = messageState.messages.indexOfFirst { it.stableId == id }
+		// Adapter positions include day separators, so map through the same row list.
+		val index = searchState.selectedRowIndex(messageState.messages.toTimelineRows())
 		if (index >= 0) list.scrollToPosition(index)
 	}
 

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TextView xmlns:android="http://schemas.android.com/apk/res/android"
+	android:id="@+id/connectorDaySeparatorText"
+	android:layout_width="match_parent"
+	android:layout_height="wrap_content"
+	android:gravity="center"
+	android:paddingStart="@dimen/margin_activity_horizontal"
+	android:paddingTop="@dimen/margin_medium"
+	android:paddingEnd="@dimen/margin_activity_horizontal"
+	android:paddingBottom="@dimen/margin_medium"
+	android:textColor="?android:attr/textColorSecondary"
+	android:textSize="@dimen/text_size_small" />

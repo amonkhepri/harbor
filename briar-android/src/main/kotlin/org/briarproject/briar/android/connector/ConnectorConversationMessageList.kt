@@ -3,6 +3,8 @@ package org.briarproject.briar.android.connector
 import org.briarproject.briar.android.connector.ConnectorLocalEchoStatus.PENDING
 import org.briarproject.briar.api.connector.ConnectorMessageType
 import org.briarproject.briar.api.connector.ConnectorSource
+import java.util.Calendar
+import java.util.TimeZone
 import java.util.UUID
 
 internal data class ConnectorConversationMessageListState(
@@ -205,3 +207,50 @@ private fun ConnectorConversationAvailabilityState.shouldKeepPreviousMessages():
 	this == ConnectorConversationAvailabilityState.ACCOUNT_UNAVAILABLE ||
 		this == ConnectorConversationAvailabilityState.SESSION_EXPIRED ||
 		this == ConnectorConversationAvailabilityState.LOAD_FAILED
+
+/** One adapter row: a message or the local-calendar-day separator above its first message (MX-078). */
+internal sealed interface ConnectorConversationRow {
+	val rowId: String
+
+	data class Message(val item: ConnectorConversationMessageItem) : ConnectorConversationRow {
+		override val rowId: String get() = item.stableId
+	}
+
+	/** [dayStartMillis] is local midnight, so the id stays stable when older same-day history is prepended. */
+	data class DaySeparator(val dayStartMillis: Long) : ConnectorConversationRow {
+		override val rowId: String get() = "day:$dayStartMillis"
+	}
+}
+
+/**
+ * Interleaves a [ConnectorConversationRow.DaySeparator] before the first message of each local
+ * calendar day. Undated rows (`dateMillis <= 0`) never start a day; they stay with the preceding day.
+ */
+internal fun List<ConnectorConversationMessageItem>.toTimelineRows(
+	timeZone: TimeZone = TimeZone.getDefault(),
+): List<ConnectorConversationRow> {
+	if (isEmpty()) return emptyList()
+	val rows = ArrayList<ConnectorConversationRow>(size + 1)
+	val calendar = Calendar.getInstance(timeZone)
+	var currentDayStart: Long? = null
+	for (item in this) {
+		if (item.dateMillis > 0) {
+			val dayStart = calendar.startOfDay(item.dateMillis)
+			if (dayStart != currentDayStart) {
+				rows += ConnectorConversationRow.DaySeparator(dayStart)
+				currentDayStart = dayStart
+			}
+		}
+		rows += ConnectorConversationRow.Message(item)
+	}
+	return rows
+}
+
+private fun Calendar.startOfDay(millis: Long): Long {
+	timeInMillis = millis
+	set(Calendar.HOUR_OF_DAY, 0)
+	set(Calendar.MINUTE, 0)
+	set(Calendar.SECOND, 0)
+	set(Calendar.MILLISECOND, 0)
+	return timeInMillis
+}

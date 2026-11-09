@@ -7,11 +7,13 @@ import android.view.ViewGroup
 import android.widget.ImageView
 import android.widget.TextView
 import androidx.appcompat.widget.PopupMenu
+import androidx.core.view.ViewCompat
 import androidx.recyclerview.widget.DiffUtil.ItemCallback
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
 import org.briarproject.briar.R
 import org.briarproject.briar.android.util.UiUtils.formatDate
+import org.briarproject.briar.android.util.UiUtils.formatDateFull
 import org.briarproject.briar.api.connector.ConnectorMessageReceiptState
 import org.briarproject.briar.api.connector.ConnectorMessageType
 
@@ -25,17 +27,21 @@ internal class ConnectorConversationAdapter(
 	var editsOwnText: Boolean = false,
 	var onReactClicked: ((ConnectorConversationMessageItem) -> Unit)? = null,
 	var onLinkClicked: ((String) -> Unit)? = null,
-) : ListAdapter<
-	ConnectorConversationMessageItem,
-	ConnectorConversationAdapter.MessageViewHolder,
-	>(MessageCallback()) {
+) : ListAdapter<ConnectorConversationRow, RecyclerView.ViewHolder>(RowCallback()) {
 
-	override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): MessageViewHolder {
-		val view = LayoutInflater.from(parent.context).inflate(
-			R.layout.list_item_connector_message,
-			parent,
-			false,
-		)
+	override fun getItemViewType(position: Int): Int = when (getItem(position)) {
+		is ConnectorConversationRow.Message -> VIEW_TYPE_MESSAGE
+		is ConnectorConversationRow.DaySeparator -> VIEW_TYPE_DAY_SEPARATOR
+	}
+
+	override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RecyclerView.ViewHolder {
+		val inflater = LayoutInflater.from(parent.context)
+		if (viewType == VIEW_TYPE_DAY_SEPARATOR) {
+			return DaySeparatorViewHolder(
+				inflater.inflate(R.layout.list_item_connector_day_separator, parent, false),
+			)
+		}
+		val view = inflater.inflate(R.layout.list_item_connector_message, parent, false)
 		return MessageViewHolder(
 			view,
 			onDeleteClicked,
@@ -50,14 +56,32 @@ internal class ConnectorConversationAdapter(
 		}
 	}
 
-	override fun onBindViewHolder(holder: MessageViewHolder, position: Int) {
-		holder.onLinkClicked = onLinkClicked
-		holder.bind(getItem(position))
+	override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
+		when (val row = getItem(position)) {
+			is ConnectorConversationRow.Message -> (holder as MessageViewHolder).let {
+				it.onLinkClicked = onLinkClicked
+				it.bind(row.item)
+			}
+			is ConnectorConversationRow.DaySeparator ->
+				(holder as DaySeparatorViewHolder).bind(row.dayStartMillis)
+		}
 	}
 
-	override fun onViewRecycled(holder: MessageViewHolder) {
-		holder.recycle()
+	override fun onViewRecycled(holder: RecyclerView.ViewHolder) {
+		(holder as? MessageViewHolder)?.recycle()
 		super.onViewRecycled(holder)
+	}
+
+	class DaySeparatorViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
+		private val label: TextView = itemView.findViewById(R.id.connectorDaySeparatorText)
+
+		init {
+			ViewCompat.setAccessibilityHeading(label, true)
+		}
+
+		fun bind(dayStartMillis: Long) {
+			label.text = formatDateFull(label.context, dayStartMillis)
+		}
 	}
 
 	class MessageViewHolder(
@@ -365,27 +389,41 @@ internal class ConnectorConversationAdapter(
 		}
 	}
 
-	private class MessageCallback : ItemCallback<ConnectorConversationMessageItem>() {
+	private class RowCallback : ItemCallback<ConnectorConversationRow>() {
 
 		override fun areItemsTheSame(
-			i1: ConnectorConversationMessageItem,
-			i2: ConnectorConversationMessageItem,
-		): Boolean = i1.stableId == i2.stableId
+			r1: ConnectorConversationRow,
+			r2: ConnectorConversationRow,
+		): Boolean = r1.rowId == r2.rowId
 
 		override fun areContentsTheSame(
-			i1: ConnectorConversationMessageItem,
-			i2: ConnectorConversationMessageItem,
-		): Boolean = i1.dateMillis == i2.dateMillis &&
-			i1.isOutgoing == i2.isOutgoing &&
-			i1.text == i2.text &&
-			i1.type == i2.type &&
-			i1.isEdited == i2.isEdited &&
-			i1.isReply == i2.isReply &&
-			i1.reactions == i2.reactions &&
-			i1.localEchoStatus == i2.localEchoStatus &&
-			i1.attachment == i2.attachment &&
-			i1.downloadState == i2.downloadState &&
-			i1.downloadedFile == i2.downloadedFile &&
-			i1.receiptState == i2.receiptState
+			r1: ConnectorConversationRow,
+			r2: ConnectorConversationRow,
+		): Boolean {
+			if (r1 !is ConnectorConversationRow.Message ||
+				r2 !is ConnectorConversationRow.Message
+			) {
+				return r1 == r2
+			}
+			val i1 = r1.item
+			val i2 = r2.item
+			return i1.dateMillis == i2.dateMillis &&
+				i1.isOutgoing == i2.isOutgoing &&
+				i1.text == i2.text &&
+				i1.type == i2.type &&
+				i1.isEdited == i2.isEdited &&
+				i1.isReply == i2.isReply &&
+				i1.reactions == i2.reactions &&
+				i1.localEchoStatus == i2.localEchoStatus &&
+				i1.attachment == i2.attachment &&
+				i1.downloadState == i2.downloadState &&
+				i1.downloadedFile == i2.downloadedFile &&
+				i1.receiptState == i2.receiptState
+		}
+	}
+
+	private companion object {
+		const val VIEW_TYPE_MESSAGE = 0
+		const val VIEW_TYPE_DAY_SEPARATOR = 1
 	}
 }
