@@ -103,6 +103,15 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		onSessionExpiredListener = listener
 	}
 
+	@Synchronized
+	override fun currentUserId(): String? = try {
+		loginClient
+			?.let { it.javaClass.getMethod("userId").invoke(it) as? String }
+			?.takeIf { it.isNotBlank() }
+	} catch (_: Exception) {
+		null
+	}
+
 	/** Signals an SDK unknown/missing-token result; never logs the throwable or token. */
 	private fun handleSessionExpired() {
 		onSessionExpiredListener?.invoke()

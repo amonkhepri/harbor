@@ -11,6 +11,11 @@ interface MatrixAuthSession {
 		val authState: MatrixAuthState,
 		val errorDetail: RecoverableErrorDetail,
 		val homeserverUrl: String? = null,
+		/**
+		 * Matrix user ID of the signed-in account. Non-null only in
+		 * [MatrixAuthState.READY]; deliberately omitted from [toString].
+		 */
+		val userId: String? = null,
 	) {
 		override fun toString(): String =
 			"Snapshot(authState=$authState, errorDetail=$errorDetail, hasHomeserverUrl=${homeserverUrl != null})"

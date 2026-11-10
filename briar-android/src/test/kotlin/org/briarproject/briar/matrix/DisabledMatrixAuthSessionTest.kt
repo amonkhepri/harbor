@@ -25,5 +25,6 @@ class DisabledMatrixAuthSessionTest {
 		assertEquals(MatrixAuthState.CLOSED, snapshot.authState)
 		assertEquals(RecoverableErrorDetail.NONE, snapshot.errorDetail)
 		assertNull(snapshot.homeserverUrl)
+		assertNull(snapshot.userId)
 	}
 }

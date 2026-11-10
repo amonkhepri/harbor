@@ -26,6 +26,10 @@ internal fun setupStep(snapshot: MatrixAuthSession.Snapshot): MatrixSetupStep =
 		MatrixAuthState.CLOSED -> MatrixSetupStep.UNAVAILABLE
 	}
 
+/** The account ID to show, only on the READY step; null hides the "Signed in as" line. */
+internal fun signedInUserId(snapshot: MatrixAuthSession.Snapshot?): String? =
+	snapshot?.takeIf { setupStep(it) == MatrixSetupStep.READY }?.userId?.takeIf { it.isNotBlank() }
+
 internal data class MatrixSetupState(
 	val snapshot: MatrixAuthSession.Snapshot? = null,
 	val busy: Boolean = false,

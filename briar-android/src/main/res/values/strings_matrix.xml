@@ -8,6 +8,7 @@
 	<string name="matrix_sign_in">Sign in</string>
 	<string name="matrix_working">Connecting…</string>
 	<string name="matrix_ready">Your Matrix account is connected.</string>
+	<string name="matrix_signed_in_as">Signed in as %1$s</string>
 	<string name="matrix_setup_failed">Could not connect. Check your details and try again.</string>
 	<string name="matrix_unavailable">Matrix setup is unavailable. Return to Settings and try again.</string>
 	<string name="matrix_unsupported">This server requires a sign-in method that is not supported yet.</string>

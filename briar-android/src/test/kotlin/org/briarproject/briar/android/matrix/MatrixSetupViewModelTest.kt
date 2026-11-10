@@ -237,4 +237,26 @@ class MatrixSetupViewModelTest {
 		)
 		assertEquals(MatrixSetupStep.CREDENTIALS, setupStep(loginFailure))
 	}
+
+	@Test fun signedInUserIdIsShownOnlyOnTheReadyStep() {
+		val ready = Snapshot(
+			MatrixAuthState.READY,
+			RecoverableErrorDetail.NONE,
+			"https://example.org",
+			"@alice:example.org",
+		)
+		assertEquals("@alice:example.org", signedInUserId(ready))
+		assertNull(signedInUserId(ready.copy(userId = null)))
+		assertNull(signedInUserId(ready.copy(userId = " ")))
+		assertNull(signedInUserId(null))
+		// Defensive: even if a stale ID rode along, no other step may show it.
+		for (state in listOf(
+			MatrixAuthState.CLOSED,
+			MatrixAuthState.HOMESERVER_ENTRY,
+			MatrixAuthState.CREDENTIAL_ENTRY,
+			MatrixAuthState.RECOVERABLE_ERROR,
+		)) {
+			assertNull(signedInUserId(ready.copy(authState = state)))
+		}
+	}
 }

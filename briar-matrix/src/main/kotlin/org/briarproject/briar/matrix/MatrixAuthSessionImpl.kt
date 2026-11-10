@@ -54,7 +54,12 @@ class MatrixAuthSessionImpl(
 			HOMESERVER_SNAPSHOT
 		} else {
 			when (val result = loginClient.restore(storeConfiguration)) {
-				is RestoreResult.Restored -> Snapshot(MatrixAuthState.READY, NONE, result.homeserverUrl)
+				is RestoreResult.Restored -> Snapshot(
+					MatrixAuthState.READY,
+					NONE,
+					result.homeserverUrl,
+					loginClient.currentUserId(),
+				)
 				is RestoreResult.NotFound -> HOMESERVER_SNAPSHOT
 				is RestoreResult.Failed -> Snapshot(
 					MatrixAuthState.RECOVERABLE_ERROR,
@@ -92,7 +97,7 @@ class MatrixAuthSessionImpl(
 		val storeConfiguration = storeConfigurationProvider?.newStoreConfiguration()
 		val result = loginClient.login(homeserverUrl, username, password, storeConfiguration)
 		snapshot = if (result == NONE) {
-			Snapshot(MatrixAuthState.READY, NONE, homeserverUrl)
+			Snapshot(MatrixAuthState.READY, NONE, homeserverUrl, loginClient.currentUserId())
 		} else {
 			storeConfigurationProvider?.invalidateStore()
 			Snapshot(MatrixAuthState.RECOVERABLE_ERROR, result, homeserverUrl)

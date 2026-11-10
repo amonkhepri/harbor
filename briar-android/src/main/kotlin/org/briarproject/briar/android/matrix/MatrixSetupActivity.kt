@@ -34,6 +34,7 @@ class MatrixSetupActivity : BriarActivity() {
 	private lateinit var password: EditText
 	private lateinit var submit: Button
 	private lateinit var status: TextView
+	private lateinit var account: TextView
 	private lateinit var signOut: Button
 
 	override fun injectActivity(component: ActivityComponent) {
@@ -52,6 +53,7 @@ class MatrixSetupActivity : BriarActivity() {
 		password = findViewById(R.id.matrixPassword)
 		submit = findViewById(R.id.matrixSubmit)
 		status = findViewById(R.id.matrixStatus)
+		account = findViewById(R.id.matrixAccount)
 		signOut = findViewById(R.id.matrixSignOut)
 		model = ViewModelProvider(
 			this,
@@ -124,6 +126,9 @@ class MatrixSetupActivity : BriarActivity() {
 			else -> R.string.matrix_homeserver
 		}
 		status.setText(message)
+		val userId = signedInUserId(state.snapshot)
+		account.visibility = if (userId != null) View.VISIBLE else View.GONE
+		account.text = userId?.let { getString(R.string.matrix_signed_in_as, it) }.orEmpty()
 		if (step == MatrixSetupStep.READY) {
 			(getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager)
 				.hideSoftInputFromWindow(password.windowToken, 0)

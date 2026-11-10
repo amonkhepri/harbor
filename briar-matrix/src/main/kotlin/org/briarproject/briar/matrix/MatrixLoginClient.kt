@@ -28,6 +28,9 @@ interface MatrixLoginClient {
 
 	fun setOnSessionExpiredListener(listener: (() -> Unit)?) {}
 
+	/** The signed-in account's Matrix user ID after a successful [login] or [restore], else null. */
+	fun currentUserId(): String? = null
+
 	sealed class RestoreResult {
 		data class Restored(val homeserverUrl: String) : RestoreResult()
 		object NotFound : RestoreResult()

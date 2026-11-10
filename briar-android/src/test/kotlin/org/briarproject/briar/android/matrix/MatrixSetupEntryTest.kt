@@ -44,4 +44,18 @@ class MatrixSetupEntryTest {
 		assertFalse(password.isSaveEnabled)
 		assertEquals(android.view.View.IMPORTANT_FOR_AUTOFILL_NO, password.importantForAutofill)
 	}
+
+	@Test fun accountLineIsHiddenUntilTheReadyStepShowsIt() {
+		val application = RuntimeEnvironment.getApplication()
+		application.setTheme(R.style.BriarTheme)
+		val view = LayoutInflater.from(application).inflate(R.layout.activity_matrix_setup, null)
+		assertEquals(
+			android.view.View.GONE,
+			view.findViewById<android.widget.TextView>(R.id.matrixAccount).visibility,
+		)
+		assertEquals(
+			"Signed in as @alice:example.org",
+			application.getString(R.string.matrix_signed_in_as, "@alice:example.org"),
+		)
+	}
 }
