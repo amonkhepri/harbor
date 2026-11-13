@@ -1,6 +1,7 @@
 package org.briarproject.briar.android.contact
 
 import android.app.Application
+import android.graphics.Color
 import android.view.LayoutInflater
 import android.widget.TextView
 import android.widget.ImageView
@@ -200,9 +201,15 @@ class ConnectorInboxThreadViewHolderTest {
 			holder.bind(GenericConnectorInboxThreadItem(group.copy(isDirect = direct))) { _, _ -> }
 			val expected = if (direct == false) R.drawable.ic_group else R.drawable.ic_link_menu
 			assertEquals(expected, shadowOf(icon.drawable).createdFromResId)
+			if (direct == false) {
+				assertEquals(Color.WHITE, icon.imageTintList!!.defaultColor)
+			} else {
+				assertNull(icon.imageTintList)
+			}
 			val description = if (direct == false) "Matrix group room" else "Matrix source"
 			assertEquals(description, icon.contentDescription.toString())
 		}
+		holder.bind(GenericConnectorInboxThreadItem(group)) { _, _ -> }
 		holder.bind(GenericConnectorInboxThreadItem(group.copy(source = ConnectorSources.TELEGRAM))) {
 				_,
 				_,
@@ -210,6 +217,7 @@ class ConnectorInboxThreadViewHolderTest {
 		}
 		assertEquals(R.drawable.ic_telegram, shadowOf(icon.drawable).createdFromResId)
 		assertEquals("Telegram source", icon.contentDescription.toString())
+		assertNull(icon.imageTintList)
 	}
 
 	private fun createHolder(): ConnectorInboxThreadViewHolder {

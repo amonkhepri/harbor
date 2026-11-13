@@ -1,7 +1,9 @@
 package org.briarproject.briar.android.contact
 
 import android.content.Context
+import android.content.res.ColorStateList
 import android.content.res.Resources
+import android.graphics.Color
 import android.view.View
 import android.widget.ImageView
 import android.widget.TextView
@@ -31,6 +33,8 @@ class ConnectorInboxThreadViewHolder(view: View) : RecyclerView.ViewHolder(view)
 		date.visibility = dateVisibility(item)
 		date.text = dateText(date.context, item)
 		sourceIcon.setImageResource(sourceIconRes(item))
+		sourceIcon.imageTintList =
+			if (isMatrixGroup(item)) ColorStateList.valueOf(Color.WHITE) else null
 		sourceIcon.contentDescription =
 			sourceContentDescription(sourceIcon.resources, item)
 		badge.text = sourceLabel(item)
