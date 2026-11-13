@@ -1,10 +1,12 @@
 package org.briarproject.briar.android.connector
 
+import android.app.AlertDialog
 import android.view.LayoutInflater
 import android.view.Menu
 import android.view.View
 import android.view.ViewGroup
 import android.widget.ImageView
+import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.appcompat.widget.PopupMenu
 import androidx.core.view.ViewCompat
@@ -16,6 +18,8 @@ import org.briarproject.briar.android.util.UiUtils.formatDate
 import org.briarproject.briar.android.util.UiUtils.formatDateFull
 import org.briarproject.briar.api.connector.ConnectorMessageReceiptState
 import org.briarproject.briar.api.connector.ConnectorMessageType
+import org.briarproject.briar.api.connector.ConnectorReactionSummary
+import org.briarproject.briar.api.connector.ConnectorSources
 
 internal class ConnectorConversationAdapter(
 	private val onDeleteClicked: ((ConnectorConversationMessageItem) -> Unit)? = null,
@@ -112,11 +116,16 @@ internal class ConnectorConversationAdapter(
 		private val fileDetails: TextView =
 			itemView.findViewById(R.id.connectorFileDetails)
 
+		private val reactionChips: LinearLayout =
+			itemView.findViewById(R.id.connectorReactionChips)
+
 		private var boundThreadId: String? = null
 		private var boundMessageId: String? = null
 		private var thumbnailCancellation: Cancellable? = null
 
 		fun recycle() {
+			reactionChips.removeAllViews()
+			reactionChips.visibility = View.GONE
 			thumbnailCancellation?.cancel()
 			thumbnailCancellation = null
 			boundThreadId = null
@@ -192,7 +201,29 @@ internal class ConnectorConversationAdapter(
 			} else {
 				replyText
 			}
-			val reactionSummary = if (item.reactions.isEmpty()) {
+			val showChips = item.connectorSource == ConnectorSources.MATRIX &&
+				item.reactions.any { it.senderIds.isNotEmpty() }
+			reactionChips.removeAllViews()
+			reactionChips.visibility = if (showChips) View.VISIBLE else View.GONE
+			if (showChips) {
+				item.reactions.forEach { reaction ->
+					val chip = TextView(itemView.context)
+					chip.text = text.resources.getString(
+						R.string.connector_message_reaction_summary,
+						reaction.key,
+						reaction.count,
+					)
+					chip.minHeight = (48 * text.resources.displayMetrics.density).toInt()
+					if (reaction.senderIds.isNotEmpty()) {
+						chip.setOnLongClickListener {
+							showReactionSenders(reaction)
+							true
+						}
+					}
+					reactionChips.addView(chip)
+				}
+			}
+			val reactionSummary = if (item.reactions.isEmpty() || showChips) {
 				null
 			} else {
 				item.reactions.joinToString("  ") { reaction ->
@@ -348,6 +379,24 @@ internal class ConnectorConversationAdapter(
 				}
 				actionCount > 0
 			}
+		}
+
+		private fun showReactionSenders(reaction: ConnectorReactionSummary) {
+			val senders = reaction.senderIds.take(ConnectorReactionSummary.MAX_SENDERS)
+			val entries = senders.toMutableList()
+			if (reaction.count > senders.size) {
+				entries.add(
+					text.resources.getString(
+						R.string.connector_reaction_more_senders,
+						reaction.count - senders.size,
+					),
+				)
+			}
+			AlertDialog.Builder(itemView.context)
+				.setTitle(reaction.key)
+				.setItems(entries.toTypedArray(), null)
+				.setPositiveButton(android.R.string.ok, null)
+				.show()
 		}
 
 		private fun showMessageActions(

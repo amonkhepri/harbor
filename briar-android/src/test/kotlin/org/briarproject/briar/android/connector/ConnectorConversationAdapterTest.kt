@@ -1,6 +1,7 @@
 package org.briarproject.briar.android.connector
 
 import android.app.Activity
+import android.app.AlertDialog
 import android.app.Application
 import android.os.Looper
 import android.text.Spannable
@@ -10,8 +11,10 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
 import android.widget.FrameLayout
+import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.fragment.app.FragmentActivity
+import java.time.Duration
 import org.briarproject.briar.R
 import org.briarproject.briar.android.connector.ConnectorLocalEchoStatus.FAILED
 import org.briarproject.briar.android.connector.ConnectorLocalEchoStatus.PENDING
@@ -34,11 +37,54 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
-import java.time.Duration
+import org.robolectric.shadows.ShadowAlertDialog
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [21], application = Application::class)
 class ConnectorConversationAdapterTest {
+
+	@Test
+	fun reactionLongPressShowsBoundedSendersAndRebindingClearsChips() {
+		val activity = Robolectric.buildActivity(Activity::class.java).setup().get()
+		val view = LayoutInflater.from(activity).inflate(R.layout.list_item_connector_message, null)
+		val holder = ConnectorConversationAdapter.MessageViewHolder(view)
+		val item = ConnectorConversationMessageItem(
+			ConnectorSources.MATRIX,
+			"!room:example.org",
+			"\$event",
+			1_000L,
+			false,
+			"body",
+			ConnectorMessageType.TEXT,
+			reactions = listOf(
+				ConnectorReactionSummary(
+					"👍",
+					52,
+					senderIds = List(50) { "@user$it:example.org" },
+				),
+			),
+		)
+		holder.bind(item)
+		val chips = view.findViewById<LinearLayout>(R.id.connectorReactionChips)
+		assertEquals(1, chips.childCount)
+		assertTrue(chips.getChildAt(0).performLongClick())
+		val dialog: AlertDialog = ShadowAlertDialog.getLatestAlertDialog()
+		assertTrue(dialog.isShowing)
+		assertEquals("@user0:example.org", dialog.listView.adapter.getItem(0))
+		assertEquals("@user49:example.org", dialog.listView.adapter.getItem(49))
+		assertEquals(
+			activity.getString(R.string.connector_reaction_more_senders, 2),
+			dialog.listView.adapter.getItem(50),
+		)
+		dialog.dismiss()
+		holder.bind(item.copy(reactions = emptyList()))
+		assertEquals(0, chips.childCount)
+		assertEquals(View.GONE, chips.visibility)
+		holder.bind(item.copy(connectorSource = ConnectorSources.TELEGRAM))
+		assertEquals(0, chips.childCount)
+		assertEquals(View.GONE, chips.visibility)
+		assertTrue(view.findViewById<TextView>(R.id.connectorMessageText).text.contains("52"))
+	}
 
 	@Test
 	fun daySeparatorsUseTheirOwnViewTypeAndRenderTheDate() {
@@ -47,11 +93,21 @@ class ConnectorConversationAdapterTest {
 		val day = 86_400_000L
 		val rows = listOf(
 			ConnectorConversationMessageItem(
-				ConnectorSources.MATRIX, "!room:example.org", "\$a", 5 * day, false, "one",
+				ConnectorSources.MATRIX,
+				"!room:example.org",
+				"\$a",
+				5 * day,
+				false,
+				"one",
 				ConnectorMessageType.TEXT,
 			),
 			ConnectorConversationMessageItem(
-				ConnectorSources.MATRIX, "!room:example.org", "\$b", 6 * day, false, "two",
+				ConnectorSources.MATRIX,
+				"!room:example.org",
+				"\$b",
+				6 * day,
+				false,
+				"two",
 				ConnectorMessageType.TEXT,
 			),
 		).toTimelineRows()
@@ -73,7 +129,12 @@ class ConnectorConversationAdapterTest {
 			),
 			label.text.toString(),
 		)
-		assertTrue(adapter.onCreateViewHolder(parent, adapter.getItemViewType(1)) is ConnectorConversationAdapter.MessageViewHolder)
+		assertTrue(
+			adapter.onCreateViewHolder(
+				parent,
+				adapter.getItemViewType(1),
+			) is ConnectorConversationAdapter.MessageViewHolder,
+		)
 	}
 
 	@Test

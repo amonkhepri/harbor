@@ -2225,7 +2225,15 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 				} else {
 					false
 				}
-				ConnectorReactionSummary(key, senders.size, isOwn)
+				val senderIds = senders.take(ConnectorReactionSummary.MAX_SENDERS).mapNotNull { sender ->
+					try {
+						(sender?.javaClass?.getMethod("getSenderId")?.invoke(sender) as? String)
+							?.takeIf { it.isNotBlank() }
+					} catch (ignored: Exception) {
+						null
+					}
+				}
+				ConnectorReactionSummary(key, senders.size, isOwn, senderIds)
 			}
 		}
 	}

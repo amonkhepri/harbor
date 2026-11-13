@@ -438,6 +438,36 @@ class ReflectiveMatrixHomeserverDiscoveryClientMessagesTest {
 	}
 
 	@Test
+	fun `getRecentMessages caps reaction sender IDs while preserving the full count`() {
+		val client = loggedInClient()
+		FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec("!room:example.org"))
+		FakeMatrixSdkState.timelineDiffsToReturn = listOf(
+			TimelineDiff.Reset(
+				listOf(
+					remoteEvent(
+						"\$reacted:example.org",
+						"body",
+						2_000uL,
+						reactions = listOf(
+							Reaction("👍", List(60) { ReactionSenderData("@user$it:example.org") }),
+							Reaction("", listOf(ReactionSenderData())),
+							Reaction("😂", emptyList()),
+						),
+					),
+				),
+			),
+		)
+
+		val result = client.getRecentMessages("!room:example.org", 1)
+
+		val reaction = result!!.single().reactions.single()
+		assertEquals(60, reaction.count)
+		assertEquals(50, reaction.senderIds.size)
+		assertEquals("@user0:example.org", reaction.senderIds.first())
+		assertEquals("@user49:example.org", reaction.senderIds.last())
+	}
+
+	@Test
 	fun `getRecentMessages maps video, audio, file, gallery to FILE placeholders`() {
 		val client = loggedInClient()
 		FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec("!room:example.org"))
