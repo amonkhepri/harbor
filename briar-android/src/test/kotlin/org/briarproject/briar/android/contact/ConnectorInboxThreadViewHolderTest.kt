@@ -3,6 +3,10 @@ package org.briarproject.briar.android.contact
 import android.app.Application
 import android.view.LayoutInflater
 import android.widget.TextView
+import android.widget.ImageView
+import org.robolectric.Shadows.shadowOf
+import org.briarproject.briar.api.connector.ConnectorThread
+import org.briarproject.briar.api.connector.ConnectorMessageType
 import com.vanniktech.emoji.EmojiManager
 import com.vanniktech.emoji.google.GoogleEmojiProvider
 import org.briarproject.briar.R
@@ -33,7 +37,7 @@ class ConnectorInboxThreadViewHolderTest {
 			"\uFEFF",
 			"‎‏",
 			"⁠",
-			"​﻿‎‏⁠",
+			"​\uFEFF‎‏⁠",
 		)
 		for (invisibleTitle in invisibleTitles) {
 			holder.bind(FakeConnectorInboxThreadItem(title = invisibleTitle)) { _, _ -> }
@@ -149,7 +153,11 @@ class ConnectorInboxThreadViewHolderTest {
 		assertEquals(android.view.View.GONE, dateView.visibility)
 		assertBadgeHidden(holder)
 
-		holder.bind(FakeConnectorInboxThreadItem(isInvited = true, previewText = "General Discussion")) { _, _ -> }
+		holder.bind(FakeConnectorInboxThreadItem(isInvited = true, previewText = "General Discussion")) {
+				_,
+				_,
+			->
+		}
 		assertEquals("Invitation: General Discussion", previewView.text.toString())
 		assertEquals(android.view.View.GONE, dateView.visibility)
 		assertBadgeHidden(holder)
@@ -165,9 +173,43 @@ class ConnectorInboxThreadViewHolderTest {
 		assertEquals("Invitation", previewView.text.toString())
 		assertEquals(android.view.View.GONE, dateView.visibility)
 
-		holder.bind(FakeConnectorInboxThreadItem(isInvited = false, previewText = "Regular message")) { _, _ -> }
+		holder.bind(FakeConnectorInboxThreadItem(isInvited = false, previewText = "Regular message")) {
+				_,
+				_,
+			->
+		}
 		assertEquals("Regular message", previewView.text.toString())
 		assertEquals(android.view.View.VISIBLE, dateView.visibility)
+	}
+
+	@Test
+	fun matrixGroupsAreDistinctAndRecyclingRestoresOtherIcons() {
+		val holder = createHolder()
+		val icon = holder.itemView.findViewById<ImageView>(R.id.connectorThreadIcon)
+		val group = ConnectorThread(
+			ConnectorSources.MATRIX,
+			"!room",
+			"Room",
+			0,
+			"",
+			false,
+			ConnectorMessageType.TEXT,
+			isDirect = false,
+		)
+		for (direct in listOf(false, true, false, null)) {
+			holder.bind(GenericConnectorInboxThreadItem(group.copy(isDirect = direct))) { _, _ -> }
+			val expected = if (direct == false) R.drawable.ic_group else R.drawable.ic_link_menu
+			assertEquals(expected, shadowOf(icon.drawable).createdFromResId)
+			val description = if (direct == false) "Matrix group room" else "Matrix source"
+			assertEquals(description, icon.contentDescription.toString())
+		}
+		holder.bind(GenericConnectorInboxThreadItem(group.copy(source = ConnectorSources.TELEGRAM))) {
+				_,
+				_,
+			->
+		}
+		assertEquals(R.drawable.ic_telegram, shadowOf(icon.drawable).createdFromResId)
+		assertEquals("Telegram source", icon.contentDescription.toString())
 	}
 
 	private fun createHolder(): ConnectorInboxThreadViewHolder {

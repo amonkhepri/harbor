@@ -806,7 +806,14 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			val displayName = (roomClass.getMethod("displayName").invoke(room) as? String)
 				?.takeIf { it.isNotEmpty() } ?: id
 			val (unreadCount, markedUnread) = readUnreadState(room)
-			MatrixRoomSnapshot(id, displayName, unreadCount, markedUnread, readTopic(room))
+			MatrixRoomSnapshot(
+				id,
+				displayName,
+				unreadCount,
+				markedUnread,
+				readTopic(room),
+				isDirect = readDirectFlag(room),
+			)
 		}
 	} catch (e: InvocationTargetException) {
 		null
@@ -834,11 +841,20 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 				isMarkedUnread = null,
 				topic = readTopic(room),
 				isInvited = true,
+				isDirect = readDirectFlag(room),
 			)
 		}
 	} catch (e: InvocationTargetException) {
 		null
 	} catch (e: ReflectiveOperationException) {
+		null
+	} catch (e: LinkageError) {
+		null
+	}
+
+	private fun readDirectFlag(room: Any): Boolean? = try {
+		invokeCloseableValue(room, "isDirect", emptyArray(), emptyArray(), {}) as? Boolean
+	} catch (e: Exception) {
 		null
 	} catch (e: LinkageError) {
 		null

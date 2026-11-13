@@ -456,6 +456,25 @@ class ReflectiveMatrixHomeserverDiscoveryClientTest {
 	}
 
 	@Test
+	fun `room snapshots preserve direct group and unavailable flags`() {
+		val client = newSessionClient()
+		client.login("https://matrix.example.org", "alice", "swordfish")
+		for (direct in listOf(true, false, null)) {
+			for (membership in listOf(Membership.JOINED, Membership.INVITED)) {
+				FakeMatrixSdkState.roomsToReturn = listOf(
+					FakeRoomSpec("!a:example.org", membership = membership, isDirect = direct),
+				)
+				val rooms = if (membership == Membership.JOINED) {
+					client.getJoinedRooms(10)
+				} else {
+					client.getInvitedRooms(10)
+				}
+				assertEquals(direct, rooms.single().isDirect)
+			}
+		}
+	}
+
+	@Test
 	fun `getRoomTopic reads only the selected room and releases its handle`() {
 		val client = newSessionClient()
 		assertNull(client.getRoomTopic("!a:example.org"))

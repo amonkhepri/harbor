@@ -135,15 +135,24 @@ class ConnectorInboxThreadViewHolder(view: View) : RecyclerView.ViewHolder(view)
 		fun sourceIconRes(item: ConnectorInboxThreadItem): Int =
 			if (item.connectorSource.id == ConnectorSources.TELEGRAM_ID) {
 				R.drawable.ic_telegram
+			} else if (isMatrixGroup(item)) {
+				R.drawable.ic_group
 			} else {
 				R.drawable.ic_link_menu
 			}
 
 		fun sourceContentDescription(resources: Resources, item: ConnectorInboxThreadItem): CharSequence =
 			resources.getString(
-				R.string.connector_thread_source_content_description,
+				if (isMatrixGroup(item)) {
+					R.string.connector_thread_group_content_description
+				} else {
+					R.string.connector_thread_source_content_description
+				},
 				item.connectorSource.displayName,
 			)
+
+		fun isMatrixGroup(item: ConnectorInboxThreadItem): Boolean =
+			item.connectorSource.id == ConnectorSources.MATRIX_ID && item.isDirect == false
 
 		fun dateVisibility(item: ConnectorInboxThreadItem): Int =
 			if (!item.isInvited && item.latestActivityMillis > 0) View.VISIBLE else View.GONE

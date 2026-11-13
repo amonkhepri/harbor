@@ -14,4 +14,5 @@ internal data class FakeConnectorInboxThreadItem(
 	override val unreadCount: Int? = null,
 	override val isMarkedUnread: Boolean? = null,
 	override val isInvited: Boolean = false,
+	override val isDirect: Boolean? = null,
 ) : ConnectorInboxThreadItem

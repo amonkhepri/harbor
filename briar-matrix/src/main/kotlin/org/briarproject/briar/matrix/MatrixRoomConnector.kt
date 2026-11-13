@@ -146,6 +146,7 @@ class MatrixRoomConnector @JvmOverloads constructor(
 				isMarkedUnread = snapshot.isMarkedUnread,
 				topic = snapshot.topic,
 				isInvited = false,
+				isDirect = snapshot.isDirect,
 			)
 		}
 
@@ -162,6 +163,7 @@ class MatrixRoomConnector @JvmOverloads constructor(
 				isMarkedUnread = null,
 				topic = snapshot.topic,
 				isInvited = true,
+				isDirect = snapshot.isDirect,
 			)
 		}
 

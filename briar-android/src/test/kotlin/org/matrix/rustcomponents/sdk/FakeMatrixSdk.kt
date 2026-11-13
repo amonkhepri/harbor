@@ -63,9 +63,11 @@ class Room(
 	private val roomMembership: Membership,
 	private val unreadMessagesCount: ULong? = null,
 	private val roomTopic: String? = null,
+	private val direct: Boolean? = null,
 ) {
 	fun id(): String = roomId
 	fun displayName(): String? = roomDisplayName
+	suspend fun isDirect(): Boolean = direct ?: error("Direct flag unavailable")
 	fun topic(): String? = roomTopic
 	fun isSpace(): Boolean = space
 	fun membership(): Membership = roomMembership
@@ -775,6 +777,7 @@ class Client internal constructor(
 				fake.membership,
 				fake.unreadMessagesCount,
 				fake.topic,
+				fake.isDirect,
 			)
 		}
 	} as List<Room>
@@ -789,6 +792,7 @@ class Client internal constructor(
 				fake.membership,
 				fake.unreadMessagesCount,
 				fake.topic,
+				fake.isDirect,
 			)
 		}
 
@@ -994,6 +998,7 @@ data class FakeRoomSpec(
 	val malformedRoomId: Boolean = false,
 	val unreadMessagesCount: ULong? = null,
 	val topic: String? = null,
+	val isDirect: Boolean? = null,
 )
 
 /** Test-only malformed runtime handle returned through `Client.rooms()`'s erased list type. */

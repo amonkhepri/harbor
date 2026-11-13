@@ -21,6 +21,7 @@ data class GenericConnectorInboxThreadItem(
 	override val unreadCount: Int? = null,
 	override val isMarkedUnread: Boolean? = null,
 	override val isInvited: Boolean = false,
+	override val isDirect: Boolean? = null,
 ) : ConnectorInboxThreadItem {
 
 	constructor(thread: ConnectorThread) : this(
@@ -34,6 +35,7 @@ data class GenericConnectorInboxThreadItem(
 		thread.unreadCount,
 		thread.isMarkedUnread,
 		thread.isInvited,
+		thread.isDirect,
 	)
 }
 

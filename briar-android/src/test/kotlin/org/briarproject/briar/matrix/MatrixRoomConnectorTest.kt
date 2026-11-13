@@ -163,8 +163,14 @@ class MatrixRoomConnectorTest {
 	fun `getRecentThreads carries unread count from room snapshot`() {
 		val roomSnapshotClient = FakeRoomSnapshotClient(
 			listOf(
-				MatrixRoomSnapshot("!a:example.org", "Alpha", unreadCount = 5),
-				MatrixRoomSnapshot("!b:example.org", "Beta", unreadCount = 0, isMarkedUnread = true),
+				MatrixRoomSnapshot("!a:example.org", "Alpha", unreadCount = 5, isDirect = true),
+				MatrixRoomSnapshot(
+					"!b:example.org",
+					"Beta",
+					unreadCount = 0,
+					isMarkedUnread = true,
+					isDirect = false,
+				),
 				MatrixRoomSnapshot("!c:example.org", "Gamma", unreadCount = null),
 			),
 		)
@@ -176,6 +182,9 @@ class MatrixRoomConnectorTest {
 
 		val threads = connector.getRecentThreads(10)
 
+		assertEquals(true, threads[0].isDirect)
+		assertEquals(false, threads[1].isDirect)
+		assertNull(threads[2].isDirect)
 		assertEquals(3, threads.size)
 		assertEquals(5, threads[0].unreadCount)
 		assertEquals(0, threads[1].unreadCount)
@@ -314,7 +323,7 @@ class MatrixRoomConnectorTest {
 	}
 
 	@Test
-	fun `getRecentThreads includes invitations with distinct invitation state without querying messages`() {
+	fun `getRecentThreads includes invitations without querying messages`() {
 		val roomSnapshotClient = FakeRoomSnapshotClient(
 			snapshots = listOf(MatrixRoomSnapshot("!joined:example.org", "Joined Room")),
 			invitedSnapshots = listOf(
@@ -322,6 +331,7 @@ class MatrixRoomConnectorTest {
 					"!invited:example.org",
 					"Invited Room",
 					topic = "Safe room topic",
+					isDirect = true,
 					isInvited = true,
 				),
 			),
@@ -347,6 +357,7 @@ class MatrixRoomConnectorTest {
 
 		assertEquals(2, threads.size)
 		val invitedThread = threads.first { it.threadId == "!invited:example.org" }
+		assertEquals(true, invitedThread.isDirect)
 		assertEquals("Invited Room", invitedThread.title)
 		assertEquals("Safe room topic", invitedThread.latestMessageText)
 		assertEquals(0, invitedThread.latestActivityDateSeconds)
