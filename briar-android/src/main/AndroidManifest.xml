@@ -166,6 +166,18 @@
 			android:exported="false"
 			android:label="@string/matrix_setup_title" />
 		<activity
+			android:name="org.briarproject.briar.android.matrix.MatrixShareTargetActivity"
+			android:enabled="@bool/matrix_connector_enabled"
+			android:excludeFromRecents="true"
+			android:exported="true"
+			android:label="@string/matrix_share_title">
+			<intent-filter>
+				<action android:name="android.intent.action.SEND" />
+				<category android:name="android.intent.category.DEFAULT" />
+				<data android:mimeType="text/plain" />
+			</intent-filter>
+		</activity>
+		<activity
 			android:name="org.briarproject.briar.android.connector.ConnectorImageViewerActivity"
 			android:exported="false"
 			android:label="@string/connector_message_photo"

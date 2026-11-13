@@ -216,6 +216,12 @@
 	<string name="inbox_filter_all">All</string>
 	<string name="inbox_filter_matrix">Matrix</string>
 	<string name="inbox_filter_briar">Briar</string>
+	<string name="matrix_share_title">Matrix room</string>
+	<string name="matrix_share_loading">Loading rooms…</string>
+	<string name="matrix_share_choose_room">Choose a room. The text is added as a draft and is not sent until you send it.</string>
+	<string name="matrix_share_signed_out">Sign in to your Matrix account in Settings to share into a room.</string>
+	<string name="matrix_share_no_rooms">You have no Matrix rooms to share into yet.</string>
+	<string name="matrix_share_failed">Your Matrix rooms could not be loaded. Try again later.</string>
 
 	<!-- Notifications -->
 	<string name="reminder_notification_title">Signed out of Harbor</string>
