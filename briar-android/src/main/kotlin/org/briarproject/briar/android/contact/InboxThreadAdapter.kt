@@ -69,7 +69,8 @@ class InboxThreadAdapter(private val listener: OnInboxThreadClickListener) :
 					i1.previewText == t2.previewText &&
 					i1.unreadCount == t2.unreadCount &&
 					i1.isMarkedUnread == t2.isMarkedUnread &&
-					i1.isInvited == t2.isInvited
+					i1.isInvited == t2.isInvited &&
+					i1.isDirect == t2.isDirect
 			}
 			val c1 = (i1 as BriarInboxThreadItem).item
 			val c2 = (i2 as BriarInboxThreadItem).item
