@@ -5,35 +5,42 @@ import android.os.Bundle
 import android.widget.ArrayAdapter
 import android.widget.ListView
 import android.widget.TextView
+import dagger.Component
+import java.util.concurrent.Executor
+import javax.inject.Inject
+import org.briarproject.bramble.api.lifecycle.IoExecutor
 import org.briarproject.briar.BuildConfig
 import org.briarproject.briar.R
+import org.briarproject.briar.android.AndroidComponent
 import org.briarproject.briar.android.BriarApplication
 import org.briarproject.briar.android.activity.ActivityComponent
+import org.briarproject.briar.android.activity.ActivityModule
+import org.briarproject.briar.android.activity.ActivityScope
 import org.briarproject.briar.android.activity.BriarActivity
 import org.briarproject.briar.android.connector.ConnectorConversationActivity
 import org.briarproject.briar.android.connector.ConnectorDraftStore
 import org.briarproject.briar.api.connector.ConnectorRegistry
 import org.briarproject.briar.api.connector.ConnectorSources
 import org.briarproject.briar.api.connector.ConnectorThread
-import java.util.concurrent.Executor
 
 /**
  * Share target for plain text (MX-089): the user picks a Matrix room, the shared text becomes that
  * room's draft and the room opens. Nothing is ever sent from here.
  */
 class MatrixShareTargetActivity : BriarActivity() {
-	internal lateinit var connectorRegistry: ConnectorRegistry
-	internal lateinit var ioExecutor: Executor
+	@Inject lateinit var connectorRegistry: ConnectorRegistry
+
+	@Inject @IoExecutor
+	lateinit var ioExecutor: Executor
 
 	private lateinit var status: TextView
 	private lateinit var rooms: ListView
 
 	override fun injectActivity(component: ActivityComponent) {
-		// Both dependencies are application-scoped, so they are read from the application
-		// component instead of adding an inject method to the Java ActivityComponent.
-		val applicationComponent = (application as BriarApplication).applicationComponent
-		connectorRegistry = applicationComponent.connectorRegistry()
-		ioExecutor = applicationComponent.ioExecutor()
+		DaggerMatrixShareComponent.builder()
+			.androidComponent((application as BriarApplication).applicationComponent)
+			.activityModule(ActivityModule(this))
+			.build().inject(this)
 	}
 
 	override fun onCreate(savedInstanceState: Bundle?) {
@@ -101,4 +108,11 @@ class MatrixShareTargetActivity : BriarActivity() {
 			return intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString()?.takeIf { it.isNotBlank() }
 		}
 	}
+}
+
+/** Kotlin entry point so Dagger also injects the inherited activity lifecycle dependencies. */
+@ActivityScope
+@Component(modules = [ActivityModule::class], dependencies = [AndroidComponent::class])
+internal interface MatrixShareComponent {
+	fun inject(activity: MatrixShareTargetActivity)
 }

@@ -9,6 +9,14 @@ import android.widget.TextView
 import org.briarproject.briar.BuildConfig
 import org.briarproject.briar.R
 import org.briarproject.briar.android.Localizer
+import org.briarproject.briar.android.AndroidComponent
+import org.briarproject.briar.android.BriarApplication
+import org.briarproject.bramble.BrambleAppComponent
+import org.briarproject.bramble.api.lifecycle.LifecycleManager.LifecycleState
+import org.mockito.Mockito.RETURNS_DEEP_STUBS
+import org.mockito.Mockito.mock
+import org.mockito.Mockito.`when`
+import org.mockito.Mockito.verify
 import org.briarproject.briar.android.connector.ConnectorConversationActivity
 import org.briarproject.briar.android.connector.ConnectorDraftStore
 import org.briarproject.briar.android.navdrawer.NavDrawerActivity
@@ -92,6 +100,41 @@ class MatrixShareTargetActivityTest {
 
 	private fun rooms(activity: MatrixShareTargetActivity) =
 		activity.findViewById<ListView>(R.id.matrixShareRooms)
+
+	class LifecycleApplication :
+		Application(),
+		BriarApplication {
+		val component = mock(AndroidComponent::class.java, RETURNS_DEEP_STUBS)
+		override fun getApplicationComponent() = component
+		override fun getBrambleAppComponent() = mock(BrambleAppComponent::class.java)
+		override fun getDefaultSharedPreferences() = getSharedPreferences("test", 0)
+		override fun isRunningInBackground() = false
+		override fun isInstrumentationTest() = true
+	}
+
+	@Test
+	@Config(application = LifecycleApplication::class)
+	fun normalLifecycleInjectsInheritedDependencies() {
+		val app = application as LifecycleApplication
+		Localizer.initialize(app.defaultSharedPreferences)
+		`when`(app.component.accountManager().hasDatabaseKey()).thenReturn(true)
+		`when`(app.component.lifecycleManager().lifecycleState).thenReturn(LifecycleState.RUNNING)
+		`when`(app.component.connectorRegistry().connectors).thenReturn(listOf(connector))
+		`when`(app.component.ioExecutor()).thenReturn(Executor { it.run() })
+		val controller = Robolectric.buildActivity(MatrixShareTargetActivity::class.java, share())
+		controller.get().setTheme(R.style.BriarTheme)
+		controller.create().start().resume().visible()
+		shadowOf(controller.get().mainLooper).idle()
+		verify(app.component.lockManager()).onActivityStart()
+		if (BuildConfig.MATRIX_CONNECTOR_ENABLED) {
+			assertEquals(app.getString(R.string.matrix_share_no_rooms), status(controller.get()))
+			assertNull(shadowOf(app).nextStartedActivity)
+		} else {
+			assertTrue(controller.get().isFinishing)
+		}
+		controller.pause().stop().destroy()
+		verify(app.component.lockManager()).onActivityStop()
+	}
 
 	@Test fun disabledBuildFinishesWithoutShowingRoomsOrTouchingDrafts() {
 		connector.threads = listOf(room("!a:example.org", "Room A"))
