@@ -194,6 +194,8 @@ android {
 		buildConfigField "boolean", "TELEGRAM_CONNECTOR_ENABLED",
 			"${telegramConnectorEnabled}"
 		buildConfigField "boolean", "MATRIX_CONNECTOR_ENABLED", "${matrixConnectorEnabled}"
+		// Lets the manifest hide Matrix-only components (MX-089 share target).
+		resValue "bool", "matrix_connector_enabled", "${matrixConnectorEnabled}"
 		buildConfigField "int", "TELEGRAM_API_ID", "${telegramApiId}"
 		buildConfigField "String", "TELEGRAM_API_HASH", telegramApiHashLiteral
 
