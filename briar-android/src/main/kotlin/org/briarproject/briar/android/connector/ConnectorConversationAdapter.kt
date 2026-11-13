@@ -1,13 +1,15 @@
 package org.briarproject.briar.android.connector
 
-import android.app.AlertDialog
+import android.content.Context
+import android.util.AttributeSet
+import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.Menu
 import android.view.View
 import android.view.ViewGroup
 import android.widget.ImageView
-import android.widget.LinearLayout
 import android.widget.TextView
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.widget.PopupMenu
 import androidx.core.view.ViewCompat
 import androidx.recyclerview.widget.DiffUtil.ItemCallback
@@ -116,7 +118,7 @@ internal class ConnectorConversationAdapter(
 		private val fileDetails: TextView =
 			itemView.findViewById(R.id.connectorFileDetails)
 
-		private val reactionChips: LinearLayout =
+		private val reactionChips: ConnectorReactionFlowLayout =
 			itemView.findViewById(R.id.connectorReactionChips)
 
 		private var boundThreadId: String? = null
@@ -213,7 +215,12 @@ internal class ConnectorConversationAdapter(
 						reaction.key,
 						reaction.count,
 					)
-					chip.minHeight = (48 * text.resources.displayMetrics.density).toInt()
+					val touchTarget = (48 * text.resources.displayMetrics.density).toInt()
+					chip.minHeight = touchTarget
+					chip.minWidth = touchTarget
+					chip.gravity = Gravity.CENTER
+					val padding = touchTarget / 6
+					chip.setPadding(padding, 0, padding, 0)
 					if (reaction.senderIds.isNotEmpty()) {
 						chip.setOnLongClickListener {
 							showReactionSenders(reaction)
@@ -223,7 +230,7 @@ internal class ConnectorConversationAdapter(
 					reactionChips.addView(chip)
 				}
 			}
-			val reactionSummary = if (item.reactions.isEmpty() || showChips) {
+			val allReactions = if (item.reactions.isEmpty()) {
 				null
 			} else {
 				item.reactions.joinToString("  ") { reaction ->
@@ -234,6 +241,7 @@ internal class ConnectorConversationAdapter(
 					)
 				}
 			}
+			val reactionSummary = if (showChips) null else allReactions
 			val downloadStatus = when (item.downloadState) {
 				ConnectorDownloadState.DOWNLOADING ->
 					text.resources.getString(R.string.connector_file_downloading)
@@ -269,7 +277,7 @@ internal class ConnectorConversationAdapter(
 						decoratedText,
 						mimeType,
 						formattedSize,
-						reactionSummary,
+						allReactions,
 						downloadStatus,
 					)
 				fileLayout.visibility = View.VISIBLE
@@ -392,7 +400,7 @@ internal class ConnectorConversationAdapter(
 					),
 				)
 			}
-			AlertDialog.Builder(itemView.context)
+			AlertDialog.Builder(itemView.context, R.style.BriarDialogTheme)
 				.setTitle(reaction.key)
 				.setItems(entries.toTypedArray(), null)
 				.setPositiveButton(android.R.string.ok, null)
@@ -474,5 +482,59 @@ internal class ConnectorConversationAdapter(
 	private companion object {
 		const val VIEW_TYPE_MESSAGE = 0
 		const val VIEW_TYPE_DAY_SEPARATOR = 1
+	}
+}
+
+/** Lays reaction chips out in horizontal rows that wrap at the available width. */
+internal class ConnectorReactionFlowLayout(
+	context: Context,
+	attrs: AttributeSet? = null,
+) : ViewGroup(context, attrs) {
+
+	override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+		for (i in 0 until childCount) {
+			measureChild(getChildAt(i), widthMeasureSpec, heightMeasureSpec)
+		}
+		val maxWidth = if (MeasureSpec.getMode(widthMeasureSpec) == MeasureSpec.UNSPECIFIED) {
+			Int.MAX_VALUE
+		} else {
+			MeasureSpec.getSize(widthMeasureSpec)
+		}
+		var widest = 0
+		val height = flow(maxWidth) { child, left, _ ->
+			widest = maxOf(widest, left + child.measuredWidth)
+		}
+		setMeasuredDimension(
+			resolveSize(widest, widthMeasureSpec),
+			resolveSize(height, heightMeasureSpec),
+		)
+	}
+
+	override fun onLayout(changed: Boolean, l: Int, t: Int, r: Int, b: Int) {
+		val width = r - l
+		val rtl = layoutDirection == LAYOUT_DIRECTION_RTL
+		flow(width) { child, left, top ->
+			val start = if (rtl) width - left - child.measuredWidth else left
+			child.layout(start, top, start + child.measuredWidth, top + child.measuredHeight)
+		}
+	}
+
+	/** Places each measured child and returns the total height of all rows. */
+	private fun flow(maxWidth: Int, place: (View, Int, Int) -> Unit): Int {
+		var left = 0
+		var top = 0
+		var rowHeight = 0
+		for (i in 0 until childCount) {
+			val child = getChildAt(i)
+			if (left > 0 && left + child.measuredWidth > maxWidth) {
+				left = 0
+				top += rowHeight
+				rowHeight = 0
+			}
+			place(child, left, top)
+			left += child.measuredWidth
+			rowHeight = maxOf(rowHeight, child.measuredHeight)
+		}
+		return top + rowHeight
 	}
 }

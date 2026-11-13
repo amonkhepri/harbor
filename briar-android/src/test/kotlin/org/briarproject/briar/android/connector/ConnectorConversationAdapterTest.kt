@@ -1,7 +1,6 @@
 package org.briarproject.briar.android.connector
 
 import android.app.Activity
-import android.app.AlertDialog
 import android.app.Application
 import android.os.Looper
 import android.text.Spannable
@@ -10,9 +9,10 @@ import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
+import android.view.ViewGroup
 import android.widget.FrameLayout
-import android.widget.LinearLayout
 import android.widget.TextView
+import androidx.appcompat.app.AlertDialog
 import androidx.fragment.app.FragmentActivity
 import java.time.Duration
 import org.briarproject.briar.R
@@ -37,7 +37,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
-import org.robolectric.shadows.ShadowAlertDialog
+import org.robolectric.shadows.ShadowDialog
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [21], application = Application::class)
@@ -65,10 +65,10 @@ class ConnectorConversationAdapterTest {
 			),
 		)
 		holder.bind(item)
-		val chips = view.findViewById<LinearLayout>(R.id.connectorReactionChips)
+		val chips = view.findViewById<ViewGroup>(R.id.connectorReactionChips)
 		assertEquals(1, chips.childCount)
 		assertTrue(chips.getChildAt(0).performLongClick())
-		val dialog: AlertDialog = ShadowAlertDialog.getLatestAlertDialog()
+		val dialog = ShadowDialog.getLatestDialog() as AlertDialog
 		assertTrue(dialog.isShowing)
 		assertEquals("@user0:example.org", dialog.listView.adapter.getItem(0))
 		assertEquals("@user49:example.org", dialog.listView.adapter.getItem(49))
@@ -77,6 +77,28 @@ class ConnectorConversationAdapterTest {
 			dialog.listView.adapter.getItem(50),
 		)
 		dialog.dismiss()
+		holder.bind(item.copy(type = ConnectorMessageType.FILE))
+		assertEquals(1, chips.childCount)
+		val fileLayout = view.findViewById<View>(R.id.connectorFileLayout)
+		assertTrue(fileLayout.contentDescription.toString().contains("👍 52"))
+		holder.bind(
+			item.copy(
+				reactions = List(10) {
+					ConnectorReactionSummary("k$it", 1, senderIds = listOf("@a:example.org"))
+				},
+			),
+		)
+		view.measure(
+			View.MeasureSpec.makeMeasureSpec(400, View.MeasureSpec.EXACTLY),
+			View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
+		)
+		view.layout(0, 0, view.measuredWidth, view.measuredHeight)
+		assertEquals(10, chips.childCount)
+		assertEquals(chips.getChildAt(0).top, chips.getChildAt(1).top)
+		assertTrue(chips.getChildAt(1).left >= chips.getChildAt(0).right)
+		assertTrue(chips.getChildAt(9).top > chips.getChildAt(0).top)
+		assertTrue(chips.getChildAt(9).right <= chips.width)
+		assertTrue(chips.height < 10 * chips.getChildAt(0).height)
 		holder.bind(item.copy(reactions = emptyList()))
 		assertEquals(0, chips.childCount)
 		assertEquals(View.GONE, chips.visibility)
