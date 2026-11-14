@@ -8,6 +8,10 @@ import org.briarproject.briar.api.matrix.MatrixAuthSession.RecoverableErrorDetai
 import org.briarproject.briar.api.matrix.MatrixAuthSession.RecoverableErrorDetail.NONE
 import org.briarproject.briar.api.matrix.MatrixHomeserverDiscoveryClient
 import org.briarproject.briar.api.matrix.MatrixHomeserverDiscoveryClient.DiscoveryResult
+import org.briarproject.briar.api.matrix.MatrixDeviceTrustState
+import org.briarproject.briar.api.matrix.MatrixVerificationEmoji
+import org.briarproject.briar.api.matrix.MatrixVerificationSessionHandle
+import org.briarproject.briar.api.matrix.MatrixVerificationState
 import org.briarproject.briar.api.connector.ConnectorAttachmentMetadata
 import org.briarproject.briar.api.connector.ConnectorFileDownloader
 import org.briarproject.briar.api.connector.ConnectorFileDownloader.DownloadResult
@@ -28,6 +32,8 @@ import java.util.UUID
 import java.util.concurrent.CancellationException
 import java.util.concurrent.Executor
 import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledExecutorService
+import java.util.concurrent.ScheduledFuture
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.DataInputStream
@@ -87,12 +93,17 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 	private val typingExecutor: Executor = Executors.newSingleThreadExecutor { task ->
 		Thread(task, "matrix-typing").apply { isDaemon = true }
 	},
+	private val verificationTimerExecutor: ScheduledExecutorService =
+		Executors.newSingleThreadScheduledExecutor { task ->
+			Thread(task, "matrix-verification-timer").apply { isDaemon = true }
+		},
 ) : MatrixHomeserverDiscoveryClient,
 	MatrixLoginClient,
 	MatrixRoomSnapshotClient,
 	MatrixMessageSnapshotClient,
 	MatrixMessageSendClient,
-	MatrixFileDownloadClient {
+	MatrixFileDownloadClient,
+	MatrixDeviceVerificationClient {
 
 	private var loginClient: Any? = null
 	private val lifecycleLock = Any()
@@ -1265,6 +1276,214 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 				}
 			}
 		}
+	}
+
+	override fun getDeviceTrustState(): MatrixDeviceTrustState = synchronized(this) {
+		val client = loginClient ?: return MatrixDeviceTrustState.UNVERIFIED
+		try {
+			val encMethod = client.javaClass.methods.firstOrNull { it.name == "encryption" }
+				?: return MatrixDeviceTrustState.UNVERIFIED
+			val encryption = encMethod.invoke(client) ?: return MatrixDeviceTrustState.UNVERIFIED
+			val stateMethod = encryption.javaClass.methods.firstOrNull { it.name == "verificationState" }
+				?: return MatrixDeviceTrustState.UNVERIFIED
+			val state = stateMethod.invoke(encryption)
+			if (state?.toString() == "VERIFIED") {
+				MatrixDeviceTrustState.VERIFIED
+			} else {
+				MatrixDeviceTrustState.UNVERIFIED
+			}
+		} catch (_: Exception) {
+			MatrixDeviceTrustState.UNVERIFIED
+		}
+	}
+
+	override fun startVerification(
+		listener: (MatrixVerificationState) -> Unit,
+		timeoutMs: Long,
+	): MatrixVerificationSessionHandle? = synchronized(this) {
+		synchronized(lifecycleLock) { activeGeneration } ?: return null
+		val client = loginClient ?: return null
+		val controller = try {
+			invokeCloseableValue(
+				client,
+				"getSessionVerificationController",
+				emptyArray(),
+				emptyArray(),
+				::closeQuietly,
+			)
+		} catch (_: Exception) {
+			return null
+		}
+
+		val delegateClass = try {
+			Class.forName(
+				"org.matrix.rustcomponents.sdk.SessionVerificationControllerDelegate",
+				true,
+				client.javaClass.classLoader,
+			)
+		} catch (_: Exception) {
+			closeQuietly(controller)
+			return null
+		}
+
+		val scheduledFutureRef = AtomicReference<ScheduledFuture<*>?>()
+		val closed = AtomicBoolean(false)
+
+		fun stopTimer() {
+			scheduledFutureRef.getAndSet(null)?.cancel(false)
+		}
+
+		fun finishSession(terminalState: MatrixVerificationState) {
+			if (closed.compareAndSet(false, true)) {
+				stopTimer()
+				closeQuietly(controller)
+				listener(terminalState)
+			}
+		}
+
+		val delegateProxy = Proxy.newProxyInstance(
+			delegateClass.classLoader,
+			arrayOf(delegateClass),
+		) { _, method, args ->
+			when (method.name) {
+				"didReceiveVerificationRequest" -> {
+					typingExecutor.execute {
+						try {
+							invokeUnit(controller, "acceptVerificationRequest", emptyArray(), emptyArray())
+						} catch (_: Exception) {}
+					}
+					null
+				}
+				"didAcceptVerificationRequest" -> {
+					typingExecutor.execute {
+						try {
+							invokeUnit(controller, "startSasVerification", emptyArray(), emptyArray())
+						} catch (_: Exception) {}
+					}
+					null
+				}
+				"didStartSasVerification" -> {
+					if (!closed.get()) listener(MatrixVerificationState.AwaitingPeer)
+					null
+				}
+				"didReceiveVerificationData" -> {
+					if (!closed.get()) {
+						val data = args?.getOrNull(0)
+						val emojis = extractVerificationEmojis(data)
+						listener(MatrixVerificationState.Comparing(emojis))
+					}
+					null
+				}
+				"didFinish" -> {
+					finishSession(MatrixVerificationState.Verified)
+					null
+				}
+				"didCancel" -> {
+					finishSession(MatrixVerificationState.Cancelled)
+					null
+				}
+				"didFail" -> {
+					finishSession(MatrixVerificationState.Failed)
+					null
+				}
+				"hashCode" -> System.identityHashCode(controller)
+				"equals" -> false
+				"toString" -> "SessionVerificationControllerDelegateProxy"
+				else -> null
+			}
+		}
+
+		try {
+			controller.javaClass.getMethod("setDelegate", delegateClass).invoke(controller, delegateProxy)
+			typingExecutor.execute {
+				try {
+					invokeUnit(controller, "requestDeviceVerification", emptyArray(), emptyArray())
+					if (!closed.get()) listener(MatrixVerificationState.Requesting)
+				} catch (_: Exception) {
+					finishSession(MatrixVerificationState.Failed)
+				}
+			}
+		} catch (e: Exception) {
+			finishSession(MatrixVerificationState.Failed)
+			return null
+		}
+
+		val timeoutTask = verificationTimerExecutor.schedule({
+			if (closed.compareAndSet(false, true)) {
+				stopTimer()
+				typingExecutor.execute {
+					try {
+						invokeUnit(controller, "cancelVerification", emptyArray(), emptyArray())
+					} catch (_: Exception) {}
+					closeQuietly(controller)
+				}
+				listener(MatrixVerificationState.TimedOut)
+			}
+		}, timeoutMs, TimeUnit.MILLISECONDS)
+		scheduledFutureRef.set(timeoutTask)
+
+		return object : MatrixVerificationSessionHandle {
+			override fun confirm() {
+				if (closed.get()) return
+				typingExecutor.execute {
+					try {
+						invokeUnit(controller, "approveVerification", emptyArray(), emptyArray())
+					} catch (_: Exception) {
+						finishSession(MatrixVerificationState.Failed)
+					}
+				}
+			}
+
+			override fun decline() {
+				if (closed.compareAndSet(false, true)) {
+					stopTimer()
+					typingExecutor.execute {
+						try {
+							invokeUnit(controller, "declineVerification", emptyArray(), emptyArray())
+						} catch (_: Exception) {}
+						closeQuietly(controller)
+					}
+					listener(MatrixVerificationState.Failed)
+				}
+			}
+
+			override fun cancel() {
+				if (closed.compareAndSet(false, true)) {
+					stopTimer()
+					typingExecutor.execute {
+						try {
+							invokeUnit(controller, "cancelVerification", emptyArray(), emptyArray())
+						} catch (_: Exception) {}
+						closeQuietly(controller)
+					}
+					listener(MatrixVerificationState.Cancelled)
+				}
+			}
+		}
+	}
+
+	private fun extractVerificationEmojis(data: Any?): List<MatrixVerificationEmoji> {
+		if (data == null) return emptyList()
+		try {
+			val getEmojisMethod = data.javaClass.methods.firstOrNull { it.name == "getEmojis" }
+			if (getEmojisMethod != null) {
+				val list = getEmojisMethod.invoke(data) as? List<*> ?: return emptyList()
+				return list.mapNotNull { item ->
+					if (item == null) return@mapNotNull null
+					val symbol = item.javaClass.getMethod("symbol").invoke(item) as? String ?: ""
+					val desc = item.javaClass.getMethod("description").invoke(item) as? String ?: ""
+					MatrixVerificationEmoji(symbol, desc)
+				}
+			}
+			val getValuesMethod = data.javaClass.methods.firstOrNull { it.name == "getValues" }
+			if (getValuesMethod != null) {
+				val list = getValuesMethod.invoke(data) as? List<*> ?: return emptyList()
+				return list.mapNotNull { item ->
+					item?.let { MatrixVerificationEmoji(it.toString(), "") }
+				}
+			}
+		} catch (_: Exception) {}
+		return emptyList()
 	}
 
 	override fun prepareAcceptInvitation(roomId: String): PreparedAccept? {

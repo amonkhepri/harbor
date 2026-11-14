@@ -27,4 +27,14 @@
 	<string name="connector_room_mute">Mute room</string>
 	<string name="connector_room_unmute">Unmute room</string>
 	<string name="connector_room_notifications_failed">Could not confirm room notification settings. Try again.</string>
+	<string name="matrix_device_unverified">Device trust: Not verified</string>
+	<string name="matrix_device_verified">Device trust: Verified</string>
+	<string name="matrix_verify_device">Verify Device</string>
+	<string name="matrix_verification_waiting">Waiting for other device…</string>
+	<string name="matrix_verification_match">They match</string>
+	<string name="matrix_verification_mismatch">They don\'t match</string>
+	<string name="matrix_verification_success">Device successfully verified!</string>
+	<string name="matrix_verification_failed">Verification failed</string>
+	<string name="matrix_verification_cancelled">Verification cancelled</string>
+	<string name="matrix_verification_timed_out">Verification timed out</string>
 </resources>

@@ -7,6 +7,10 @@ import org.briarproject.briar.api.matrix.MatrixAuthSession
 import org.briarproject.briar.api.matrix.MatrixAuthSession.RecoverableErrorDetail
 import org.briarproject.briar.api.matrix.MatrixAuthSession.Snapshot
 import org.briarproject.briar.api.matrix.MatrixAuthState
+import org.briarproject.briar.api.matrix.MatrixDeviceTrustState
+import org.briarproject.briar.api.matrix.MatrixVerificationEmoji
+import org.briarproject.briar.api.matrix.MatrixVerificationSessionHandle
+import org.briarproject.briar.api.matrix.MatrixVerificationState
 import org.junit.Assert.assertEquals
 import org.junit.After
 import org.junit.Before
@@ -75,6 +79,34 @@ class MatrixSetupViewModelTest {
 			restored = false
 			current = Snapshot(MatrixAuthState.HOMESERVER_ENTRY, RecoverableErrorDetail.NONE)
 			if (failLogout) error("sensitive logout response")
+		}
+		var deviceTrust = MatrixDeviceTrustState.UNVERIFIED
+		var lastVerificationListener: ((MatrixVerificationState) -> Unit)? = null
+		var verificationStarts = 0
+		var handle: MatrixVerificationSessionHandle? = null
+
+		override fun getDeviceTrustState(): MatrixDeviceTrustState = deviceTrust
+
+		override fun startDeviceVerification(
+			listener: (MatrixVerificationState) -> Unit,
+			timeoutMs: Long,
+		): MatrixVerificationSessionHandle? {
+			verificationStarts++
+			lastVerificationListener = listener
+			return object : MatrixVerificationSessionHandle {
+				override fun confirm() {
+					deviceTrust = MatrixDeviceTrustState.VERIFIED
+					listener(MatrixVerificationState.Verified)
+				}
+				override fun decline() {
+					deviceTrust = MatrixDeviceTrustState.UNVERIFIED
+					listener(MatrixVerificationState.Failed)
+				}
+				override fun cancel() {
+					deviceTrust = MatrixDeviceTrustState.UNVERIFIED
+					listener(MatrixVerificationState.Cancelled)
+				}
+			}.also { handle = it }
 		}
 	}
 
@@ -286,5 +318,62 @@ class MatrixSetupViewModelTest {
 		)) {
 			assertNull(signedInUserId(ready.copy(authState = state)))
 		}
+	}
+
+	@Test fun verificationFlowTransitionsStateAndUpdatesTrust() {
+		val session = Session().apply { restored = true }
+		val queue = QueueExecutor()
+		val model = MatrixSetupViewModel(session, queue, true)
+		model.start()
+		queue.runNext()
+		assertEquals(MatrixSetupStep.READY, setupStep(model.state.value!!.snapshot!!))
+		assertEquals(MatrixDeviceTrustState.UNVERIFIED, model.state.value!!.deviceTrustState)
+		assertEquals(MatrixVerificationState.Idle, model.state.value!!.verificationState)
+
+		model.startVerification()
+		assertEquals(1, session.verificationStarts)
+		assertEquals(MatrixVerificationState.Requesting, model.state.value!!.verificationState)
+
+		session.lastVerificationListener?.invoke(
+			MatrixVerificationState.Comparing(listOf(MatrixVerificationEmoji("🐶", "Dog"))),
+		)
+		assertEquals(
+			MatrixVerificationState.Comparing(listOf(MatrixVerificationEmoji("🐶", "Dog"))),
+			model.state.value!!.verificationState,
+		)
+		assertEquals(MatrixDeviceTrustState.UNVERIFIED, model.state.value!!.deviceTrustState)
+
+		model.confirmVerification()
+		assertEquals(MatrixVerificationState.Verified, model.state.value!!.verificationState)
+		assertEquals(MatrixDeviceTrustState.VERIFIED, model.state.value!!.deviceTrustState)
+	}
+
+	@Test fun verificationDeclineLeavesDeviceUntrusted() {
+		val session = Session().apply { restored = true }
+		val queue = QueueExecutor()
+		val model = MatrixSetupViewModel(session, queue, true)
+		model.start()
+		queue.runNext()
+
+		model.startVerification()
+		session.lastVerificationListener?.invoke(
+			MatrixVerificationState.Comparing(listOf(MatrixVerificationEmoji("🐶", "Dog"))),
+		)
+		model.declineVerification()
+		assertEquals(MatrixVerificationState.Failed, model.state.value!!.verificationState)
+		assertEquals(MatrixDeviceTrustState.UNVERIFIED, model.state.value!!.deviceTrustState)
+	}
+
+	@Test fun verificationCancelLeavesDeviceUntrusted() {
+		val session = Session().apply { restored = true }
+		val queue = QueueExecutor()
+		val model = MatrixSetupViewModel(session, queue, true)
+		model.start()
+		queue.runNext()
+
+		model.startVerification()
+		model.cancelVerification()
+		assertEquals(MatrixVerificationState.Cancelled, model.state.value!!.verificationState)
+		assertEquals(MatrixDeviceTrustState.UNVERIFIED, model.state.value!!.deviceTrustState)
 	}
 }

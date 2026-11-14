@@ -43,6 +43,12 @@ enum class SlidingSyncVersion { NONE, NATIVE }
 
 enum class EncryptionState { NOT_ENCRYPTED, ENCRYPTED, UNKNOWN }
 
+enum class VerificationState { UNKNOWN, VERIFIED, UNVERIFIED }
+
+interface VerificationStateListener {
+	fun onUpdate(state: VerificationState)
+}
+
 enum class Membership { INVITED, JOINED, LEFT, KNOCKED, BANNED }
 
 enum class ReceiptType { READ, READ_PRIVATE, FULLY_READ }
@@ -773,6 +779,13 @@ class Client internal constructor(
 ) {
 	suspend fun getNotificationSettings(): NotificationSettings = NotificationSettings()
 	private var session: Session? = null
+	private val sessionVerificationController = SessionVerificationController()
+	private val clientEncryption = Encryption()
+
+	suspend fun getSessionVerificationController(): SessionVerificationController =
+		sessionVerificationController
+
+	fun encryption(): Encryption = clientEncryption
 
 	@Suppress("UNUSED_PARAMETER")
 	suspend fun joinRoomByIdOrAlias(identifier: String, servers: List<String>): Room {
@@ -1042,6 +1055,133 @@ class MalformedRoom(
 	}
 }
 
+class SessionVerificationController : AutoCloseable {
+	private var controllerDelegate: SessionVerificationControllerDelegate? = null
+	var isClosed = false
+
+	init {
+		FakeMatrixSdkState.activeVerificationControllers.add(this)
+	}
+
+	private fun peer(): SessionVerificationController? =
+		FakeMatrixSdkState.activeVerificationControllers.firstOrNull { it !== this && !it.isClosed }
+
+	fun setDelegate(delegate: SessionVerificationControllerDelegate) {
+		this.controllerDelegate = delegate
+	}
+
+	suspend fun requestDeviceVerification() {
+		FakeMatrixSdkState.verificationRequestCalls++
+		val peer = peer()
+		if (peer != null) {
+			peer.controllerDelegate?.didReceiveVerificationRequest(
+				SessionVerificationRequestDetails("flow-1", "device-2"),
+			)
+		} else {
+			controllerDelegate?.didStartSasVerification()
+			controllerDelegate?.didReceiveVerificationData(
+				SessionVerificationData.Emojis(FakeMatrixSdkState.defaultVerificationEmojis, byteArrayOf()),
+			)
+		}
+	}
+
+	suspend fun acceptVerificationRequest() {
+		FakeMatrixSdkState.verificationAcceptCalls++
+		peer()?.controllerDelegate?.didAcceptVerificationRequest()
+	}
+
+	suspend fun startSasVerification() {
+		FakeMatrixSdkState.verificationStartSasCalls++
+		val peer = peer()
+		controllerDelegate?.didStartSasVerification()
+		peer?.controllerDelegate?.didStartSasVerification()
+		val emojis = SessionVerificationData.Emojis(
+			FakeMatrixSdkState.defaultVerificationEmojis,
+			byteArrayOf(),
+		)
+		controllerDelegate?.didReceiveVerificationData(emojis)
+		peer?.controllerDelegate?.didReceiveVerificationData(emojis)
+	}
+
+	suspend fun approveVerification() {
+		FakeMatrixSdkState.verificationApproveCalls++
+		val peer = peer()
+		if (peer != null) {
+			FakeMatrixSdkState.approvedControllers.add(this)
+			if (FakeMatrixSdkState.approvedControllers.contains(peer)) {
+				FakeMatrixSdkState.verified = true
+				controllerDelegate?.didFinish()
+				peer.controllerDelegate?.didFinish()
+			}
+		} else {
+			FakeMatrixSdkState.verified = true
+			controllerDelegate?.didFinish()
+		}
+	}
+
+	suspend fun declineVerification() {
+		FakeMatrixSdkState.verificationDeclineCalls++
+		FakeMatrixSdkState.verified = false
+		val peer = peer()
+		controllerDelegate?.didFail()
+		peer?.controllerDelegate?.didFail()
+	}
+
+	suspend fun cancelVerification() {
+		FakeMatrixSdkState.verificationCancelCalls++
+		FakeMatrixSdkState.verified = false
+		val peer = peer()
+		controllerDelegate?.didCancel()
+		peer?.controllerDelegate?.didCancel()
+	}
+
+	override fun close() {
+		isClosed = true
+		FakeMatrixSdkState.approvedControllers.remove(this)
+		FakeMatrixSdkState.activeVerificationControllers.remove(this)
+	}
+}
+
+interface SessionVerificationControllerDelegate {
+	fun didReceiveVerificationRequest(details: SessionVerificationRequestDetails)
+	fun didAcceptVerificationRequest()
+	fun didStartSasVerification()
+	fun didReceiveVerificationData(data: SessionVerificationData)
+	fun didFail()
+	fun didCancel()
+	fun didFinish()
+}
+
+sealed class SessionVerificationData {
+	class Emojis(
+		private val emojis: List<SessionVerificationEmoji>,
+		private val indices: ByteArray = byteArrayOf(),
+	) : SessionVerificationData() {
+		fun getEmojis(): List<SessionVerificationEmoji> = emojis
+		fun getIndices(): ByteArray = indices
+	}
+	class Decimals(private val values: List<UShort>) : SessionVerificationData() {
+		fun getValues(): List<UShort> = values
+	}
+}
+
+class SessionVerificationEmoji(private val symbol: String, private val description: String) {
+	fun symbol(): String = symbol
+	fun description(): String = description
+}
+
+class SessionVerificationRequestDetails(
+	val flowId: String = "flow-1",
+	val deviceId: String = "device-1",
+)
+
+class Encryption {
+	fun verificationState(): VerificationState =
+		if (FakeMatrixSdkState.verified) VerificationState.VERIFIED else VerificationState.UNVERIFIED
+
+	fun verificationStateListener(listener: VerificationStateListener): TaskHandle = TaskHandle()
+}
+
 object FakeMatrixSdkState {
 	val builds = mutableListOf<Thread>()
 	fun awaitBuilds() {
@@ -1193,9 +1333,34 @@ object FakeMatrixSdkState {
 	var lastMediaThumbnailWidth: ULong? = null
 	var lastMediaThumbnailHeight: ULong? = null
 	var onGetMediaThumbnail: (() -> Unit)? = null
+	val activeVerificationControllers = mutableListOf<SessionVerificationController>()
+	var peerVerificationController: SessionVerificationController? = null
+	val approvedControllers = mutableSetOf<SessionVerificationController>()
+	var verified = false
+	var verificationRequestCalls = 0
+	var verificationAcceptCalls = 0
+	var verificationStartSasCalls = 0
+	var verificationApproveCalls = 0
+	var verificationDeclineCalls = 0
+	var verificationCancelCalls = 0
+	val defaultVerificationEmojis = listOf(
+		SessionVerificationEmoji("🐶", "Dog"),
+		SessionVerificationEmoji("🐱", "Cat"),
+		SessionVerificationEmoji("🦊", "Fox"),
+	)
 
 	fun reset() {
 		awaitBuilds()
+		activeVerificationControllers.clear()
+		peerVerificationController = null
+		approvedControllers.clear()
+		verified = false
+		verificationRequestCalls = 0
+		verificationAcceptCalls = 0
+		verificationStartSasCalls = 0
+		verificationApproveCalls = 0
+		verificationDeclineCalls = 0
+		verificationCancelCalls = 0
 		getMediaThumbnailCallCount = 0
 		mediaSourceDestroyCount = 0
 		mediaThumbnailFailureToThrow = null

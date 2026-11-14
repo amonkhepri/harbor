@@ -61,6 +61,47 @@
 			android:layout_height="wrap_content"
 			android:text="@string/matrix_join_room"
 			android:visibility="gone" />
+		<TextView
+			android:id="@+id/matrixDeviceTrust"
+			android:layout_width="match_parent"
+			android:layout_height="wrap_content"
+			android:visibility="gone" />
+		<Button
+			android:id="@+id/matrixVerifyDevice"
+			android:layout_width="match_parent"
+			android:layout_height="wrap_content"
+			android:text="@string/matrix_verify_device"
+			android:visibility="gone" />
+		<TextView
+			android:id="@+id/matrixVerificationData"
+			android:layout_width="match_parent"
+			android:layout_height="wrap_content"
+			android:visibility="gone" />
+		<LinearLayout
+			android:id="@+id/matrixVerificationActions"
+			android:layout_width="match_parent"
+			android:layout_height="wrap_content"
+			android:orientation="horizontal"
+			android:visibility="gone">
+			<Button
+				android:id="@+id/matrixConfirmVerification"
+				android:layout_width="0dp"
+				android:layout_height="wrap_content"
+				android:layout_weight="1"
+				android:text="@string/matrix_verification_match" />
+			<Button
+				android:id="@+id/matrixDeclineVerification"
+				android:layout_width="0dp"
+				android:layout_height="wrap_content"
+				android:layout_weight="1"
+				android:text="@string/matrix_verification_mismatch" />
+		</LinearLayout>
+		<Button
+			android:id="@+id/matrixCancelVerification"
+			android:layout_width="match_parent"
+			android:layout_height="wrap_content"
+			android:text="@string/cancel"
+			android:visibility="gone" />
 		<Button
 			android:id="@+id/matrixSignOut"
 			android:layout_width="match_parent"
