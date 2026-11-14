@@ -204,11 +204,13 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 						)
 						if (!isCurrent()) return@synchronized null
 						val mode = confirmed.javaClass.getMethod("getMode").invoke(confirmed) as? Enum<*>
-						when (mode?.name) {
+						val confirmedMuted = when (mode?.name) {
 							"MUTE" -> true
 							"ALL_MESSAGES", "MENTIONS_AND_KEYWORDS_ONLY" -> false
 							else -> null
 						}
+						// An acknowledged write is not proof that the requested mode took effect.
+						if (muted != null && confirmedMuted != muted) null else confirmedMuted
 					} catch (e: InterruptedException) {
 						Thread.currentThread().interrupt()
 						null

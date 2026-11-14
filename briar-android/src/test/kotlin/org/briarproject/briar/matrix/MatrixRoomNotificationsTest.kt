@@ -19,6 +19,7 @@ class MatrixRoomNotificationsTest {
 		FakeMatrixSdkState.reset()
 		NotificationSettings.modes.clear()
 		NotificationSettings.failUpdate = false
+		NotificationSettings.ignoreUpdate = false
 	}
 
 	private fun login() {
@@ -42,6 +43,19 @@ class MatrixRoomNotificationsTest {
 		assertEquals(true, restored.readMuted())
 		NotificationSettings.failUpdate = false
 		assertEquals(false, restored.setMuted(false))
+	}
+
+	@Test fun `acknowledged write requires matching server readback`() {
+		login()
+		val preference = client.prepareRoomNotifications(room)!!
+		NotificationSettings.ignoreUpdate = true
+		assertNull(preference.setMuted(true))
+		assertEquals(false, preference.readMuted())
+		NotificationSettings.ignoreUpdate = false
+		assertEquals(true, preference.setMuted(true))
+		NotificationSettings.ignoreUpdate = true
+		assertNull(preference.setMuted(false))
+		assertEquals(true, preference.readMuted())
 	}
 
 	@Test fun `missing room and missing session do not infer unmuted`() {

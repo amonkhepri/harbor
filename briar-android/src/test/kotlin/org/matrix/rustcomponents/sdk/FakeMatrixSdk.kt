@@ -1331,6 +1331,7 @@ class NotificationSettings : AutoCloseable {
 	companion object {
 		val modes = mutableMapOf<String, RoomNotificationMode>()
 		var failUpdate = false
+		var ignoreUpdate = false
 	}
 
 	@Suppress("UNUSED_PARAMETER")
@@ -1338,7 +1339,7 @@ class NotificationSettings : AutoCloseable {
 		RoomNotificationSettings(modes[roomId] ?: RoomNotificationMode.ALL_MESSAGES, false)
 	suspend fun setRoomNotificationMode(roomId: String, mode: RoomNotificationMode) {
 		check(!failUpdate)
-		modes[roomId] = mode
+		if (!ignoreUpdate) modes[roomId] = mode
 	}
 
 	@Suppress("UNUSED_PARAMETER")
