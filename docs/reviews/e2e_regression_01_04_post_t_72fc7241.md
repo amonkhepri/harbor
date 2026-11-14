@@ -22,11 +22,11 @@ The failure across all four flows exhibits strong hallmarks of host virtualizati
 
 1. **Host Virtualization Delays**: The emulator took 76.4 seconds just to restore its `default_boot` snapshot under SwiftShader software Vulkan emulation.
 2. **Package Clear Latency**: Maestro's `clearState: true` (`pm clear`) took 37–44 seconds per flow due to host I/O saturation.
-3. **Cold Startup Frame Drops**: `SplashScreenActivity` startup was delayed by ~19 seconds during main thread Dagger initialization in `BriarApplicationImpl.onCreate`, dropping 361 frames (`Choreographer: Skipped 361 frames! The application may be doing too much work on its main thread`).
+3. **Cold Startup Frame Drops**: `BriarApplicationImpl.onCreate` took ~19 seconds initializing the Dagger singleton graph on the main thread, dropping 361 frames (`Choreographer: Skipped 361 frames! The application may be doing too much work on its main thread`).
 4. **Rendering Pipeline Stall**: The window manager remained blocked in `BLASTSyncEngine DRAW_PENDING` while EGL/HWUI re-initialized graphics swap configurations without preserved swap behavior.
-5. **Timeout on Blank Screen**: Maestro's 18.6-second assertion timeout for `"Welcome to Harbor" is visible` expired before `SplashScreenActivity` could draw its view hierarchy or trigger the transition to `SetupActivity`. The captured view hierarchy (`step-004-assertCondition-Welcome_to_Harbor.json`) contained exclusively system status bar icons, with 99.96% of pixels completely black.
+5. **Timeout on Blank Screen During Multi-Stage Startup Cascade**: Maestro's 18.6-second assertion timeout for `"Welcome to Harbor" is visible` expired while the multi-stage cold startup routing cascade (`SplashScreenActivity` 500ms postDelay -> `NavDrawerActivity` -> `BriarActivity.onResume` -> `StartupActivity.onCreate` -> `telegramAuthExecutor` asynchronous `deleteAccount` cleanup -> `StartupActivity.onAccountDeleted` -> `SetupActivity` -> `AuthorNameFragment`) was still in flight under host CPU starvation. The captured view hierarchy (`step-004-assertCondition-Welcome_to_Harbor.json`) contained exclusively system status bar icons, with 99.96% of pixels completely black.
 6. **Subsequent Host Hang**: The immediately following gate run (`t_d40188ed` at `20261114T210836Z`) demonstrated total host virtualization failure: the emulator failed to complete boot within the 240-second timeout.
-7. **Architectural Orthogonality**: Commit `9e2f36c2f` modified only Matrix room notification readback confirmation in `briar-matrix` and associated unit fakes, with zero coupling to application startup, Dagger entry graphs, or account setup UI.
+7. **Architectural Orthogonality**: Commit `9e2f36c2f` modified only Matrix room notification readback confirmation in `briar-matrix` (`ReflectiveMatrixHomeserverDiscoveryClient.kt`) and associated unit fakes, with zero direct or transitive coupling to any stage of the cold startup routing cascade, asynchronous account cleanup, or onboarding UI presentation.
 
 **Provisional Requirement**: Because the host emulator entered a degraded state that prevented subsequent runs from completing, and the test device is currently unavailable / leased by other pipeline operations, this diagnosis remains **provisional**. A definitive closure requires a successful run of flows `01` through `04` on a healthy emulator or physical device.
 
@@ -69,28 +69,65 @@ Key observations from gate logs:
 ### 2.1 Audit of Commit 9e2f36c2f (t_72fc7241)
 Commit `9e2f36c2f` ("fix(matrix): require matching room notification readback (MX-067)") modified 3 files:
 1. `briar-matrix/src/main/kotlin/org/briarproject/briar/matrix/ReflectiveMatrixHomeserverDiscoveryClient.kt` (+4, -1):
-   Requires matching readback from the Matrix Rust SDK when setting room notification mode.
+   Requires matching readback from the Matrix Rust SDK when setting room notification mode in `setRoomNotificationMode()`.
 2. `briar-android/src/test/kotlin/org/briarproject/briar/matrix/MatrixRoomNotificationsTest.kt` (+14, -0):
    Adds unit test `acknowledged write requires matching server readback`.
 3. `briar-android/src/test/kotlin/org/matrix/rustcomponents/sdk/FakeMatrixSdk.kt` (+3, -1):
    Adds `ignoreUpdate` test knob.
 
-### 2.2 Controlled Code Path Comparison: App Startup vs. Commit Changes
-Tracing the execution path from cold launch to `"Welcome to Harbor"`:
-1. **Entry Intent**:
-   The launcher starts `org.briarproject.briar.android.splash.SplashScreenActivity`.
-2. **Application Creation (`BriarApplicationImpl.onCreate`)**:
-   Dagger components are built (`AndroidComponent`, `BriarServiceComponent`). Matrix components (`MatrixRoomConnector`, `ReflectiveMatrixHomeserverDiscoveryClient`) are lazy-initialized and wired only to connector services.
-3. **Splash Activity Routing**:
-   `SplashScreenActivity` queries `AccountManager.accountExists()`.
-   - On a clean install (`clearState: true`), no Briar account exists in the database.
-   - `SplashScreenActivity` schedules a 500ms post-delayed runnable to start `org.briarproject.briar.android.account.SetupActivity`.
-4. **Setup Screen Rendering (`SetupActivity`)**:
-   `SetupActivity` creates `SetupFragment`, inflating `activity_setup.xml` containing `R.string.welcome_title` ("Welcome to Harbor").
-5. **Coupling Analysis**:
-   - Zero classes modified in commit `9e2f36c2f` are imported or referenced by `SplashScreenActivity`, `SetupActivity`, `SetupFragment`, `SetupViewModel`, or `AccountManager`.
-   - The Matrix connector is default-off, and no Matrix account exists on fresh startup.
-   - Therefore, commit `9e2f36c2f` has zero direct or transitive influence on the rendering of `SetupActivity` or `"Welcome to Harbor"`.
+### 2.2 Controlled Code Path Comparison: Actual App Startup Cascade vs. Commit Changes
+
+Tracing the complete, multi-stage execution path from cold launch after `clearState: true` to the `"Welcome to Harbor"` onboarding screen:
+
+1. **Application Creation (`BriarApplicationImpl.onCreate`)**:
+   - Constructs Dagger dependency graphs (`AndroidComponent`, `BriarServiceComponent`).
+   - In `AppModule`, Matrix singletons (`provideMatrixReflectiveClient`, `provideMatrixAuthSession`, `provideMatrixConnector`) are gated by `BuildConfig.MATRIX_CONNECTOR_ENABLED` and instantiate `ReflectiveMatrixHomeserverDiscoveryClient`, `MatrixAuthSessionImpl`, and `MatrixRoomConnector`. They are wired exclusively to connector background services. None perform network operations, none access disk databases, and none invoke notification preference methods during application startup.
+2. **Entry Intent & Splash Delay (`SplashScreenActivity`)**:
+   - The launcher starts `org.briarproject.briar.android.splash.SplashScreenActivity`.
+   - `onCreate()` sets window exit transitions (`Fade`), triggers `setPreferencesDefaults()` on a background worker thread (`androidExecutor`), and sets `R.layout.splash`.
+   - It checks `accountManager.hasDatabaseKey()`. (Note: it does *not* call `accountExists()` directly).
+   - On a clean install (`clearState: true`), `hasDatabaseKey()` returns `false`.
+   - `SplashScreenActivity` schedules a post-delayed runnable on the main handler for `R.integer.splashScreenDuration` (500ms) to launch `ENTRY_ACTIVITY`.
+   - `BriarApplication.ENTRY_ACTIVITY` is statically defined as `NavDrawerActivity.class`.
+3. **Intermediate Navigation & Session Check (`NavDrawerActivity` -> `BriarActivity`)**:
+   - `NavDrawerActivity` extends `BriarActivity`.
+   - In `BriarActivity.onResume()`, the activity checks `!briarController.accountSignedIn()`.
+   - Because no account is signed in on a fresh install, `BriarActivity` launches `StartupActivity` with request code `REQUEST_PASSWORD` (`startActivityForResult(intent, REQUEST_PASSWORD)`).
+4. **Account State Verification & Asynchronous Cleanup (`StartupActivity` -> `StartupViewModel`)**:
+   - In `StartupActivity.onCreate()`, the activity sets `R.layout.activity_fragment_container` and registers an observer on `viewModel.getAccountDeleted()`.
+   - It invokes `viewModel.accountExists()` (which delegates to `accountManager.accountExists()`).
+   - On a clean install after `pm clear`, no account database directory exists, returning `false`.
+   - `StartupActivity` immediately invokes `viewModel.deleteAccount()` and returns.
+   - `StartupViewModel.deleteAccount()` dispatches an asynchronous task to `telegramAuthExecutor`:
+     - Calls `telegramAuthSession.closeAndConfirm()` to terminate any active session.
+     - Calls `accountManager.deleteAccount()` to clean filesystem artifacts.
+     - Posts `true` to `accountDeleted` LiveData on the main thread.
+5. **Setup Transition (`StartupActivity.onAccountDeleted` -> `SetupActivity`)**:
+   - When the `accountDeleted` event arrives on the main thread, `StartupActivity.onAccountDeleted()` sets `RESULT_CANCELED`, finishes `StartupActivity`, and starts `SetupActivity` with flags `FLAG_ACTIVITY_NEW_TASK | FLAG_ACTIVITY_CLEAR_TOP | FLAG_ACTIVITY_CLEAR_TASK | FLAG_ACTIVITY_TASK_ON_HOME`.
+6. **Onboarding UI Initialization (`SetupActivity` -> `AuthorNameFragment`)**:
+   - `SetupActivity` injects `ActivityComponent`, creates `SetupViewModel`, and observes `viewModel.getState()`.
+   - In `onCreate()`, `SetupActivity` sets `R.layout.activity_fragment_container`.
+   - `SetupViewModel` initializes its state to `SetupViewModel.State.AUTHOR_NAME`.
+   - `SetupActivity.onStateChanged()` receives `AUTHOR_NAME`: sets soft input to visible and attaches `AuthorNameFragment.newInstance()` via `showInitialFragment()`.
+   - Note: `SetupFragment` is an abstract base class (`public abstract class SetupFragment extends BaseFragment`); the concrete fragment hosting the initial onboarding view is `AuthorNameFragment`.
+7. **Rendering `"Welcome to Harbor"`**:
+   - `AuthorNameFragment.onCreateView()` inflates `R.layout.fragment_setup_author_name`.
+   - `fragment_setup_author_name.xml` defines `TextView` `@+id/intro` bound to string resource `@string/setup_title`: `"Welcome to Harbor"`.
+   - The view hierarchy is drawn to the window surface, satisfying Maestro's visibility assertion.
+
+### 2.3 Reassessment of Transitive Independence Across the Full Startup Cascade
+
+Auditing every participant in this 7-stage startup cascade against commit `9e2f36c2f`:
+- **Components involved in startup**: `BriarApplicationImpl`, `AppModule`, `SplashScreenActivity`, `NavDrawerActivity`, `BriarActivity`, `StartupActivity`, `StartupViewModel`, `telegramAuthExecutor`, `TelegramAuthSession`, `AccountManager`, `SetupActivity`, `SetupViewModel`, `AuthorNameFragment`, `SetupFragment`, and layout resources `layout/splash.xml`, `layout/activity_fragment_container.xml`, `layout/fragment_setup_author_name.xml`.
+- **Components modified in commit 9e2f36c2f**:
+  - `ReflectiveMatrixHomeserverDiscoveryClient.kt` (+4, -1): modified only `setRoomNotificationMode()` logic to ensure readback confirmation matches requested mute status.
+  - `MatrixRoomNotificationsTest.kt` (+14, -0) & `FakeMatrixSdk.kt` (+3, -1): unit test suite only.
+- **Transitive coupling analysis**:
+  - `setRoomNotificationMode()` is called only when an active Matrix room's notification setting is toggled via `MatrixRoomNotifications`.
+  - During cold startup, no Matrix account exists, no Matrix room session is active, no notification preference changes occur, and `setRoomNotificationMode()` is never invoked.
+  - Zero classes in the startup cascade reference `MatrixRoomNotifications` or call `setRoomNotificationMode()`.
+  - The asynchronous background cleanup in `StartupViewModel.deleteAccount()` executes on `telegramAuthExecutor` and interacts with `TelegramAuthSession` and `AccountManager`, having zero intersection with `ReflectiveMatrixHomeserverDiscoveryClient` or `briar-matrix`.
+- **Conclusion**: There is strictly zero direct, indirect, or transitive coupling between commit `9e2f36c2f` and any component, thread, or lifecycle step in the startup path leading to `"Welcome to Harbor"`.
 
 ---
 
@@ -126,14 +163,14 @@ However, the application process was stalled in initialization:
 - `11-14 21:36:18.966 W/HWUI: Failed to choose config with EGL_SWAP_BEHAVIOR_PRESERVED, retrying without...`
 - `11-14 21:36:18.977 W/HWUI: Failed to initialize 101010-2 format, error = EGL_SUCCESS`
 
-### 3.4 Assertion Timeout on Blank Screen
+### 3.4 Assertion Timeout on Blank Screen During Multi-Activity Cascade
 At 21:36:22.605 (18.6s after starting the assertion), Maestro timed out:
 `CommandFailed: Assertion is false: "Welcome to Harbor" is visible`
 
 Inspection of diagnostic artifacts captured at the instant of failure:
 - `step-004-assertCondition-Welcome_to_Harbor.json`: The accessibility hierarchy contained only system status bar icons (`com.android.systemui:id/status_bar_container`, clock `9:36`, battery, wifi). No activity views from `org.briarproject.briar.android.debug` had rendered.
 - `step-004-assertCondition-Welcome_to_Harbor.png`: 2,591,049 of 2,592,000 pixels (99.96%) were completely black (RGB 0,0,0); only 951 pixels belonged to the status bar.
-- `SetupActivity` had not yet been reached because `SplashScreenActivity`'s delayed transition was delayed behind main thread execution when Maestro killed the process.
+- `SetupActivity` and `AuthorNameFragment` had not yet been reached or drawn because the multi-stage cold startup sequence (`SplashScreenActivity` 500ms postDelay -> `NavDrawerActivity` -> `BriarActivity.onResume` -> `StartupActivity.onCreate` -> `telegramAuthExecutor` asynchronous `deleteAccount` cleanup -> `StartupActivity.onAccountDeleted` -> `SetupActivity` -> `AuthorNameFragment` inflation) was delayed behind the 361 skipped frames and main-thread Dagger initialization backlog when Maestro's 18.6s assertion timer expired.
 
 ---
 
@@ -167,12 +204,14 @@ This confirms that the host emulator entered a persistent hang condition where e
 
 To verify the integrity of the codebase in the absence of an available emulator:
 
-1. **Setup & Onboarding Component Tests**:
+1. **Startup, Setup & Onboarding Component Tests**:
+   - `StartupViewModelTest`: PASSED (20/20 tests covering asynchronous account deletion, thread dispatch, Telegram auth coordination, and state transitions).
    - `SetupViewModelTest`: PASSED (verifies account creation state transition to `CREATED`).
    - `SetupActivityTest` (Robolectric): PASSED (verifies password matching, button enabling, and progress indicators).
-   - `MatrixSetupViewModelTest`: PASSED.
-   - Command: `JAVA_HOME=/opt/homebrew/opt/openjdk@17 ./gradlew :briar-android:testOfficialDebugUnitTest --tests '*Setup*'`
-   - Result: 12/12 tests PASSED (0 failures, 0 ignored).
+   - `MatrixSetupViewModelTest`: PASSED (10/10 tests).
+   - `MatrixSetupEntryTest`: PASSED (3/3 tests).
+   - Command: `JAVA_HOME=/opt/homebrew/opt/openjdk@17 ./gradlew :briar-android:testOfficialDebugUnitTest --tests '*StartupViewModelTest*' --tests '*Setup*'`
+   - Result: 35/35 tests PASSED (0 failures, 0 ignored).
 
 2. **Matrix Notification Component Tests**:
    - `MatrixRoomNotificationsTest`: PASSED (3/3 tests covering confirmed readback, server mute persistence, and missing session handling).
@@ -182,7 +221,7 @@ To verify the integrity of the codebase in the absence of an available emulator:
 3. **Workspace Hygiene & Policies**:
    - `check_product_language_policy.sh`: PASS
    - `check_workspace_hygiene.sh`: PASS
-   - `review_headroom.sh`: 2,053 lines remaining under review limit (status OK).
+   - `review_headroom.sh`: 1,789 lines remaining under review limit (status OK).
 
 ---
 
