@@ -72,6 +72,34 @@ class ContactListViewModelTest {
 	@After
 	fun resetSdk() = FakeMatrixSdkState.reset()
 
+	@Test
+	fun `acceptance during inbox load queues a fresh snapshot after that load`() {
+		val connector = connector(ConnectorSources.MATRIX, connectorThread(ConnectorSources.MATRIX))
+		val io = QueuedIoExecutor()
+		val ui = QueuedIoExecutor()
+		val vm = createViewModel(
+			connector,
+			ioExecutor = io,
+			androidExecutor = AndroidExecutorTestImpl(ui),
+		)
+		val prepared = mock(
+			org.briarproject.briar.api.connector.ConnectorRoomInvitationAccepter.PreparedAccept::class.java,
+		)
+		`when`(prepared.isCurrent()).thenReturn(true)
+		`when`(prepared.accept()).thenReturn(true)
+		val results = mutableListOf<Boolean>()
+		vm.acceptInvitation(prepared) { results.add(it) }
+		io.runNext() // Join finishes, but its UI completion is still queued.
+		vm.loadConnectorThreads()
+		ui.runNext() // Acceptance must not lose its refresh to the LOADING guard.
+		assertEquals(listOf(true), results)
+		io.runNext() // Finish the already running inbox load.
+		ui.runNext() // Drain the pending refresh after LOADING clears.
+		assertEquals(1, io.size)
+		io.runNext()
+		verify(connector, times(2)).getRecentThreads(20)
+	}
+
 	@Test fun `accept ignores repeat taps retries failures and reloads joined inbox`() {
 		val fixture = MatrixInboxFixture()
 		val session = fixture.session()

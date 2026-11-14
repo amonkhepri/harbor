@@ -124,7 +124,7 @@ internal class ContactListViewModel @Inject constructor(
 			}
 			androidExecutor.runOnUiThread {
 				acceptingInvitation = false
-				if (success && prepared.isCurrent()) loadConnectorThreads()
+				if (success && prepared.isCurrent()) refreshAfterRemoteActivity()
 				onComplete.accept(success && prepared.isCurrent())
 			}
 		}
