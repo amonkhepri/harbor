@@ -7,6 +7,10 @@ package org.briarproject.briar.matrix
  * so a room-listing regression can't block login/restore/logout.
  */
 interface MatrixRoomSnapshotClient {
+	fun prepareRoomNotifications(
+		roomId: String,
+	): org.briarproject.briar.api.connector.ConnectorRoomNotifications.PreparedNotifications? = null
+
 	fun prepareJoinRoom(identifier: String): (() -> Boolean)? = null
 
 	fun prepareAcceptInvitation(

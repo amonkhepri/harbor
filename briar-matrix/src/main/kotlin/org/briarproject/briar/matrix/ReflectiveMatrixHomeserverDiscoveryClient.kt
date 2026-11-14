@@ -1,5 +1,6 @@
 package org.briarproject.briar.matrix
 
+import org.briarproject.briar.api.connector.ConnectorRoomNotifications.PreparedNotifications
 import org.briarproject.briar.api.matrix.MatrixAuthSession.RecoverableErrorDetail
 import org.briarproject.briar.api.matrix.MatrixAuthSession.RecoverableErrorDetail.HOMESERVER_DISCOVERY_FAILED
 import org.briarproject.briar.api.matrix.MatrixAuthSession.RecoverableErrorDetail.INVALID_CREDENTIALS
@@ -147,6 +148,83 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 	private val activeAttachmentRoots = java.util.Collections.newSetFromMap(
 		java.util.concurrent.ConcurrentHashMap<File, Boolean>(),
 	)
+
+	override fun prepareRoomNotifications(roomId: String): PreparedNotifications? {
+		val generation = synchronized(lifecycleLock) { activeGeneration } ?: return null
+		return object : PreparedNotifications {
+			override fun isCurrent() = synchronized(lifecycleLock) {
+				activeGeneration === generation
+			}
+			override fun readMuted() = access(null)
+			override fun setMuted(muted: Boolean) = access(muted)
+
+			private fun access(muted: Boolean?): Boolean? =
+				synchronized(this@ReflectiveMatrixHomeserverDiscoveryClient) {
+					if (!isCurrent()) return@synchronized null
+					val captured = loginClient ?: return@synchronized null
+					var room: Any? = null
+					var settings: Any? = null
+					try {
+						room = captured.javaClass.getMethod("getRoom", String::class.java)
+							.invoke(captured, roomId) ?: return@synchronized null
+						val membership = room.javaClass.getMethod("membership").invoke(room) as? Enum<*>
+						if (membership?.name != "JOINED") return@synchronized null
+						val encrypted = invokeCloseableValue(room, "isEncrypted", emptyArray(), emptyArray(), {})
+						val direct = invokeCloseableValue(room, "isDirect", emptyArray(), emptyArray(), {})
+						settings = invokeCloseableValue(
+							captured,
+							"getNotificationSettings",
+							emptyArray(),
+							emptyArray(),
+							::closeQuietly,
+						)
+						val types = arrayOf<Class<*>>(
+							String::class.java,
+							Boolean::class.javaPrimitiveType!!,
+							Boolean::class.javaPrimitiveType!!,
+						)
+						val args = arrayOf<Any?>(roomId, encrypted, direct)
+						if (muted == true) {
+							val mode = Class.forName("org.matrix.rustcomponents.sdk.RoomNotificationMode")
+							invokeUnit(
+								settings,
+								"setRoomNotificationMode",
+								arrayOf(String::class.java, mode),
+								arrayOf(roomId, mode.getField("MUTE").get(null)),
+							)
+						} else if (muted == false) {
+							invokeUnit(settings, "unmuteRoom", types, args)
+						}
+						val confirmed = invokeCloseableValue(
+							settings,
+							"getRoomNotificationSettings",
+							types,
+							args,
+							{},
+						)
+						if (!isCurrent()) return@synchronized null
+						val mode = confirmed.javaClass.getMethod("getMode").invoke(confirmed) as? Enum<*>
+						when (mode?.name) {
+							"MUTE" -> true
+							"ALL_MESSAGES", "MENTIONS_AND_KEYWORDS_ONLY" -> false
+							else -> null
+						}
+					} catch (e: InterruptedException) {
+						Thread.currentThread().interrupt()
+						null
+					} catch (e: Exception) {
+						if (isUnauthorized(e)) handleSessionExpired()
+						null
+					} catch (_: LinkageError) {
+						null
+					} finally {
+						closeQuietly(settings)
+						closeQuietly(room)
+					}
+				}
+		}
+	}
+
 	private class TypingLane {
 		val queue = java.util.ArrayDeque<() -> Unit>()
 		var busy = false

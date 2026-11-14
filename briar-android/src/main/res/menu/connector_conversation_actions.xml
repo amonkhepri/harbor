@@ -21,4 +21,8 @@
 		android:id="@+id/action_leave_connector_room"
 		android:title="@string/connector_leave_room"
 		app:showAsAction="never" />
+	<item
+		android:id="@+id/action_connector_notifications"
+		android:title="@string/connector_room_notifications"
+		app:showAsAction="never" />
 </menu>

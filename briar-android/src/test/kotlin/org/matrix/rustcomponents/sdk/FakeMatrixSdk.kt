@@ -67,6 +67,7 @@ class Room(
 ) {
 	fun id(): String = roomId
 	fun displayName(): String? = roomDisplayName
+	suspend fun isEncrypted(): Boolean = false
 	suspend fun isDirect(): Boolean = direct ?: error("Direct flag unavailable")
 	fun topic(): String? = roomTopic
 	fun isSpace(): Boolean = space
@@ -766,6 +767,7 @@ class Client internal constructor(
 	private val homeserverUrl: String?,
 	private val sessionDelegate: ClientSessionDelegate?,
 ) {
+	suspend fun getNotificationSettings(): NotificationSettings = NotificationSettings()
 	private var session: Session? = null
 
 	@Suppress("UNUSED_PARAMETER")
@@ -1320,4 +1322,28 @@ object FakeMatrixSdkState {
 		lastMarkAsReadReceiptType = null
 		markAsReadFailureToThrow = null
 	}
+}
+
+// Server state survives client recreation, unlike local UI state.
+enum class RoomNotificationMode { MUTE, ALL_MESSAGES, MENTIONS_AND_KEYWORDS_ONLY }
+data class RoomNotificationSettings(val mode: RoomNotificationMode, val isDefault: Boolean)
+class NotificationSettings : AutoCloseable {
+	companion object {
+		val modes = mutableMapOf<String, RoomNotificationMode>()
+		var failUpdate = false
+	}
+
+	@Suppress("UNUSED_PARAMETER")
+	suspend fun getRoomNotificationSettings(roomId: String, encrypted: Boolean, direct: Boolean) =
+		RoomNotificationSettings(modes[roomId] ?: RoomNotificationMode.ALL_MESSAGES, false)
+	suspend fun setRoomNotificationMode(roomId: String, mode: RoomNotificationMode) {
+		check(!failUpdate)
+		modes[roomId] = mode
+	}
+
+	@Suppress("UNUSED_PARAMETER")
+	suspend fun unmuteRoom(roomId: String, encrypted: Boolean, direct: Boolean) {
+		setRoomNotificationMode(roomId, RoomNotificationMode.ALL_MESSAGES)
+	}
+	override fun close() {}
 }

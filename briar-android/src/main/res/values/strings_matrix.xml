@@ -21,4 +21,10 @@
 	<string name="matrix_join_room">Join room</string>
 	<string name="matrix_room_joined">Room joined. Return to the inbox to see it.</string>
 	<string name="matrix_join_failed">Could not join room. Check the alias or ID and your access, then try again.</string>
+	<string name="connector_room_notifications">Room notifications</string>
+	<string name="connector_room_muted">Room is muted</string>
+	<string name="connector_room_unmuted">Room is unmuted</string>
+	<string name="connector_room_mute">Mute room</string>
+	<string name="connector_room_unmute">Unmute room</string>
+	<string name="connector_room_notifications_failed">Could not confirm room notification settings. Try again.</string>
 </resources>

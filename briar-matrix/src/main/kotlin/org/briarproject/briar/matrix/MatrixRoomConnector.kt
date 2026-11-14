@@ -1,5 +1,6 @@
 package org.briarproject.briar.matrix
 
+import org.briarproject.briar.api.connector.ConnectorRoomNotifications.PreparedNotifications
 import org.briarproject.bramble.api.system.Clock
 import org.briarproject.briar.api.connector.ConnectorAttachmentMetadata
 import org.briarproject.briar.api.connector.ConnectorFileDownloader
@@ -70,6 +71,7 @@ class MatrixRoomConnector @JvmOverloads constructor(
 	private val fileDownloadClient: MatrixFileDownloadClient? = null,
 	private val maxInvitations: Int = DEFAULT_INVITATION_LIMIT,
 ) : MatrixConnector,
+	org.briarproject.briar.api.connector.ConnectorRoomNotifications,
 	ConnectorTextSender,
 	ConnectorReplySender,
 	ConnectorImageSender,
@@ -106,6 +108,16 @@ class MatrixRoomConnector @JvmOverloads constructor(
 			override val navigationContext: ConnectorNavigationContext? = navigationContext
 			override fun isCurrent(): Boolean = isSessionExpired()
 			override fun reconnect(): Boolean = isCurrent()
+		}
+	}
+
+	override fun prepareRoomNotifications(threadId: String): PreparedNotifications? {
+		if (!isAuthorized()) return null
+		val prepared = roomSnapshotClient.prepareRoomNotifications(threadId) ?: return null
+		return object : PreparedNotifications {
+			override fun isCurrent() = isAuthorized() && prepared.isCurrent()
+			override fun readMuted() = if (isCurrent()) prepared.readMuted() else null
+			override fun setMuted(muted: Boolean) = if (isCurrent()) prepared.setMuted(muted) else null
 		}
 	}
 

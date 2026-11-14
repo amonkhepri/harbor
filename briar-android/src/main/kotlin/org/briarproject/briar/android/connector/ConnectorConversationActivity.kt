@@ -750,6 +750,9 @@ class ConnectorConversationActivity : BriarActivity() {
 			isVisible = canMarkUnread()
 			isEnabled = !unreadPending
 		}
+		menu.findItem(R.id.action_connector_notifications)?.isVisible =
+			connector is org.briarproject.briar.api.connector.ConnectorRoomNotifications &&
+			connector?.isAuthorized() == true
 		menu.findItem(R.id.action_refresh_connector_conversation)?.isVisible =
 			shouldShowManualRefreshAction(
 				connector?.isEnabled() == true,
@@ -763,6 +766,10 @@ class ConnectorConversationActivity : BriarActivity() {
 
 	override fun onOptionsItemSelected(item: MenuItem): Boolean {
 		val itemId = item.itemId
+		if (itemId == R.id.action_connector_notifications) {
+			showRoomNotifications()
+			return true
+		}
 		if (itemId == R.id.action_leave_connector_room) {
 			confirmLeaveRoom()
 			return true
@@ -782,6 +789,77 @@ class ConnectorConversationActivity : BriarActivity() {
 			return true
 		}
 		return super.onOptionsItemSelected(item)
+	}
+
+	private fun showRoomNotifications() {
+		val active = connector as?
+			org.briarproject.briar.api.connector.ConnectorRoomNotifications ?: return
+		val room = threadId
+		val owner = connector
+		val prepared = active.prepareRoomNotifications(room) ?: return
+		val dialog = androidx.appcompat.app.AlertDialog.Builder(this)
+			.setTitle(R.string.connector_room_notifications)
+			.setMessage(R.string.connector_conversation_loading)
+			.setPositiveButton(R.string.connector_room_mute, null)
+			.setNegativeButton(android.R.string.cancel, null)
+			.create()
+		var confirmed: Boolean? = null
+		fun current() = dialog.isShowing &&
+			!isFinishing &&
+			!isDestroyed &&
+			connector === owner &&
+			threadId == room &&
+			prepared.isCurrent()
+		fun load(update: Boolean?) {
+			dialog.getButton(android.content.DialogInterface.BUTTON_POSITIVE).isEnabled = false
+			ioExecutor.execute {
+				val result = try {
+					if (!prepared.isCurrent()) {
+						null
+					} else if (update == null) {
+						prepared.readMuted()
+					} else {
+						prepared.setMuted(update)
+					}
+				} catch (_: RuntimeException) {
+					null
+				}
+				runOnUiThread {
+					if (!current()) return@runOnUiThread
+					if (result != null) confirmed = result
+					dialog.setMessage(
+						getString(
+							when (confirmed) {
+								true -> R.string.connector_room_muted
+								false -> R.string.connector_room_unmuted
+								null -> R.string.connector_room_notifications_failed
+							},
+						),
+					)
+					val button = dialog.getButton(android.content.DialogInterface.BUTTON_POSITIVE)
+					button.setText(
+						when (confirmed) {
+							true -> R.string.connector_room_unmute
+							false -> R.string.connector_room_mute
+							null -> R.string.connector_conversation_refresh
+						},
+					)
+					button.isEnabled = true
+					if (result == null) {
+						android.widget.Toast.makeText(
+							this,
+							R.string.connector_room_notifications_failed,
+							android.widget.Toast.LENGTH_LONG,
+						).show()
+					}
+				}
+			}
+		}
+		dialog.show()
+		dialog.getButton(android.content.DialogInterface.BUTTON_POSITIVE).setOnClickListener {
+			load(confirmed?.not())
+		}
+		load(null)
 	}
 
 	internal fun retryRefresh() {
