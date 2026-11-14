@@ -265,6 +265,63 @@ class ContactListFragmentTest {
 		)
 	}
 
+	@Test
+	fun testDeclineRequiresConfirmationWithoutOpeningConversation() {
+		val activity = Robolectric.buildActivity(TestActivity::class.java).setup().get()
+		val fragment = TestContactListFragment()
+		activity.supportFragmentManager.beginTransaction().add(fragment, "tag").commitNow()
+
+		val invitedItem = FakeConnectorInboxThreadItem(
+			connectorSource = ConnectorSources.MATRIX,
+			connectorThreadId = "!invited:example.org",
+			title = "Invited Room",
+			isInvited = true,
+		)
+		activity.setTheme(R.style.BriarTheme)
+		val vm = mock(ContactListViewModel::class.java)
+		ContactListFragment::class.java.getDeclaredField("viewModel").apply {
+			isAccessible = true
+			set(fragment, vm)
+		}
+		val prepared = mock(
+			org.briarproject.briar.api.connector.ConnectorRoomInvitationAccepter
+				.PreparedAccept::class.java,
+		)
+		org.mockito.Mockito.`when`(vm.prepareAcceptInvitation(invitedItem)).thenReturn(prepared)
+		val decline = mock(
+			org.briarproject.briar.api.connector.ConnectorRoomInvitationDecliner.PreparedDecline::class.java,
+		)
+		org.mockito.Mockito.`when`(vm.prepareDeclineInvitation(invitedItem)).thenReturn(decline)
+		fragment.onConnectorItemClick(View(activity), invitedItem)
+		assertNull(fragment.startedIntent)
+		assertEquals(
+			0,
+			org.mockito.Mockito.mockingDetails(vm).invocations.count {
+				it.method.name == "declineInvitation"
+			},
+		)
+		val dialog = org.robolectric.shadows.ShadowDialog.getLatestDialog()
+			as androidx.appcompat.app.AlertDialog
+		dialog.getButton(android.content.DialogInterface.BUTTON_NEUTRAL).performClick()
+		org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+		val confirmation = org.robolectric.shadows.ShadowDialog.getLatestDialog()
+			as androidx.appcompat.app.AlertDialog
+		assertEquals(
+			0,
+			org.mockito.Mockito.mockingDetails(vm).invocations.count {
+				it.method.name == "declineInvitation"
+			},
+		)
+		confirmation.getButton(android.content.DialogInterface.BUTTON_POSITIVE).performClick()
+		org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+		val declineCall = org.mockito.Mockito.mockingDetails(vm).invocations.single {
+			it.method.name == "declineInvitation"
+		}
+		assertEquals(decline, declineCall.arguments[0])
+
+		assertNull(fragment.startedIntent)
+	}
+
 	class TestContactListFragment : ContactListFragment() {
 		var startedIntent: Intent? = null
 		override fun injectFragment(component: ActivityComponent) {}

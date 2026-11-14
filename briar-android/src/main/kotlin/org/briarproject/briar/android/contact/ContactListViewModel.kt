@@ -17,6 +17,7 @@ import org.briarproject.bramble.api.lifecycle.IoExecutor
 import org.briarproject.bramble.api.lifecycle.LifecycleManager
 import org.briarproject.bramble.api.system.AndroidExecutor
 import org.briarproject.briar.api.android.AndroidNotificationManager
+import org.briarproject.briar.api.connector.ConnectorRoomInvitationDecliner
 import org.briarproject.briar.api.connector.ConnectorRoomInvitationAccepter
 import org.briarproject.briar.api.connector.ConnectorRegistry
 import org.briarproject.briar.api.connector.ConnectorSource
@@ -119,6 +120,37 @@ internal class ContactListViewModel @Inject constructor(
 		ioExecutor.execute {
 			val success = try {
 				prepared.isCurrent() && prepared.accept()
+			} catch (e: RuntimeException) {
+				false
+			}
+			androidExecutor.runOnUiThread {
+				acceptingInvitation = false
+				if (success && prepared.isCurrent()) refreshAfterRemoteActivity()
+				onComplete.accept(success && prepared.isCurrent())
+			}
+		}
+	}
+
+	fun prepareDeclineInvitation(
+		item: ConnectorInboxThreadItem,
+	): ConnectorRoomInvitationDecliner.PreparedDecline? {
+		if (!item.isInvited || acceptingInvitation) return null
+		val connector = connectorRegistry.connectors.firstOrNull {
+			it.source == item.connectorSource && it.isEnabled() && it.isAuthorized()
+		} as? ConnectorRoomInvitationDecliner ?: return null
+		return connector.prepareDeclineInvitation(item.connectorThreadId)
+	}
+
+	/** Owned by the retained ViewModel so rotation cannot enqueue another membership change. */
+	fun declineInvitation(
+		prepared: ConnectorRoomInvitationDecliner.PreparedDecline,
+		onComplete: androidx.core.util.Consumer<Boolean>,
+	) {
+		if (acceptingInvitation) return
+		acceptingInvitation = true
+		ioExecutor.execute {
+			val success = try {
+				prepared.isCurrent() && prepared.decline()
 			} catch (e: RuntimeException) {
 				false
 			}

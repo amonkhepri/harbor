@@ -139,6 +139,45 @@ class ContactListViewModelTest {
 		session.close()
 	}
 
+	@Test fun `decline ignores repeat taps retries failures and removes invitation from inbox`() {
+		val fixture = MatrixInboxFixture()
+		val session = fixture.session()
+		session.start()
+		session.submitHomeserver("matrix.invalid")
+		session.submitCredentials("fixture-user", "fixture-password")
+		val connector = fixture.connector(session)
+		FakeMatrixSdkState.roomsToReturn = listOf(
+			FakeRoomSpec("!room:example", membership = org.matrix.rustcomponents.sdk.Membership.INVITED),
+		)
+		val io = QueuedIoExecutor()
+		val vm = createViewModel(
+			connector,
+			matrixAuthSession = session,
+			ioExecutor = io,
+			androidExecutor = immediateUi(),
+		)
+		vm.loadConnectorThreads()
+		io.runNext()
+		val item = vm.connectorThreadItems.value!!.single()
+		val prepared = vm.prepareDeclineInvitation(item)!!
+		val results = mutableListOf<Boolean>()
+		FakeMatrixSdkState.leaveFails = true
+		vm.declineInvitation(prepared) { results.add(it) }
+		vm.declineInvitation(prepared) { results.add(it) }
+		assertEquals(1, io.size)
+		io.runNext()
+		assertEquals(listOf(false), results)
+		assertEquals(true, vm.connectorThreadItems.value!!.single().isInvited)
+		FakeMatrixSdkState.leaveFails = false
+		vm.declineInvitation(vm.prepareDeclineInvitation(item)!!) { results.add(it) }
+		io.runNext()
+		assertEquals(listOf(false, true), results)
+		io.runNext() // Successful decline queues a fresh inbox snapshot.
+		assertEquals(true, vm.connectorThreadItems.value!!.isEmpty())
+		assertEquals(2, FakeMatrixSdkState.leaveCalls)
+		session.close()
+	}
+
 	@Test
 	fun `inbox restores saved session on IO and refresh preserves READY and sign-out`() {
 		val fixture = MatrixInboxFixture()

@@ -1070,4 +1070,7 @@
 	<string name="connector_accept_invitation_confirm">Accept this room invitation?</string>
 	<string name="connector_accept_invitation_action">Accept invitation</string>
 	<string name="connector_accept_invitation_failed">Could not accept invitation. Tap the invitation to retry.</string>
+	<string name="connector_decline_invitation_action">Decline invitation</string>
+	<string name="connector_decline_invitation_confirm">Decline this room invitation?</string>
+	<string name="connector_decline_invitation_failed">Could not decline invitation. Tap the invitation to retry.</string>
 </resources>

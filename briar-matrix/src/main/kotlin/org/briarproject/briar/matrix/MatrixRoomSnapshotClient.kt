@@ -11,6 +11,10 @@ interface MatrixRoomSnapshotClient {
 		roomId: String,
 	): org.briarproject.briar.api.connector.ConnectorRoomInvitationAccepter.PreparedAccept? = null
 
+	fun prepareDeclineInvitation(
+		roomId: String,
+	): org.briarproject.briar.api.connector.ConnectorRoomInvitationDecliner.PreparedDecline? = null
+
 	/**
 	 * Returns currently joined, non-space rooms in deterministic order, bounded
 	 * to [limit]. Never throws; returns an empty list when no session is

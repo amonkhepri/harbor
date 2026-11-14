@@ -171,6 +171,20 @@ public class ContactListFragment extends BaseFragment
 			new AlertDialog.Builder(requireContext())
 					.setMessage(R.string.connector_accept_invitation_confirm)
 					.setNegativeButton(R.string.cancel, null)
+					.setNeutralButton(R.string.connector_decline_invitation_action, (d, w) -> {
+						var decline = viewModel.prepareDeclineInvitation(item);
+						if (decline == null) return;
+						new AlertDialog.Builder(requireContext())
+								.setMessage(R.string.connector_decline_invitation_confirm)
+								.setNegativeButton(R.string.cancel, null)
+								.setPositiveButton(R.string.connector_decline_invitation_action,
+										(dialog, which) -> viewModel.declineInvitation(decline, success -> {
+											if (!success && isAdded() && getView() != null) {
+												Snackbar.make(getView(), R.string.connector_decline_invitation_failed,
+														Snackbar.LENGTH_LONG).show();
+											}
+										})).show();
+					})
 					.setPositiveButton(R.string.connector_accept_invitation_action,
 							(dialog, which) -> viewModel.acceptInvitation(prepared, success -> {
 								if (!isAdded() || getView() == null) return;

@@ -17,6 +17,7 @@ import org.briarproject.briar.api.connector.ConnectorMessageReceiptState
 import org.briarproject.briar.api.connector.ConnectorMessageType
 import org.briarproject.briar.api.connector.ConnectorReactionSummary
 import org.briarproject.briar.api.connector.ConnectorUnreadMarker.PreparedMarkUnread
+import org.briarproject.briar.api.connector.ConnectorRoomInvitationDecliner.PreparedDecline
 import org.briarproject.briar.api.connector.ConnectorRoomInvitationAccepter.PreparedAccept
 import org.briarproject.briar.api.connector.ConnectorRoomLeaver.PreparedLeave
 import org.briarproject.briar.api.connector.ConnectorRoomObserver.RoomSubscription
@@ -1170,6 +1171,40 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 					invokeUnit(room, "join", emptyArray(), emptyArray())
 					accepted = isCurrent()
 					accepted
+				} catch (e: InterruptedException) {
+					Thread.currentThread().interrupt()
+					false
+				} catch (e: Exception) {
+					if (isUnauthorized(e)) handleSessionExpired()
+					false
+				} catch (e: LinkageError) {
+					false
+				} finally {
+					closeQuietly(room)
+				}
+			}
+		}
+	}
+
+	override fun prepareDeclineInvitation(roomId: String): PreparedDecline? {
+		val generation = synchronized(lifecycleLock) { activeGeneration } ?: return null
+		return object : PreparedDecline {
+			private var declined = false
+			override fun isCurrent() = synchronized(lifecycleLock) { activeGeneration === generation }
+			override fun decline(): Boolean = synchronized(this@ReflectiveMatrixHomeserverDiscoveryClient) {
+				if (!isCurrent()) return@synchronized false
+				if (declined) return@synchronized true
+				var room: Any? = null
+				try {
+					val client = loginClient ?: return@synchronized false
+					room = client.javaClass.getMethod("getRoom", String::class.java).invoke(client, roomId)
+						?: return@synchronized false
+					val membership = room.javaClass.getMethod("membership").invoke(room) as? Enum<*>
+					if (membership?.name == "LEFT") return@synchronized true
+					if (membership?.name != "INVITED") return@synchronized false
+					invokeUnit(room, "leave", emptyArray(), emptyArray())
+					declined = isCurrent()
+					declined
 				} catch (e: InterruptedException) {
 					Thread.currentThread().interrupt()
 					false
