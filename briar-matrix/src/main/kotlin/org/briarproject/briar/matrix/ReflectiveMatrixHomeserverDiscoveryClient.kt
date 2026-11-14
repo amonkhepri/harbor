@@ -1328,14 +1328,96 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 
 		val scheduledFutureRef = AtomicReference<ScheduledFuture<*>?>()
 		val closed = AtomicBoolean(false)
+		val syncThreadRef = AtomicReference<Thread?>()
+
+		val syncService = try {
+			val syncServiceMethod = client.javaClass.methods.firstOrNull {
+				it.name == "syncService" && it.parameterTypes.isEmpty()
+			}
+			if (syncServiceMethod != null) {
+				val builder = syncServiceMethod.invoke(client)
+				invokeCloseableValue(builder, "finish", emptyArray(), emptyArray(), ::closeQuietly)
+			} else {
+				null
+			}
+		} catch (_: Exception) {
+			null
+		}
+
+		if (syncService != null) {
+			typingExecutor.execute {
+				try {
+					invokeUnit(syncService, "start", emptyArray(), emptyArray())
+				} catch (_: Exception) {}
+			}
+		} else {
+			val syncOnceMethod = client.javaClass.methods.firstOrNull { it.name == "syncOnceV2" }
+			if (syncOnceMethod != null) {
+				val syncSettingsClass = try {
+					Class.forName(
+						"org.matrix.rustcomponents.sdk.SyncSettingsV2",
+						true,
+						client.javaClass.classLoader,
+					)
+				} catch (_: Exception) {
+					null
+				}
+				val syncSettings = syncSettingsClass?.let { clazz ->
+					try {
+						clazz.constructors.firstOrNull { it.parameterCount == 4 }
+							?.newInstance(null, false, 3, null)
+					} catch (_: Exception) {
+						null
+					}
+				}
+				val thread = Thread({
+					while (!closed.get()) {
+						try {
+							if (syncSettings != null) {
+								invokeUnit(
+									client,
+									"syncOnceV2",
+									arrayOf(syncSettingsClass),
+									arrayOf(syncSettings),
+								)
+							} else {
+								invokeUnit(client, "syncOnceV2", emptyArray(), emptyArray())
+							}
+						} catch (_: Exception) {
+							if (closed.get()) break
+							try {
+								Thread.sleep(1000)
+							} catch (_: InterruptedException) {
+								break
+							}
+						}
+					}
+				}, "matrix-verification-sync").apply {
+					isDaemon = true
+					start()
+				}
+				syncThreadRef.set(thread)
+			}
+		}
 
 		fun stopTimer() {
 			scheduledFutureRef.getAndSet(null)?.cancel(false)
 		}
 
+		fun stopSync() {
+			syncThreadRef.getAndSet(null)?.interrupt()
+			if (syncService != null) {
+				try {
+					invokeUnit(syncService, "stop", emptyArray(), emptyArray())
+				} catch (_: Exception) {}
+				closeQuietly(syncService)
+			}
+		}
+
 		fun finishSession(terminalState: MatrixVerificationState) {
 			if (closed.compareAndSet(false, true)) {
 				stopTimer()
+				stopSync()
 				closeQuietly(controller)
 				listener(terminalState)
 			}
@@ -1411,6 +1493,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		val timeoutTask = verificationTimerExecutor.schedule({
 			if (closed.compareAndSet(false, true)) {
 				stopTimer()
+				stopSync()
 				typingExecutor.execute {
 					try {
 						invokeUnit(controller, "cancelVerification", emptyArray(), emptyArray())
@@ -1437,6 +1520,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			override fun decline() {
 				if (closed.compareAndSet(false, true)) {
 					stopTimer()
+					stopSync()
 					typingExecutor.execute {
 						try {
 							invokeUnit(controller, "declineVerification", emptyArray(), emptyArray())
@@ -1450,6 +1534,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			override fun cancel() {
 				if (closed.compareAndSet(false, true)) {
 					stopTimer()
+					stopSync()
 					typingExecutor.execute {
 						try {
 							invokeUnit(controller, "cancelVerification", emptyArray(), emptyArray())

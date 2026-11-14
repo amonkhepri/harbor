@@ -77,22 +77,37 @@ internal class MatrixSetupViewModel(
 
 	fun startVerification(timeoutMs: Long = 60_000L) {
 		if (!enabled || currentStep() != MatrixSetupStep.READY) return
-		verificationHandle?.cancel()
-		verificationHandle = session.startDeviceVerification({ vState ->
+		executor.execute {
+			verificationHandle?.cancel()
+			val handle = session.startDeviceVerification({ vState ->
+				val current = mutableState.value ?: MatrixSetupState()
+				val trust = session.getDeviceTrustState()
+				mutableState.postValue(
+					current.copy(
+						verificationState = vState,
+						deviceTrustState = trust,
+					),
+				)
+			}, timeoutMs)
+			verificationHandle = handle
 			val current = mutableState.value ?: MatrixSetupState()
 			val trust = session.getDeviceTrustState()
-			mutableState.postValue(
-				current.copy(
-					verificationState = vState,
-					deviceTrustState = trust,
-				),
-			)
-		}, timeoutMs)
-		val current = mutableState.value ?: MatrixSetupState()
-		mutableState.value = current.copy(
-			verificationState = MatrixVerificationState.Requesting,
-			deviceTrustState = session.getDeviceTrustState(),
-		)
+			if (handle != null) {
+				mutableState.postValue(
+					current.copy(
+						verificationState = MatrixVerificationState.Requesting,
+						deviceTrustState = trust,
+					),
+				)
+			} else {
+				mutableState.postValue(
+					current.copy(
+						verificationState = MatrixVerificationState.Failed,
+						deviceTrustState = trust,
+					),
+				)
+			}
+		}
 	}
 
 	fun confirmVerification() {
@@ -115,10 +130,11 @@ internal class MatrixSetupViewModel(
 
 	fun logout(confirmed: Boolean) {
 		if (!confirmed || currentStep() != MatrixSetupStep.READY) return
-		verificationHandle?.cancel()
+		val handle = verificationHandle
 		verificationHandle = null
 		runAction(reconcileLogoutFailure = true) {
 			try {
+				handle?.cancel()
 				session.logout()
 			} finally {
 				ConnectorDraftStore.clearSource(ConnectorSources.MATRIX_ID)

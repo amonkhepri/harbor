@@ -54,6 +54,7 @@ class MatrixDeviceVerificationTest {
 
 		assertNotNull(handle1)
 		assertNotNull(handle2)
+		assertTrue(FakeMatrixSdkState.syncServiceStartCalls >= 2)
 
 		assertTrue(latch1Comparing.await(5, SECONDS))
 		assertTrue(latch2Comparing.await(5, SECONDS))
@@ -76,6 +77,7 @@ class MatrixDeviceVerificationTest {
 
 		assertEquals(MatrixDeviceTrustState.VERIFIED, client1.getDeviceTrustState())
 		assertEquals(MatrixDeviceTrustState.VERIFIED, client2.getDeviceTrustState())
+		assertTrue(FakeMatrixSdkState.syncServiceStopCalls >= 2)
 	}
 
 	@Test fun `mismatch decline never marks device trusted`() {

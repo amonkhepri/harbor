@@ -84,6 +84,7 @@ class MatrixSetupViewModelTest {
 		var lastVerificationListener: ((MatrixVerificationState) -> Unit)? = null
 		var verificationStarts = 0
 		var handle: MatrixVerificationSessionHandle? = null
+		var returnNullHandle = false
 
 		override fun getDeviceTrustState(): MatrixDeviceTrustState = deviceTrust
 
@@ -91,6 +92,7 @@ class MatrixSetupViewModelTest {
 			listener: (MatrixVerificationState) -> Unit,
 			timeoutMs: Long,
 		): MatrixVerificationSessionHandle? {
+			if (returnNullHandle) return null
 			verificationStarts++
 			lastVerificationListener = listener
 			return object : MatrixVerificationSessionHandle {
@@ -331,6 +333,7 @@ class MatrixSetupViewModelTest {
 		assertEquals(MatrixVerificationState.Idle, model.state.value!!.verificationState)
 
 		model.startVerification()
+		queue.runNext()
 		assertEquals(1, session.verificationStarts)
 		assertEquals(MatrixVerificationState.Requesting, model.state.value!!.verificationState)
 
@@ -356,6 +359,7 @@ class MatrixSetupViewModelTest {
 		queue.runNext()
 
 		model.startVerification()
+		queue.runNext()
 		session.lastVerificationListener?.invoke(
 			MatrixVerificationState.Comparing(listOf(MatrixVerificationEmoji("🐶", "Dog"))),
 		)
@@ -372,8 +376,25 @@ class MatrixSetupViewModelTest {
 		queue.runNext()
 
 		model.startVerification()
+		queue.runNext()
 		model.cancelVerification()
 		assertEquals(MatrixVerificationState.Cancelled, model.state.value!!.verificationState)
+		assertEquals(MatrixDeviceTrustState.UNVERIFIED, model.state.value!!.deviceTrustState)
+	}
+
+	@Test fun verificationStartupFailurePublishesFailedState() {
+		val session = Session().apply {
+			restored = true
+			returnNullHandle = true
+		}
+		val queue = QueueExecutor()
+		val model = MatrixSetupViewModel(session, queue, true)
+		model.start()
+		queue.runNext()
+
+		model.startVerification()
+		queue.runNext()
+		assertEquals(MatrixVerificationState.Failed, model.state.value!!.verificationState)
 		assertEquals(MatrixDeviceTrustState.UNVERIFIED, model.state.value!!.deviceTrustState)
 	}
 }

@@ -782,6 +782,14 @@ class Client internal constructor(
 	private val sessionVerificationController = SessionVerificationController()
 	private val clientEncryption = Encryption()
 
+	fun syncService(): SyncServiceBuilder = SyncServiceBuilder()
+
+	@Suppress("UNUSED_PARAMETER")
+	suspend fun syncOnceV2(settings: SyncSettingsV2? = null): SyncResponseV2 {
+		FakeMatrixSdkState.syncOnceCalls++
+		return SyncResponseV2()
+	}
+
 	suspend fun getSessionVerificationController(): SessionVerificationController =
 		sessionVerificationController
 
@@ -1182,6 +1190,37 @@ class Encryption {
 	fun verificationStateListener(listener: VerificationStateListener): TaskHandle = TaskHandle()
 }
 
+class SyncService : AutoCloseable {
+	var isStarted = false
+
+	suspend fun start() {
+		FakeMatrixSdkState.syncServiceStartCalls++
+		isStarted = true
+	}
+
+	suspend fun stop() {
+		FakeMatrixSdkState.syncServiceStopCalls++
+		isStarted = false
+	}
+
+	override fun close() {
+		isStarted = false
+	}
+}
+
+class SyncServiceBuilder : AutoCloseable {
+	suspend fun finish(): SyncService {
+		FakeMatrixSdkState.syncServiceFinishCalls++
+		return SyncService()
+	}
+
+	override fun close() {}
+}
+
+class SyncSettingsV2(val timeoutMs: ULong? = null, val fullState: Boolean = false)
+
+class SyncResponseV2
+
 object FakeMatrixSdkState {
 	val builds = mutableListOf<Thread>()
 	fun awaitBuilds() {
@@ -1343,6 +1382,10 @@ object FakeMatrixSdkState {
 	var verificationApproveCalls = 0
 	var verificationDeclineCalls = 0
 	var verificationCancelCalls = 0
+	var syncServiceStartCalls = 0
+	var syncServiceStopCalls = 0
+	var syncServiceFinishCalls = 0
+	var syncOnceCalls = 0
 	val defaultVerificationEmojis = listOf(
 		SessionVerificationEmoji("🐶", "Dog"),
 		SessionVerificationEmoji("🐱", "Cat"),
@@ -1361,6 +1404,10 @@ object FakeMatrixSdkState {
 		verificationApproveCalls = 0
 		verificationDeclineCalls = 0
 		verificationCancelCalls = 0
+		syncServiceStartCalls = 0
+		syncServiceStopCalls = 0
+		syncServiceFinishCalls = 0
+		syncOnceCalls = 0
 		getMediaThumbnailCallCount = 0
 		mediaSourceDestroyCount = 0
 		mediaThumbnailFailureToThrow = null
