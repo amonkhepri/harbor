@@ -34,7 +34,9 @@ import org.briarproject.briar.android.connector.ConnectorConversationAvailabilit
 import org.briarproject.briar.android.connector.ConnectorConversationAvailabilityState.LOAD_FAILED
 import org.briarproject.briar.android.connector.ConnectorConversationAvailabilityState.LOADING
 import org.briarproject.briar.android.connector.ConnectorConversationAvailabilityState.SESSION_EXPIRED
+import org.briarproject.briar.android.contact.MATRIX_ROOM_ACTION_PREFIX
 import org.briarproject.briar.android.matrix.MatrixSetupActivity
+import org.briarproject.briar.android.navdrawer.NavDrawerActivity
 import org.briarproject.briar.android.util.ActivityLaunchers.GetImageAdvanced
 import org.briarproject.briar.android.util.ActivityLaunchers.OpenImageDocumentAdvanced
 import org.briarproject.briar.android.util.BriarSnackbarBuilder
@@ -651,6 +653,39 @@ class ConnectorConversationActivity : BriarActivity() {
 		loadMessages(isInitialOpen = true)
 	}
 
+	override fun onNewIntent(newIntent: Intent) {
+		super.onNewIntent(newIntent)
+		intent = newIntent
+		val newThreadId = newIntent.getStringExtra(THREAD_ID) ?: ""
+		val newSourceId = newIntent.getStringExtra(SOURCE_ID)
+		if (newSourceId != connector?.source?.id || newThreadId != threadId) {
+			threadId = newThreadId
+			connector = connectorRegistry.connectors.firstOrNull { it.source.id == newSourceId }
+			textSender = connector as? ConnectorTextSender
+			replySender = (connector as? ConnectorReplySender)?.takeIf { textSender != null }
+			if (replySender != null) adapter.onReplyClicked = ::onReplyClicked
+			reactionSender = connector as? ConnectorReactionSender
+			reactionRemover = connector as? ConnectorReactionRemover
+			if (reactionSender != null || reactionRemover != null) {
+				adapter.onReactClicked = ::onReactClicked
+			}
+			adapter.editsOwnText = connector is ConnectorMessageEditor
+			imageSender = connector as? ConnectorImageSender
+			fileSender = connector as? ConnectorFileSender
+			readMarker = connector as? ConnectorReadMarker
+			sourceName = connector?.source?.displayName
+				?: getString(R.string.connector_conversation_label)
+			val title = titleText(
+				newIntent.getStringExtra(THREAD_TITLE),
+				getString(R.string.connector_conversation_title, sourceName),
+			)
+			supportActionBar?.title = title
+			loadOwner.invalidate()
+			retryOwner.invalidate()
+			loadMessages(isInitialOpen = true)
+		}
+	}
+
 	override fun onCreateOptionsMenu(menu: Menu): Boolean {
 		menuInflater.inflate(R.menu.connector_conversation_actions, menu)
 		return super.onCreateOptionsMenu(menu)
@@ -887,11 +922,27 @@ class ConnectorConversationActivity : BriarActivity() {
 		super.onDestroy()
 	}
 
+	private fun isNotificationIntent(intent: Intent?): Boolean =
+		intent?.action?.startsWith(MATRIX_ROOM_ACTION_PREFIX) == true
+
+	internal fun fallbackToInbox() {
+		if (isFinishing || isDestroyed) return
+		val fallback = Intent(this, NavDrawerActivity::class.java).apply {
+			flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+		}
+		startActivity(fallback)
+		finish()
+	}
+
 	private fun loadMessages(showLoading: Boolean = true, isInitialOpen: Boolean = false) {
 		automaticRefreshRunning = !showLoading
 		val loadGeneration = loadOwner.begin()
 		val activeConnector = connector
 		if (activeConnector == null || !hasValidThreadId(threadId)) {
+			if (isInitialOpen && isNotificationIntent(intent)) {
+				fallbackToInbox()
+				return
+			}
 			showMessages(loadGeneration, ConnectorConversationMessageListState(), LOAD_FAILED)
 			return
 		}
@@ -910,12 +961,14 @@ class ConnectorConversationActivity : BriarActivity() {
 				return@execute
 			}
 			try {
-				if (!activeConnector.isEnabled()) {
-					showMessages(loadGeneration, ConnectorConversationMessageListState(), DISABLED)
-					return@execute
-				}
-				if (!activeConnector.isAuthorized()) {
-					val availability = if (activeConnector.isSessionExpired()) {
+				if (!activeConnector.isEnabled() || !activeConnector.isAuthorized()) {
+					if (isInitialOpen && isNotificationIntent(intent)) {
+						runOnUiThread { fallbackToInbox() }
+						return@execute
+					}
+					val availability = if (!activeConnector.isEnabled()) {
+						DISABLED
+					} else if (activeConnector.isSessionExpired()) {
 						SESSION_EXPIRED
 					} else {
 						ACCOUNT_UNAVAILABLE
@@ -952,6 +1005,10 @@ class ConnectorConversationActivity : BriarActivity() {
 						}
 					}
 					ConnectorMessageReadResult.SessionExpired -> {
+						if (isInitialOpen && isNotificationIntent(intent)) {
+							runOnUiThread { fallbackToInbox() }
+							return@execute
+						}
 						showMessages(
 							loadGeneration,
 							ConnectorConversationMessageListState(),
@@ -959,6 +1016,10 @@ class ConnectorConversationActivity : BriarActivity() {
 						)
 					}
 					ConnectorMessageReadResult.LoadFailed -> {
+						if (isInitialOpen && isNotificationIntent(intent)) {
+							runOnUiThread { fallbackToInbox() }
+							return@execute
+						}
 						showMessages(
 							loadGeneration,
 							ConnectorConversationMessageListState(),
@@ -967,6 +1028,10 @@ class ConnectorConversationActivity : BriarActivity() {
 					}
 				}
 			} catch (e: RuntimeException) {
+				if (isInitialOpen && isNotificationIntent(intent)) {
+					runOnUiThread { fallbackToInbox() }
+					return@execute
+				}
 				showMessages(
 					loadGeneration,
 					ConnectorConversationMessageListState(),

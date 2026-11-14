@@ -3,9 +3,11 @@ package org.briarproject.briar.android.contact
 import android.app.Activity
 import android.app.Application
 import android.app.PendingIntent
+import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.app.TaskStackBuilder
 import org.briarproject.briar.R
 import org.briarproject.briar.android.connector.ConnectorConversationActivity
 import org.briarproject.briar.android.util.BriarNotificationBuilder
@@ -106,17 +108,7 @@ internal class MatrixActiveNotifications(
 		}
 		val manager = NotificationManagerCompat.from(app)
 		if (!shouldNotifyMatrixRoom(room.threadId, openRoom, manager.areNotificationsEnabled())) return
-		val intent = Intent(app, ConnectorConversationActivity::class.java)
-			.putExtra(ConnectorConversationActivity.SOURCE_ID, ConnectorSources.MATRIX_ID)
-			.putExtra(ConnectorConversationActivity.THREAD_ID, room.threadId)
-			.putExtra(ConnectorConversationActivity.THREAD_TITLE, room.title)
-			.setAction("matrix-room:${room.threadId}")
-		val pending = PendingIntent.getActivity(
-			app,
-			0,
-			intent,
-			PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-		)
+		val pending = createMatrixRoomPendingIntent(app, room.threadId, room.title)
 		val notification = BriarNotificationBuilder(app, CONTACT_CHANNEL_ID)
 			.setSmallIcon(R.drawable.notification_private_message)
 			.setContentTitle(app.getString(R.string.app_name))
@@ -149,6 +141,37 @@ internal class MatrixActiveNotifications(
 	override fun onActivityStopped(activity: Activity) = Unit
 	override fun onActivitySaveInstanceState(activity: Activity, state: Bundle) = Unit
 	override fun onActivityDestroyed(activity: Activity) = Unit
+}
+
+internal const val MATRIX_ROOM_ACTION_PREFIX = "matrix-room:"
+
+internal fun createMatrixRoomNotificationIntent(
+	context: Context,
+	threadId: String,
+	threadTitle: String?,
+): Intent = Intent(context, ConnectorConversationActivity::class.java).apply {
+	action = "$MATRIX_ROOM_ACTION_PREFIX$threadId"
+	flags = Intent.FLAG_ACTIVITY_CLEAR_TOP
+	putExtra(ConnectorConversationActivity.SOURCE_ID, ConnectorSources.MATRIX_ID)
+	putExtra(ConnectorConversationActivity.THREAD_ID, threadId)
+	putExtra(ConnectorConversationActivity.THREAD_TITLE, threadTitle)
+}
+
+internal fun createMatrixRoomPendingIntent(
+	context: Context,
+	threadId: String,
+	threadTitle: String?,
+): PendingIntent {
+	val intent = createMatrixRoomNotificationIntent(context, threadId, threadTitle)
+	return checkNotNull(
+		TaskStackBuilder.create(context)
+			.addParentStack(ConnectorConversationActivity::class.java)
+			.addNextIntent(intent)
+			.getPendingIntent(
+				threadId.hashCode(),
+				PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+			),
+	)
 }
 
 internal fun shouldNotifyMatrixRoom(room: String, openRoom: String?, permitted: Boolean): Boolean =

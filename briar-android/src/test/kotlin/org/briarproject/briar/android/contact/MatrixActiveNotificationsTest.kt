@@ -4,6 +4,9 @@ import android.app.Activity
 import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.content.Intent
+import org.briarproject.briar.android.connector.ConnectorConversationActivity
+import org.briarproject.briar.android.navdrawer.NavDrawerActivity
 import org.briarproject.briar.api.connector.ConnectorMessage
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult.Success
 import org.briarproject.briar.api.connector.ConnectorMessageType
@@ -14,6 +17,7 @@ import org.briarproject.briar.api.connector.ConnectorThread
 import org.briarproject.briar.api.connector.ReadOnlyConnector
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -163,5 +167,172 @@ class MatrixActiveNotificationsTest {
 		} finally {
 			notifier.close()
 		}
+	}
+
+	@Test fun sourceQualifiedNotificationIntentStructureAndNoContentExposure() {
+		val app = RuntimeEnvironment.getApplication()
+		val intent = createMatrixRoomNotificationIntent(app, "!room1:example.org", "Room One")
+
+		assertEquals(ConnectorConversationActivity::class.java.name, intent.component?.className)
+		assertEquals("matrix-room:!room1:example.org", intent.action)
+		assertEquals(Intent.FLAG_ACTIVITY_CLEAR_TOP, intent.flags and Intent.FLAG_ACTIVITY_CLEAR_TOP)
+		assertEquals(ConnectorSources.MATRIX_ID, intent.getStringExtra(ConnectorConversationActivity.SOURCE_ID))
+		assertEquals("!room1:example.org", intent.getStringExtra(ConnectorConversationActivity.THREAD_ID))
+		assertEquals("Room One", intent.getStringExtra(ConnectorConversationActivity.THREAD_TITLE))
+
+		// Privacy: Event content/text must not be exposed in intent extras
+		assertFalse(intent.hasExtra(Intent.EXTRA_TEXT))
+		assertFalse(intent.hasExtra("text"))
+		assertFalse(intent.hasExtra("message"))
+	}
+
+	@Test fun matrixRoomPendingIntentConfiguresTaskStackAndDistinctRequestCode() {
+		val app = RuntimeEnvironment.getApplication()
+		val pending1 = createMatrixRoomPendingIntent(app, "!roomA:example.org", "Room A")
+		val pending2 = createMatrixRoomPendingIntent(app, "!roomB:example.org", "Room B")
+
+		assertNotNull(pending1)
+		assertNotNull(pending2)
+	}
+
+	@Test fun tapNotificationFromActiveAppOpensCorrectRoom() {
+		val app = RuntimeEnvironment.getApplication()
+		val manager = app.getSystemService(NotificationManager::class.java)
+		manager.createNotificationChannel(
+			NotificationChannel("contacts", "Messages", NotificationManager.IMPORTANCE_DEFAULT),
+		)
+		val notifier = MatrixActiveNotifications(app) { it() }
+		val activity = Robolectric.buildActivity(Activity::class.java).setup().get()
+		notifier.onActivityResumed(activity)
+
+		val connector = Mockito.mock(
+			ReadOnlyConnector::class.java,
+			Mockito.withSettings().extraInterfaces(ConnectorRoomNotifications::class.java),
+		)
+		val prefs = Mockito.mock(PreparedNotifications::class.java)
+		Mockito.`when`(connector.source).thenReturn(ConnectorSources.MATRIX)
+		Mockito.`when`((connector as ConnectorRoomNotifications).prepareRoomNotifications("room"))
+			.thenReturn(prefs)
+		Mockito.`when`(prefs.isCurrent()).thenReturn(true)
+		Mockito.`when`(prefs.readMuted()).thenReturn(false)
+		val room = ConnectorThread(
+			ConnectorSources.MATRIX,
+			"room",
+			"Alpha Room",
+			0,
+			"",
+			false,
+			ConnectorMessageType.TEXT,
+		)
+		val session = Any()
+		Mockito.`when`(connector.getRecentMessageReadResult("room", 50))
+			.thenReturn(Success(listOf(message("msg-1"))))
+
+		try {
+			// Baseline then incoming
+			notifier.update(connector, session, listOf(room)) { true }
+			Mockito.`when`(connector.getRecentMessageReadResult("room", 50))
+				.thenReturn(Success(listOf(message("msg-1"), message("msg-2"))))
+			notifier.update(connector, session, listOf(room)) { true }
+
+			assertEquals(1, manager.activeNotifications.size)
+			val notification = manager.activeNotifications.first().notification
+			assertNotNull(notification.contentIntent)
+
+			// Tap while app is active
+			notification.contentIntent.send()
+
+			val started = Shadows.shadowOf(app).nextStartedActivity
+			assertNotNull(started)
+			assertEquals(ConnectorConversationActivity::class.java.name, started.component?.className)
+			assertEquals("matrix", started.getStringExtra(ConnectorConversationActivity.SOURCE_ID))
+			assertEquals("room", started.getStringExtra(ConnectorConversationActivity.THREAD_ID))
+			assertEquals("Alpha Room", started.getStringExtra(ConnectorConversationActivity.THREAD_TITLE))
+			assertEquals("matrix-room:room", started.action)
+
+			// Privacy check: message body is not in notification extras or intent
+			assertFalse(started.hasExtra("text"))
+			assertFalse(started.hasExtra(Intent.EXTRA_TEXT))
+		} finally {
+			notifier.close()
+		}
+	}
+
+	@Test fun tapNotificationFromStoppedActivityOpensCorrectRoom() {
+		val app = RuntimeEnvironment.getApplication()
+		val manager = app.getSystemService(NotificationManager::class.java)
+		manager.createNotificationChannel(
+			NotificationChannel("contacts", "Messages", NotificationManager.IMPORTANCE_DEFAULT),
+		)
+		val notifier = MatrixActiveNotifications(app) { it() }
+		val activityController = Robolectric.buildActivity(Activity::class.java).setup()
+		notifier.onActivityResumed(activityController.get())
+
+		val connector = Mockito.mock(
+			ReadOnlyConnector::class.java,
+			Mockito.withSettings().extraInterfaces(ConnectorRoomNotifications::class.java),
+		)
+		val prefs = Mockito.mock(PreparedNotifications::class.java)
+		Mockito.`when`(connector.source).thenReturn(ConnectorSources.MATRIX)
+		Mockito.`when`((connector as ConnectorRoomNotifications).prepareRoomNotifications("room"))
+			.thenReturn(prefs)
+		Mockito.`when`(prefs.isCurrent()).thenReturn(true)
+		Mockito.`when`(prefs.readMuted()).thenReturn(false)
+		val room = ConnectorThread(
+			ConnectorSources.MATRIX,
+			"room",
+			"Beta Room",
+			0,
+			"",
+			false,
+			ConnectorMessageType.TEXT,
+		)
+		val session = Any()
+		Mockito.`when`(connector.getRecentMessageReadResult("room", 50))
+			.thenReturn(Success(listOf(message("msg-init"))))
+
+		try {
+			notifier.update(connector, session, listOf(room)) { true }
+			Mockito.`when`(connector.getRecentMessageReadResult("room", 50))
+				.thenReturn(Success(listOf(message("msg-init"), message("msg-new"))))
+			notifier.update(connector, session, listOf(room)) { true }
+
+			assertEquals(1, manager.activeNotifications.size)
+			val notification = manager.activeNotifications.first().notification
+
+			// Activity transitions to STOPPED state
+			activityController.stop()
+
+			// Tap from stopped activity
+			notification.contentIntent.send()
+
+			val started = Shadows.shadowOf(app).nextStartedActivity
+			assertNotNull(started)
+			assertEquals(ConnectorConversationActivity::class.java.name, started.component?.className)
+			assertEquals("matrix", started.getStringExtra(ConnectorConversationActivity.SOURCE_ID))
+			assertEquals("room", started.getStringExtra(ConnectorConversationActivity.THREAD_ID))
+			assertEquals("Beta Room", started.getStringExtra(ConnectorConversationActivity.THREAD_TITLE))
+			assertEquals("matrix-room:room", started.action)
+		} finally {
+			notifier.close()
+		}
+	}
+
+	@Test fun conversationActivityFallbackToInboxSafelyNavigates() {
+		val app = RuntimeEnvironment.getApplication()
+		org.briarproject.briar.android.Localizer.initialize(app.getSharedPreferences("test", 0))
+		val intent = createMatrixRoomNotificationIntent(app, "!room:example.org", "Test Room")
+		val activity = Robolectric.buildActivity(ConnectorConversationActivity::class.java, intent).get()
+
+		activity.fallbackToInbox()
+
+		assertTrue(activity.isFinishing)
+		val started = Shadows.shadowOf(activity).nextStartedActivity
+		assertNotNull(started)
+		assertEquals(NavDrawerActivity::class.java.name, started.component?.className)
+		assertEquals(
+			Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP,
+			started.flags and (Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP),
+		)
 	}
 }
