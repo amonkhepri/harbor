@@ -1346,6 +1346,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 
 		if (syncService != null) {
 			typingExecutor.execute {
+				if (closed.get()) return@execute
 				try {
 					invokeUnit(syncService, "start", emptyArray(), emptyArray())
 				} catch (_: Exception) {}
@@ -1404,8 +1405,11 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			scheduledFutureRef.getAndSet(null)?.cancel(false)
 		}
 
-		fun stopSync() {
+		fun stopPollingThread() {
 			syncThreadRef.getAndSet(null)?.interrupt()
+		}
+
+		fun stopSyncService() {
 			if (syncService != null) {
 				try {
 					invokeUnit(syncService, "stop", emptyArray(), emptyArray())
@@ -1417,8 +1421,11 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		fun finishSession(terminalState: MatrixVerificationState) {
 			if (closed.compareAndSet(false, true)) {
 				stopTimer()
-				stopSync()
-				closeQuietly(controller)
+				stopPollingThread()
+				typingExecutor.execute {
+					stopSyncService()
+					closeQuietly(controller)
+				}
 				listener(terminalState)
 			}
 		}
@@ -1479,6 +1486,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			controller.javaClass.getMethod("setDelegate", delegateClass).invoke(controller, delegateProxy)
 			if (!closed.get()) listener(MatrixVerificationState.Requesting)
 			typingExecutor.execute {
+				if (closed.get()) return@execute
 				try {
 					invokeUnit(controller, "requestDeviceVerification", emptyArray(), emptyArray())
 				} catch (_: Exception) {
@@ -1493,11 +1501,12 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		val timeoutTask = verificationTimerExecutor.schedule({
 			if (closed.compareAndSet(false, true)) {
 				stopTimer()
-				stopSync()
+				stopPollingThread()
 				typingExecutor.execute {
 					try {
 						invokeUnit(controller, "cancelVerification", emptyArray(), emptyArray())
 					} catch (_: Exception) {}
+					stopSyncService()
 					closeQuietly(controller)
 				}
 				listener(MatrixVerificationState.TimedOut)
@@ -1523,11 +1532,12 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			override fun decline() {
 				if (closed.compareAndSet(false, true)) {
 					stopTimer()
-					stopSync()
+					stopPollingThread()
 					typingExecutor.execute {
 						try {
 							invokeUnit(controller, "declineVerification", emptyArray(), emptyArray())
 						} catch (_: Exception) {}
+						stopSyncService()
 						closeQuietly(controller)
 					}
 					listener(MatrixVerificationState.Failed)
@@ -1537,11 +1547,12 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			override fun cancel() {
 				if (closed.compareAndSet(false, true)) {
 					stopTimer()
-					stopSync()
+					stopPollingThread()
 					typingExecutor.execute {
 						try {
 							invokeUnit(controller, "cancelVerification", emptyArray(), emptyArray())
 						} catch (_: Exception) {}
+						stopSyncService()
 						closeQuietly(controller)
 					}
 					listener(MatrixVerificationState.Cancelled)

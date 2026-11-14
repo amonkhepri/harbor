@@ -12,6 +12,7 @@ import org.briarproject.briar.api.matrix.MatrixDeviceTrustState
 import org.briarproject.briar.api.matrix.MatrixVerificationSessionHandle
 import org.briarproject.briar.api.matrix.MatrixVerificationState
 import java.util.concurrent.Executor
+import java.util.concurrent.atomic.AtomicLong
 
 internal enum class MatrixSetupStep { HOMESERVER, CREDENTIALS, READY, UNAVAILABLE }
 
@@ -51,7 +52,10 @@ internal class MatrixSetupViewModel(
 ) : ViewModel() {
 	private val mutableState = MutableLiveData(MatrixSetupState())
 	val state: LiveData<MatrixSetupState> = mutableState
+
+	@Volatile
 	private var verificationHandle: MatrixVerificationSessionHandle? = null
+	private val verificationAttempt = AtomicLong(0)
 
 	fun start() {
 		if (!enabled || state.value?.started == true) return
@@ -77,8 +81,11 @@ internal class MatrixSetupViewModel(
 
 	fun startVerification(timeoutMs: Long = 60_000L) {
 		if (!enabled || currentStep() != MatrixSetupStep.READY) return
+		val attempt = verificationAttempt.incrementAndGet()
 		executor.execute {
+			if (verificationAttempt.get() != attempt) return@execute
 			verificationHandle?.cancel()
+			verificationHandle = null
 			val current = mutableState.value ?: MatrixSetupState()
 			val trust = session.getDeviceTrustState()
 			mutableState.postValue(
@@ -88,6 +95,7 @@ internal class MatrixSetupViewModel(
 				),
 			)
 			val handle = session.startDeviceVerification({ vState ->
+				if (verificationAttempt.get() != attempt) return@startDeviceVerification
 				val cur = mutableState.value ?: MatrixSetupState()
 				val t = session.getDeviceTrustState()
 				mutableState.postValue(
@@ -97,6 +105,10 @@ internal class MatrixSetupViewModel(
 					),
 				)
 			}, timeoutMs)
+			if (verificationAttempt.get() != attempt) {
+				handle?.cancel()
+				return@execute
+			}
 			verificationHandle = handle
 			if (handle == null) {
 				val cur = mutableState.value ?: MatrixSetupState()
@@ -120,6 +132,7 @@ internal class MatrixSetupViewModel(
 	}
 
 	fun cancelVerification() {
+		verificationAttempt.incrementAndGet()
 		verificationHandle?.cancel()
 		verificationHandle = null
 		val current = mutableState.value ?: MatrixSetupState()
@@ -131,6 +144,7 @@ internal class MatrixSetupViewModel(
 
 	fun logout(confirmed: Boolean) {
 		if (!confirmed || currentStep() != MatrixSetupStep.READY) return
+		verificationAttempt.incrementAndGet()
 		val handle = verificationHandle
 		verificationHandle = null
 		runAction(reconcileLogoutFailure = true) {
@@ -143,7 +157,8 @@ internal class MatrixSetupViewModel(
 		}
 	}
 
-	override fun onCleared() {
+	public override fun onCleared() {
+		verificationAttempt.incrementAndGet()
 		verificationHandle?.cancel()
 		verificationHandle = null
 		super.onCleared()

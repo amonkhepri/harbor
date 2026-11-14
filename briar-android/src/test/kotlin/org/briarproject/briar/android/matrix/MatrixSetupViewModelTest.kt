@@ -12,6 +12,7 @@ import org.briarproject.briar.api.matrix.MatrixVerificationEmoji
 import org.briarproject.briar.api.matrix.MatrixVerificationSessionHandle
 import org.briarproject.briar.api.matrix.MatrixVerificationState
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.After
 import org.junit.Before
 import org.junit.Assert.assertNull
@@ -86,6 +87,35 @@ class MatrixSetupViewModelTest {
 		var handle: MatrixVerificationSessionHandle? = null
 		var returnNullHandle = false
 		var deliverComparingSynchronously = false
+		var onStartVerification: (() -> Unit)? = null
+		var lastCreatedHandle: TestVerificationHandle? = null
+
+		class TestVerificationHandle(
+			val listener: (MatrixVerificationState) -> Unit,
+			val onConfirm: () -> Unit,
+			val onDecline: () -> Unit,
+			val onCancel: () -> Unit,
+		) : MatrixVerificationSessionHandle {
+			var confirmed = false
+			var declined = false
+			var cancelled = false
+
+			override fun confirm() {
+				confirmed = true
+				onConfirm()
+				listener(MatrixVerificationState.Verified)
+			}
+			override fun decline() {
+				declined = true
+				onDecline()
+				listener(MatrixVerificationState.Failed)
+			}
+			override fun cancel() {
+				cancelled = true
+				onCancel()
+				listener(MatrixVerificationState.Cancelled)
+			}
+		}
 
 		override fun getDeviceTrustState(): MatrixDeviceTrustState = deviceTrust
 
@@ -96,23 +126,19 @@ class MatrixSetupViewModelTest {
 			if (returnNullHandle) return null
 			verificationStarts++
 			lastVerificationListener = listener
+			onStartVerification?.invoke()
 			if (deliverComparingSynchronously) {
 				listener(MatrixVerificationState.Comparing(listOf(MatrixVerificationEmoji("🐶", "Dog"))))
 			}
-			return object : MatrixVerificationSessionHandle {
-				override fun confirm() {
-					deviceTrust = MatrixDeviceTrustState.VERIFIED
-					listener(MatrixVerificationState.Verified)
-				}
-				override fun decline() {
-					deviceTrust = MatrixDeviceTrustState.UNVERIFIED
-					listener(MatrixVerificationState.Failed)
-				}
-				override fun cancel() {
-					deviceTrust = MatrixDeviceTrustState.UNVERIFIED
-					listener(MatrixVerificationState.Cancelled)
-				}
-			}.also { handle = it }
+			return TestVerificationHandle(
+				listener,
+				onConfirm = { deviceTrust = MatrixDeviceTrustState.VERIFIED },
+				onDecline = { deviceTrust = MatrixDeviceTrustState.UNVERIFIED },
+				onCancel = { deviceTrust = MatrixDeviceTrustState.UNVERIFIED },
+			).also {
+				handle = it
+				lastCreatedHandle = it
+			}
 		}
 	}
 
@@ -419,5 +445,67 @@ class MatrixSetupViewModelTest {
 			model.state.value!!.verificationState,
 		)
 		assertEquals(MatrixDeviceTrustState.UNVERIFIED, model.state.value!!.deviceTrustState)
+	}
+
+	@Test fun cancelVerificationBeforeStartupRunsInvalidatesAttempt() {
+		val session = Session().apply { restored = true }
+		val queue = QueueExecutor()
+		val model = MatrixSetupViewModel(session, queue, true)
+		model.start()
+		queue.runNext()
+
+		model.startVerification()
+		model.cancelVerification()
+		assertEquals(MatrixVerificationState.Cancelled, model.state.value!!.verificationState)
+
+		queue.runNext()
+		assertEquals(0, session.verificationStarts)
+		assertEquals(MatrixVerificationState.Cancelled, model.state.value!!.verificationState)
+	}
+
+	@Test fun cancelVerificationWhileStartupInFlightCancelsReturnedHandle() {
+		val session = Session().apply { restored = true }
+		val queue = QueueExecutor()
+		val model = MatrixSetupViewModel(session, queue, true)
+		model.start()
+		queue.runNext()
+
+		session.onStartVerification = {
+			model.cancelVerification()
+		}
+
+		model.startVerification()
+		queue.runNext()
+
+		assertEquals(1, session.verificationStarts)
+		val handle = session.lastCreatedHandle
+		assertNotNull(handle)
+		assertTrue(handle!!.cancelled)
+		assertEquals(MatrixVerificationState.Cancelled, model.state.value!!.verificationState)
+
+		session.lastVerificationListener?.invoke(
+			MatrixVerificationState.Comparing(listOf(MatrixVerificationEmoji("🐶", "Dog"))),
+		)
+		assertEquals(MatrixVerificationState.Cancelled, model.state.value!!.verificationState)
+	}
+
+	@Test fun onClearedWhileStartupInFlightCancelsReturnedHandle() {
+		val session = Session().apply { restored = true }
+		val queue = QueueExecutor()
+		val model = MatrixSetupViewModel(session, queue, true)
+		model.start()
+		queue.runNext()
+
+		session.onStartVerification = {
+			model.onCleared()
+		}
+
+		model.startVerification()
+		queue.runNext()
+
+		assertEquals(1, session.verificationStarts)
+		val handle = session.lastCreatedHandle
+		assertNotNull(handle)
+		assertTrue(handle!!.cancelled)
 	}
 }

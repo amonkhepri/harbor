@@ -7,6 +7,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Test
 import org.matrix.rustcomponents.sdk.FakeMatrixSdkState
 import java.util.ArrayDeque
@@ -20,6 +21,10 @@ import java.util.concurrent.atomic.AtomicReference
 class MatrixDeviceVerificationTest {
 	private val client1 = ReflectiveMatrixHomeserverDiscoveryClient()
 	private val client2 = ReflectiveMatrixHomeserverDiscoveryClient()
+
+	@Before fun setUp() {
+		FakeMatrixSdkState.reset()
+	}
 
 	@After fun reset() {
 		client1.close()
@@ -81,6 +86,10 @@ class MatrixDeviceVerificationTest {
 
 		assertEquals(MatrixDeviceTrustState.VERIFIED, client1.getDeviceTrustState())
 		assertEquals(MatrixDeviceTrustState.VERIFIED, client2.getDeviceTrustState())
+		val deadline = System.currentTimeMillis() + 5000
+		while (FakeMatrixSdkState.syncServiceStopCalls < 2 && System.currentTimeMillis() < deadline) {
+			Thread.sleep(10)
+		}
 		assertTrue(FakeMatrixSdkState.syncServiceStopCalls >= 2)
 	}
 
@@ -174,16 +183,19 @@ class MatrixDeviceVerificationTest {
 		controlledExecutor.allowExecution = true
 		val controlledClient =
 			ReflectiveMatrixHomeserverDiscoveryClient(typingExecutor = controlledExecutor)
+		val peerExecutor = ControlledExecutor().apply { allowExecution = true }
+		val peerClient =
+			ReflectiveMatrixHomeserverDiscoveryClient(typingExecutor = peerExecutor)
 		try {
 			assertEquals(NONE, controlledClient.login("https://matrix.example.org", "alice", "password"))
-			assertEquals(NONE, client2.login("https://matrix.example.org", "alice", "password"))
+			assertEquals(NONE, peerClient.login("https://matrix.example.org", "alice", "password"))
 
 			val state1 = AtomicReference<MatrixVerificationState>()
 			val state2 = AtomicReference<MatrixVerificationState>()
 			val latch1Comparing = CountDownLatch(1)
 			val latch2Comparing = CountDownLatch(1)
 
-			val handle2 = client2.startVerification({ state ->
+			val handle2 = peerClient.startVerification({ state ->
 				state2.set(state)
 				if (state is MatrixVerificationState.Comparing) latch2Comparing.countDown()
 			}, 10_000L)
@@ -198,7 +210,7 @@ class MatrixDeviceVerificationTest {
 			assertTrue(latch1Comparing.await(5, SECONDS))
 			assertTrue(latch2Comparing.await(5, SECONDS))
 
-			// Peer (client2) approves verification
+			// Peer (peerClient) approves verification synchronously via peerExecutor
 			handle2!!.confirm()
 
 			// Block the controlled executor to simulate typingExecutor being occupied
@@ -216,10 +228,59 @@ class MatrixDeviceVerificationTest {
 
 			// Rechecking cancellation inside queued approval work ensures approveVerification
 			// was rejected and not invoked on the controller after cancellation
-			assertEquals(1, FakeMatrixSdkState.verificationApproveCalls) // only client2's confirm
+			assertEquals(1, FakeMatrixSdkState.verificationApproveCalls) // only peer's confirm
 			assertEquals(MatrixVerificationState.Cancelled, state1.get())
 			assertEquals(MatrixDeviceTrustState.UNVERIFIED, controlledClient.getDeviceTrustState())
-			assertEquals(MatrixDeviceTrustState.UNVERIFIED, client2.getDeviceTrustState())
+			assertEquals(MatrixDeviceTrustState.UNVERIFIED, peerClient.getDeviceTrustState())
+		} finally {
+			controlledClient.close()
+			peerClient.close()
+		}
+	}
+
+	@Test fun `cancellation dispatches sync service stop asynchronously on typing executor`() {
+		val controlledExecutor = ControlledExecutor()
+		controlledExecutor.allowExecution = true
+		val controlledClient =
+			ReflectiveMatrixHomeserverDiscoveryClient(typingExecutor = controlledExecutor)
+		try {
+			assertEquals(NONE, controlledClient.login("https://matrix.example.org", "alice", "password"))
+			val handle = controlledClient.startVerification({}, 10_000L)
+			assertNotNull(handle)
+			assertEquals(1, FakeMatrixSdkState.syncServiceStartCalls)
+			assertEquals(0, FakeMatrixSdkState.syncServiceStopCalls)
+
+			controlledExecutor.allowExecution = false
+			handle!!.cancel()
+
+			assertEquals(0, FakeMatrixSdkState.syncServiceStopCalls)
+
+			controlledExecutor.runQueued()
+			assertEquals(1, FakeMatrixSdkState.syncServiceStopCalls)
+		} finally {
+			controlledClient.close()
+		}
+	}
+
+	@Test fun `decline dispatches sync service stop asynchronously on typing executor`() {
+		val controlledExecutor = ControlledExecutor()
+		controlledExecutor.allowExecution = true
+		val controlledClient =
+			ReflectiveMatrixHomeserverDiscoveryClient(typingExecutor = controlledExecutor)
+		try {
+			assertEquals(NONE, controlledClient.login("https://matrix.example.org", "alice", "password"))
+			val handle = controlledClient.startVerification({}, 10_000L)
+			assertNotNull(handle)
+			assertEquals(1, FakeMatrixSdkState.syncServiceStartCalls)
+			assertEquals(0, FakeMatrixSdkState.syncServiceStopCalls)
+
+			controlledExecutor.allowExecution = false
+			handle!!.decline()
+
+			assertEquals(0, FakeMatrixSdkState.syncServiceStopCalls)
+
+			controlledExecutor.runQueued()
+			assertEquals(1, FakeMatrixSdkState.syncServiceStopCalls)
 		} finally {
 			controlledClient.close()
 		}
