@@ -1477,10 +1477,10 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 
 		try {
 			controller.javaClass.getMethod("setDelegate", delegateClass).invoke(controller, delegateProxy)
+			if (!closed.get()) listener(MatrixVerificationState.Requesting)
 			typingExecutor.execute {
 				try {
 					invokeUnit(controller, "requestDeviceVerification", emptyArray(), emptyArray())
-					if (!closed.get()) listener(MatrixVerificationState.Requesting)
 				} catch (_: Exception) {
 					finishSession(MatrixVerificationState.Failed)
 				}
@@ -1505,10 +1505,13 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		}, timeoutMs, TimeUnit.MILLISECONDS)
 		scheduledFutureRef.set(timeoutTask)
 
+		val confirmed = AtomicBoolean(false)
+
 		return object : MatrixVerificationSessionHandle {
 			override fun confirm() {
-				if (closed.get()) return
+				if (closed.get() || !confirmed.compareAndSet(false, true)) return
 				typingExecutor.execute {
+					if (closed.get()) return@execute
 					try {
 						invokeUnit(controller, "approveVerification", emptyArray(), emptyArray())
 					} catch (_: Exception) {

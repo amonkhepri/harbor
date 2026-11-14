@@ -9,7 +9,11 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.matrix.rustcomponents.sdk.FakeMatrixSdkState
+import java.util.ArrayDeque
+import java.util.ArrayList
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executor
 import java.util.concurrent.TimeUnit.SECONDS
 import java.util.concurrent.atomic.AtomicReference
 
@@ -144,5 +148,104 @@ class MatrixDeviceVerificationTest {
 		assertTrue(latchTimedOut.await(5, SECONDS))
 		assertEquals(MatrixVerificationState.TimedOut, state1.get())
 		assertEquals(MatrixDeviceTrustState.UNVERIFIED, client1.getDeviceTrustState())
+	}
+
+	@Test fun `callbacks during requestDeviceVerification not overwritten by Requesting`() {
+		assertEquals(NONE, client1.login("https://matrix.example.org", "alice", "password"))
+		val receivedStates = CopyOnWriteArrayList<MatrixVerificationState>()
+		val latchComparing = CountDownLatch(1)
+
+		val handle = client1.startVerification({ state ->
+			receivedStates.add(state)
+			if (state is MatrixVerificationState.Comparing) latchComparing.countDown()
+		}, 10_000L)
+
+		assertNotNull(handle)
+		assertTrue(latchComparing.await(5, SECONDS))
+		assertTrue(receivedStates.isNotEmpty())
+		assertEquals(MatrixVerificationState.Requesting, receivedStates.first())
+		assertTrue(receivedStates.last() is MatrixVerificationState.Comparing)
+		assertEquals(MatrixDeviceTrustState.UNVERIFIED, client1.getDeviceTrustState())
+		handle!!.cancel()
+	}
+
+	@Test fun `approval queued before cancellation is rejected and never marks device trusted`() {
+		val controlledExecutor = ControlledExecutor()
+		controlledExecutor.allowExecution = true
+		val controlledClient =
+			ReflectiveMatrixHomeserverDiscoveryClient(typingExecutor = controlledExecutor)
+		try {
+			assertEquals(NONE, controlledClient.login("https://matrix.example.org", "alice", "password"))
+			assertEquals(NONE, client2.login("https://matrix.example.org", "alice", "password"))
+
+			val state1 = AtomicReference<MatrixVerificationState>()
+			val state2 = AtomicReference<MatrixVerificationState>()
+			val latch1Comparing = CountDownLatch(1)
+			val latch2Comparing = CountDownLatch(1)
+
+			val handle2 = client2.startVerification({ state ->
+				state2.set(state)
+				if (state is MatrixVerificationState.Comparing) latch2Comparing.countDown()
+			}, 10_000L)
+
+			val handle1 = controlledClient.startVerification({ state ->
+				state1.set(state)
+				if (state is MatrixVerificationState.Comparing) latch1Comparing.countDown()
+			}, 10_000L)
+
+			assertNotNull(handle1)
+			assertNotNull(handle2)
+			assertTrue(latch1Comparing.await(5, SECONDS))
+			assertTrue(latch2Comparing.await(5, SECONDS))
+
+			// Peer (client2) approves verification
+			handle2!!.confirm()
+
+			// Block the controlled executor to simulate typingExecutor being occupied
+			controlledExecutor.allowExecution = false
+
+			// client1 confirms first, queueing approveVerification on typingExecutor
+			handle1!!.confirm()
+
+			// client1 cancels while approval is still queued
+			handle1.cancel()
+			assertEquals(MatrixVerificationState.Cancelled, state1.get())
+
+			// Now run all queued tasks on the occupied executor (confirm followed by cancel)
+			controlledExecutor.runQueued()
+
+			// Rechecking cancellation inside queued approval work ensures approveVerification
+			// was rejected and not invoked on the controller after cancellation
+			assertEquals(1, FakeMatrixSdkState.verificationApproveCalls) // only client2's confirm
+			assertEquals(MatrixVerificationState.Cancelled, state1.get())
+			assertEquals(MatrixDeviceTrustState.UNVERIFIED, controlledClient.getDeviceTrustState())
+			assertEquals(MatrixDeviceTrustState.UNVERIFIED, client2.getDeviceTrustState())
+		} finally {
+			controlledClient.close()
+		}
+	}
+
+	private class ControlledExecutor : Executor {
+		val queue = ArrayDeque<Runnable>()
+		var allowExecution = false
+
+		override fun execute(command: Runnable) {
+			synchronized(queue) {
+				if (allowExecution) {
+					command.run()
+				} else {
+					queue.add(command)
+				}
+			}
+		}
+
+		fun runQueued() {
+			val tasks = synchronized(queue) {
+				val list = ArrayList(queue)
+				queue.clear()
+				list
+			}
+			for (task in tasks) task.run()
+		}
 	}
 }

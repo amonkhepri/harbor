@@ -85,6 +85,7 @@ class MatrixSetupViewModelTest {
 		var verificationStarts = 0
 		var handle: MatrixVerificationSessionHandle? = null
 		var returnNullHandle = false
+		var deliverComparingSynchronously = false
 
 		override fun getDeviceTrustState(): MatrixDeviceTrustState = deviceTrust
 
@@ -95,6 +96,9 @@ class MatrixSetupViewModelTest {
 			if (returnNullHandle) return null
 			verificationStarts++
 			lastVerificationListener = listener
+			if (deliverComparingSynchronously) {
+				listener(MatrixVerificationState.Comparing(listOf(MatrixVerificationEmoji("🐶", "Dog"))))
+			}
 			return object : MatrixVerificationSessionHandle {
 				override fun confirm() {
 					deviceTrust = MatrixDeviceTrustState.VERIFIED
@@ -395,6 +399,25 @@ class MatrixSetupViewModelTest {
 		model.startVerification()
 		queue.runNext()
 		assertEquals(MatrixVerificationState.Failed, model.state.value!!.verificationState)
+		assertEquals(MatrixDeviceTrustState.UNVERIFIED, model.state.value!!.deviceTrustState)
+	}
+
+	@Test fun verificationCallbacksDeliveredBeforeStartupReturnsAreNotOverwritten() {
+		val session = Session().apply {
+			restored = true
+			deliverComparingSynchronously = true
+		}
+		val queue = QueueExecutor()
+		val model = MatrixSetupViewModel(session, queue, true)
+		model.start()
+		queue.runNext()
+
+		model.startVerification()
+		queue.runNext()
+		assertEquals(
+			MatrixVerificationState.Comparing(listOf(MatrixVerificationEmoji("🐶", "Dog"))),
+			model.state.value!!.verificationState,
+		)
 		assertEquals(MatrixDeviceTrustState.UNVERIFIED, model.state.value!!.deviceTrustState)
 	}
 }

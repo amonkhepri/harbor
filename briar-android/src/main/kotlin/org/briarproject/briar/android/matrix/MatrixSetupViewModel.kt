@@ -79,31 +79,32 @@ internal class MatrixSetupViewModel(
 		if (!enabled || currentStep() != MatrixSetupStep.READY) return
 		executor.execute {
 			verificationHandle?.cancel()
+			val current = mutableState.value ?: MatrixSetupState()
+			val trust = session.getDeviceTrustState()
+			mutableState.postValue(
+				current.copy(
+					verificationState = MatrixVerificationState.Requesting,
+					deviceTrustState = trust,
+				),
+			)
 			val handle = session.startDeviceVerification({ vState ->
-				val current = mutableState.value ?: MatrixSetupState()
-				val trust = session.getDeviceTrustState()
+				val cur = mutableState.value ?: MatrixSetupState()
+				val t = session.getDeviceTrustState()
 				mutableState.postValue(
-					current.copy(
+					cur.copy(
 						verificationState = vState,
-						deviceTrustState = trust,
+						deviceTrustState = t,
 					),
 				)
 			}, timeoutMs)
 			verificationHandle = handle
-			val current = mutableState.value ?: MatrixSetupState()
-			val trust = session.getDeviceTrustState()
-			if (handle != null) {
+			if (handle == null) {
+				val cur = mutableState.value ?: MatrixSetupState()
+				val t = session.getDeviceTrustState()
 				mutableState.postValue(
-					current.copy(
-						verificationState = MatrixVerificationState.Requesting,
-						deviceTrustState = trust,
-					),
-				)
-			} else {
-				mutableState.postValue(
-					current.copy(
+					cur.copy(
 						verificationState = MatrixVerificationState.Failed,
-						deviceTrustState = trust,
+						deviceTrustState = t,
 					),
 				)
 			}
