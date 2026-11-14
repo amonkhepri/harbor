@@ -153,6 +153,8 @@ interface TypingNotificationsListener {
 }
 
 class Timeline {
+	private val ownedListeners = mutableListOf<TimelineListener>()
+
 	suspend fun addListener(listener: TimelineListener): TaskHandle {
 		FakeMatrixSdkState.listenerAddCount++
 		FakeMatrixSdkState.timelineOperationOrder.add("listener")
@@ -160,6 +162,7 @@ class Timeline {
 			FakeMatrixSdkState.activeTimelineListeners.remove(listener)
 		}
 		FakeMatrixSdkState.activeTimelineListeners.add(listener)
+		ownedListeners.add(listener)
 		if (!FakeMatrixSdkState.listenerRegistrationSuspendAsynchronously) {
 			deliverTimelineUpdate(listener)
 			return task
@@ -309,7 +312,8 @@ class Timeline {
 
 	fun close() {
 		FakeMatrixSdkState.timelineCloseCount++
-		FakeMatrixSdkState.activeTimelineListeners.clear()
+		FakeMatrixSdkState.activeTimelineListeners.removeAll(ownedListeners.toSet())
+		ownedListeners.clear()
 	}
 
 	private fun deliverTimelineUpdate(listener: TimelineListener) {

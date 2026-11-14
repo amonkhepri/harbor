@@ -75,6 +75,10 @@ internal class ContactListViewModel @Inject constructor(
 		_connectorAvailabilityStates
 	val sourceFilter: LiveData<InboxSourceFilter> = _sourceFilter
 
+	private val matrixNotifications = MatrixActiveNotifications(application) {
+		androidExecutor.runOnUiThread(Runnable(it))
+	}
+
 	private val roomObservers = ConnectorInboxRoomObservers(::onRemoteConnectorActivity)
 
 	/** Set on the UI thread when remote activity arrives while a load is in flight. */
@@ -89,6 +93,7 @@ internal class ContactListViewModel @Inject constructor(
 	override fun onCleared() {
 		super.onCleared()
 		roomObservers.close()
+		matrixNotifications.close()
 	}
 
 	override fun eventOccurred(event: Event) {
@@ -221,6 +226,13 @@ internal class ContactListViewModel @Inject constructor(
 					}
 					threads.mapTo(items, ::GenericConnectorInboxThreadItem)
 					roomObservers.update(connector, fence, threads)
+					try {
+						matrixNotifications.update(connector, fence, threads) {
+							connector.isAuthorized() && sessionFence(connector.source) === fence
+						}
+					} catch (e: RuntimeException) {
+						// Notification failure must not discard the loaded inbox.
+					}
 				} catch (e: RuntimeException) {
 					states[connector.source] = LOAD_FAILED
 					items.addAll(previousItems[connector.source].orEmpty())
