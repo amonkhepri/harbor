@@ -19,6 +19,7 @@ import org.briarproject.briar.api.connector.ConnectorMessageType
 import org.briarproject.briar.api.connector.ConnectorNavigationContext
 import org.briarproject.briar.api.connector.ConnectorReadMarker
 import org.briarproject.briar.api.connector.ConnectorReconnectAction
+import org.briarproject.briar.api.connector.ConnectorRoomInvitationAccepter
 import org.briarproject.briar.api.connector.ConnectorRoomLeaver
 import org.briarproject.briar.api.connector.ConnectorRoomObserver
 import org.briarproject.briar.api.connector.ConnectorSource
@@ -76,6 +77,7 @@ class MatrixRoomConnector @JvmOverloads constructor(
 	ConnectorReadMarker,
 	ConnectorUnreadMarker,
 	ConnectorRoomLeaver,
+	ConnectorRoomInvitationAccepter,
 	ConnectorTypingSender,
 	ConnectorMessageDeleter,
 	ConnectorMessageEditor,
@@ -255,6 +257,11 @@ class MatrixRoomConnector @JvmOverloads constructor(
 
 	override fun prepareMarkUnread(threadId: String): ConnectorUnreadMarker.PreparedMarkUnread? =
 		if (isAuthorized()) messageSendClient.prepareMarkUnread(threadId) else null
+
+	override fun prepareAcceptInvitation(
+		threadId: String,
+	): ConnectorRoomInvitationAccepter.PreparedAccept? =
+		if (isAuthorized()) roomSnapshotClient.prepareAcceptInvitation(threadId) else null
 
 	override fun prepareLeave(threadId: String): ConnectorRoomLeaver.PreparedLeave? =
 		if (isAuthorized()) messageSendClient.prepareLeave(threadId) else null

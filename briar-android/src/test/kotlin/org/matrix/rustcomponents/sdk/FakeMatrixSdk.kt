@@ -127,6 +127,15 @@ class Room(
 		FakeMatrixSdkState.markedUnreadRooms[roomId] = newValue
 	}
 
+	suspend fun join() {
+		FakeMatrixSdkState.joinCalls++
+		FakeMatrixSdkState.onJoin?.invoke()
+		if (FakeMatrixSdkState.joinFails) throw ClientException.Generic("failed", "failed")
+		FakeMatrixSdkState.roomsToReturn = FakeMatrixSdkState.roomsToReturn.map {
+			if (it.roomId == roomId) it.copy(membership = Membership.JOINED) else it
+		}
+	}
+
 	suspend fun leave() {
 		FakeMatrixSdkState.leaveCalls++
 		if (FakeMatrixSdkState.leaveFails) throw ClientException.Generic("failed", "failed")
@@ -1056,6 +1065,9 @@ object FakeMatrixSdkState {
 	var lastBuiltClient: Client? = null
 	var roomsToReturn: List<FakeRoomSpec> = emptyList()
 	var roomCloseCount = 0
+	var joinCalls = 0
+	var joinFails = false
+	var onJoin: (() -> Unit)? = null
 	var leaveCalls = 0
 	var leaveFails = false
 	val closedRoomHandles = mutableListOf<String>()
@@ -1215,6 +1227,9 @@ object FakeMatrixSdkState {
 		lastBuiltClient = null
 		roomsToReturn = emptyList()
 		roomCloseCount = 0
+		joinCalls = 0
+		joinFails = false
+		onJoin = null
 		leaveCalls = 0
 		leaveFails = false
 		closedRoomHandles.clear()

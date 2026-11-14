@@ -212,7 +212,7 @@ class ContactListFragmentTest {
 	}
 
 	@Test
-	fun testInvitedItemClickDoesNotStartConversationActivity() {
+	fun testInvitationRequiresExplicitAcceptanceBeforeOpeningConversation() {
 		val activity = Robolectric.buildActivity(TestActivity::class.java).setup().get()
 		val fragment = TestContactListFragment()
 		activity.supportFragmentManager.beginTransaction().add(fragment, "tag").commitNow()
@@ -223,8 +223,33 @@ class ContactListFragmentTest {
 			title = "Invited Room",
 			isInvited = true,
 		)
+		activity.setTheme(R.style.BriarTheme)
+		val vm = mock(ContactListViewModel::class.java)
+		ContactListFragment::class.java.getDeclaredField("viewModel").apply {
+			isAccessible = true
+			set(fragment, vm)
+		}
+		val prepared = mock(
+			org.briarproject.briar.api.connector.ConnectorRoomInvitationAccepter
+				.PreparedAccept::class.java,
+		)
+		org.mockito.Mockito.`when`(vm.prepareAcceptInvitation(invitedItem)).thenReturn(prepared)
 		fragment.onConnectorItemClick(View(activity), invitedItem)
 		assertNull(fragment.startedIntent)
+		assertEquals(
+			0,
+			org.mockito.Mockito.mockingDetails(vm).invocations.count {
+				it.method.name == "acceptInvitation"
+			},
+		)
+		val dialog = org.robolectric.shadows.ShadowDialog.getLatestDialog()
+			as androidx.appcompat.app.AlertDialog
+		dialog.getButton(android.content.DialogInterface.BUTTON_POSITIVE).performClick()
+		org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+		val acceptCall = org.mockito.Mockito.mockingDetails(vm).invocations.single {
+			it.method.name == "acceptInvitation"
+		}
+		assertEquals(prepared, acceptCall.arguments[0])
 
 		val joinedItem = FakeConnectorInboxThreadItem(
 			connectorSource = ConnectorSources.MATRIX,

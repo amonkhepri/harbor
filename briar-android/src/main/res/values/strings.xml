@@ -1067,4 +1067,7 @@
 	<string name="connector_typing_indicator">Typing…</string>
 	<string name="connector_thread_group_content_description">%1$s group room</string>
 	<string name="connector_reaction_more_senders">And %1$d more</string>
+	<string name="connector_accept_invitation_confirm">Accept this room invitation?</string>
+	<string name="connector_accept_invitation_action">Accept invitation</string>
+	<string name="connector_accept_invitation_failed">Could not accept invitation. Tap the invitation to retry.</string>
 </resources>

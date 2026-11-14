@@ -26,6 +26,7 @@ import org.briarproject.briar.android.fragment.BaseFragment;
 import org.briarproject.briar.android.matrix.MatrixSetupActivity;
 import org.briarproject.briar.android.util.BriarSnackbarBuilder;
 import org.briarproject.briar.android.view.BriarRecyclerView;
+import org.briarproject.briar.api.connector.ConnectorRoomInvitationAccepter.PreparedAccept;
 import org.briarproject.briar.api.connector.ConnectorSource;
 import org.briarproject.nullsafety.MethodsNotNullByDefault;
 import org.briarproject.nullsafety.ParametersNotNullByDefault;
@@ -38,6 +39,7 @@ import javax.annotation.Nullable;
 import javax.inject.Inject;
 
 import androidx.annotation.UiThread;
+import androidx.appcompat.app.AlertDialog;
 import androidx.lifecycle.ViewModelProvider;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import io.github.kobakei.materialfabspeeddial.FabSpeedDial;
@@ -164,6 +166,29 @@ public class ContactListFragment extends BaseFragment
 	@Override
 	public void onConnectorItemClick(View view, ConnectorInboxThreadItem item) {
 		if (item.isInvited()) {
+			PreparedAccept prepared = viewModel.prepareAcceptInvitation(item);
+			if (prepared == null) return;
+			new AlertDialog.Builder(requireContext())
+					.setMessage(R.string.connector_accept_invitation_confirm)
+					.setNegativeButton(R.string.cancel, null)
+					.setPositiveButton(R.string.connector_accept_invitation_action,
+							(dialog, which) -> viewModel.acceptInvitation(prepared, success -> {
+								if (!isAdded() || getView() == null) return;
+								if (success) {
+									Intent i = new Intent(requireContext(),
+											ConnectorConversationActivity.class);
+									i.putExtra(ConnectorConversationActivity.SOURCE_ID,
+											item.getConnectorSource().getId());
+									i.putExtra(ConnectorConversationActivity.THREAD_ID,
+											item.getConnectorThreadId());
+									i.putExtra(ConnectorConversationActivity.THREAD_TITLE, item.getTitle());
+									startActivity(i);
+								} else {
+									Snackbar.make(getView(), R.string.connector_accept_invitation_failed,
+											Snackbar.LENGTH_LONG).show();
+								}
+							}))
+					.show();
 			return;
 		}
 		Intent i = createConnectorConversationIntent(getActivity(), item);

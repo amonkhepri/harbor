@@ -17,6 +17,7 @@ import org.briarproject.bramble.api.lifecycle.IoExecutor
 import org.briarproject.bramble.api.lifecycle.LifecycleManager
 import org.briarproject.bramble.api.system.AndroidExecutor
 import org.briarproject.briar.api.android.AndroidNotificationManager
+import org.briarproject.briar.api.connector.ConnectorRoomInvitationAccepter
 import org.briarproject.briar.api.connector.ConnectorRegistry
 import org.briarproject.briar.api.connector.ConnectorSource
 import org.briarproject.briar.api.connector.ConnectorSources
@@ -93,6 +94,39 @@ internal class ContactListViewModel @Inject constructor(
 		super.eventOccurred(event)
 		if (event is PendingContactAddedEvent || event is PendingContactRemovedEvent) {
 			checkForPendingContacts()
+		}
+	}
+
+	private var acceptingInvitation = false
+
+	fun prepareAcceptInvitation(
+		item: ConnectorInboxThreadItem,
+	): ConnectorRoomInvitationAccepter.PreparedAccept? {
+		if (!item.isInvited || acceptingInvitation) return null
+		val connector = connectorRegistry.connectors.firstOrNull {
+			it.source == item.connectorSource && it.isEnabled() && it.isAuthorized()
+		} as? ConnectorRoomInvitationAccepter ?: return null
+		return connector.prepareAcceptInvitation(item.connectorThreadId)
+	}
+
+	/** Owned by the retained ViewModel so rotation cannot enqueue another join. */
+	fun acceptInvitation(
+		prepared: ConnectorRoomInvitationAccepter.PreparedAccept,
+		onComplete: androidx.core.util.Consumer<Boolean>,
+	) {
+		if (acceptingInvitation) return
+		acceptingInvitation = true
+		ioExecutor.execute {
+			val success = try {
+				prepared.isCurrent() && prepared.accept()
+			} catch (e: RuntimeException) {
+				false
+			}
+			androidExecutor.runOnUiThread {
+				acceptingInvitation = false
+				if (success && prepared.isCurrent()) loadConnectorThreads()
+				onComplete.accept(success && prepared.isCurrent())
+			}
 		}
 	}
 

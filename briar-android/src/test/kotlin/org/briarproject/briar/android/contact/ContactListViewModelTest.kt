@@ -72,6 +72,45 @@ class ContactListViewModelTest {
 	@After
 	fun resetSdk() = FakeMatrixSdkState.reset()
 
+	@Test fun `accept ignores repeat taps retries failures and reloads joined inbox`() {
+		val fixture = MatrixInboxFixture()
+		val session = fixture.session()
+		session.start()
+		session.submitHomeserver("matrix.invalid")
+		session.submitCredentials("fixture-user", "fixture-password")
+		val connector = fixture.connector(session)
+		FakeMatrixSdkState.roomsToReturn = listOf(
+			FakeRoomSpec("!room:example", membership = org.matrix.rustcomponents.sdk.Membership.INVITED),
+		)
+		val io = QueuedIoExecutor()
+		val vm = createViewModel(
+			connector,
+			matrixAuthSession = session,
+			ioExecutor = io,
+			androidExecutor = immediateUi(),
+		)
+		vm.loadConnectorThreads()
+		io.runNext()
+		val item = vm.connectorThreadItems.value!!.single()
+		val prepared = vm.prepareAcceptInvitation(item)!!
+		val results = mutableListOf<Boolean>()
+		FakeMatrixSdkState.joinFails = true
+		vm.acceptInvitation(prepared) { results.add(it) }
+		vm.acceptInvitation(prepared) { results.add(it) }
+		assertEquals(1, io.size)
+		io.runNext()
+		assertEquals(listOf(false), results)
+		assertEquals(true, vm.connectorThreadItems.value!!.single().isInvited)
+		FakeMatrixSdkState.joinFails = false
+		vm.acceptInvitation(vm.prepareAcceptInvitation(item)!!) { results.add(it) }
+		io.runNext()
+		assertEquals(listOf(false, true), results)
+		io.runNext() // Successful acceptance queues a fresh joined-room snapshot.
+		assertEquals(false, vm.connectorThreadItems.value!!.single().isInvited)
+		assertEquals(2, FakeMatrixSdkState.joinCalls)
+		session.close()
+	}
+
 	@Test
 	fun `inbox restores saved session on IO and refresh preserves READY and sign-out`() {
 		val fixture = MatrixInboxFixture()
@@ -604,8 +643,10 @@ class ContactListViewModelTest {
 		viewModel.loadConnectorThreads()
 
 		assertEquals(emptyList<Pair<String, () -> Unit>>(), rooms.callbacks)
-		assertEquals(emptyMap<ConnectorSource, ConnectorInboxAvailabilityState>(),
-			viewModel.connectorAvailabilityStates.value)
+		assertEquals(
+			emptyMap<ConnectorSource, ConnectorInboxAvailabilityState>(),
+			viewModel.connectorAvailabilityStates.value,
+		)
 		verify(matrix, never()).getRecentThreads(20)
 		verify(androidExecutor, never()).runOnUiThread(any(Runnable::class.java))
 	}

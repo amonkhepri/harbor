@@ -17,6 +17,7 @@ import org.briarproject.briar.api.connector.ConnectorMessageReceiptState
 import org.briarproject.briar.api.connector.ConnectorMessageType
 import org.briarproject.briar.api.connector.ConnectorReactionSummary
 import org.briarproject.briar.api.connector.ConnectorUnreadMarker.PreparedMarkUnread
+import org.briarproject.briar.api.connector.ConnectorRoomInvitationAccepter.PreparedAccept
 import org.briarproject.briar.api.connector.ConnectorRoomLeaver.PreparedLeave
 import org.briarproject.briar.api.connector.ConnectorRoomObserver.RoomSubscription
 import org.briarproject.briar.api.connector.ConnectorTypingObserver.TypingSubscription
@@ -1147,6 +1148,40 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 				synchronized(this@ReflectiveMatrixHomeserverDiscoveryClient) {
 					isCurrent() && updateReadState(roomId, true) && isCurrent()
 				}
+		}
+	}
+
+	override fun prepareAcceptInvitation(roomId: String): PreparedAccept? {
+		val generation = synchronized(lifecycleLock) { activeGeneration } ?: return null
+		return object : PreparedAccept {
+			private var accepted = false
+			override fun isCurrent() = synchronized(lifecycleLock) { activeGeneration === generation }
+			override fun accept(): Boolean = synchronized(this@ReflectiveMatrixHomeserverDiscoveryClient) {
+				if (!isCurrent()) return@synchronized false
+				if (accepted) return@synchronized true
+				var room: Any? = null
+				try {
+					val client = loginClient ?: return@synchronized false
+					room = client.javaClass.getMethod("getRoom", String::class.java).invoke(client, roomId)
+						?: return@synchronized false
+					val membership = room.javaClass.getMethod("membership").invoke(room) as? Enum<*>
+					if (membership?.name == "JOINED") return@synchronized true
+					if (membership?.name != "INVITED") return@synchronized false
+					invokeUnit(room, "join", emptyArray(), emptyArray())
+					accepted = isCurrent()
+					accepted
+				} catch (e: InterruptedException) {
+					Thread.currentThread().interrupt()
+					false
+				} catch (e: Exception) {
+					if (isUnauthorized(e)) handleSessionExpired()
+					false
+				} catch (e: LinkageError) {
+					false
+				} finally {
+					closeQuietly(room)
+				}
+			}
 		}
 	}
 
