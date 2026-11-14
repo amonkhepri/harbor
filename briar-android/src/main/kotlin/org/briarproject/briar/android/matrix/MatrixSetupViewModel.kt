@@ -49,6 +49,9 @@ internal class MatrixSetupViewModel(
 	private val session: MatrixAuthSession,
 	private val executor: Executor,
 	private val enabled: Boolean,
+	private val mainExecutor: Executor = Executor { command ->
+		androidx.arch.core.executor.ArchTaskExecutor.getInstance().postToMainThread(command)
+	},
 ) : ViewModel() {
 	private val mutableState = MutableLiveData(MatrixSetupState())
 	val state: LiveData<MatrixSetupState> = mutableState
@@ -86,24 +89,26 @@ internal class MatrixSetupViewModel(
 			if (verificationAttempt.get() != attempt) return@execute
 			verificationHandle?.cancel()
 			verificationHandle = null
-			val current = mutableState.value ?: MatrixSetupState()
 			val trust = session.getDeviceTrustState()
-			mutableState.postValue(
-				current.copy(
+			mainExecutor.execute {
+				if (verificationAttempt.get() != attempt) return@execute
+				val current = mutableState.value ?: MatrixSetupState()
+				mutableState.value = current.copy(
 					verificationState = MatrixVerificationState.Requesting,
 					deviceTrustState = trust,
-				),
-			)
+				)
+			}
 			val handle = session.startDeviceVerification({ vState ->
 				if (verificationAttempt.get() != attempt) return@startDeviceVerification
-				val cur = mutableState.value ?: MatrixSetupState()
 				val t = session.getDeviceTrustState()
-				mutableState.postValue(
-					cur.copy(
+				mainExecutor.execute {
+					if (verificationAttempt.get() != attempt) return@execute
+					val cur = mutableState.value ?: MatrixSetupState()
+					mutableState.value = cur.copy(
 						verificationState = vState,
 						deviceTrustState = t,
-					),
-				)
+					)
+				}
 			}, timeoutMs)
 			if (verificationAttempt.get() != attempt) {
 				handle?.cancel()
@@ -111,14 +116,15 @@ internal class MatrixSetupViewModel(
 			}
 			verificationHandle = handle
 			if (handle == null) {
-				val cur = mutableState.value ?: MatrixSetupState()
 				val t = session.getDeviceTrustState()
-				mutableState.postValue(
-					cur.copy(
+				mainExecutor.execute {
+					if (verificationAttempt.get() != attempt) return@execute
+					val cur = mutableState.value ?: MatrixSetupState()
+					mutableState.value = cur.copy(
 						verificationState = MatrixVerificationState.Failed,
 						deviceTrustState = t,
-					),
-				)
+					)
+				}
 			}
 		}
 	}

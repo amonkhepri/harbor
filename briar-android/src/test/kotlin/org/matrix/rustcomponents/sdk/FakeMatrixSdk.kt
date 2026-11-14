@@ -1083,7 +1083,7 @@ class SessionVerificationController : AutoCloseable {
 		val peer = peer()
 		if (peer != null) {
 			peer.controllerDelegate?.didReceiveVerificationRequest(
-				SessionVerificationRequestDetails("flow-1", "device-2"),
+				SessionVerificationRequestDetails("flow-1", "device-2", UserProfile("@bob:matrix.example.org")),
 			)
 		} else {
 			controllerDelegate?.didStartSasVerification()
@@ -1091,6 +1091,10 @@ class SessionVerificationController : AutoCloseable {
 				SessionVerificationData.Emojis(FakeMatrixSdkState.defaultVerificationEmojis, byteArrayOf()),
 			)
 		}
+	}
+
+	suspend fun acknowledgeVerificationRequest(senderId: String, flowId: String) {
+		FakeMatrixSdkState.verificationAcknowledgeCalls++
 	}
 
 	suspend fun acceptVerificationRequest() {
@@ -1178,9 +1182,16 @@ class SessionVerificationEmoji(private val symbol: String, private val descripti
 	fun description(): String = description
 }
 
+class UserProfile(
+	val userId: String = "@alice:matrix.example.org",
+	val displayName: String? = null,
+	val avatarUrl: String? = null,
+)
+
 class SessionVerificationRequestDetails(
 	val flowId: String = "flow-1",
 	val deviceId: String = "device-1",
+	val senderProfile: UserProfile = UserProfile(),
 )
 
 class Encryption {
@@ -1377,6 +1388,7 @@ object FakeMatrixSdkState {
 	val approvedControllers = mutableSetOf<SessionVerificationController>()
 	var verified = false
 	var verificationRequestCalls = 0
+	var verificationAcknowledgeCalls = 0
 	var verificationAcceptCalls = 0
 	var verificationStartSasCalls = 0
 	var verificationApproveCalls = 0
@@ -1399,6 +1411,7 @@ object FakeMatrixSdkState {
 		approvedControllers.clear()
 		verified = false
 		verificationRequestCalls = 0
+		verificationAcknowledgeCalls = 0
 		verificationAcceptCalls = 0
 		verificationStartSasCalls = 0
 		verificationApproveCalls = 0

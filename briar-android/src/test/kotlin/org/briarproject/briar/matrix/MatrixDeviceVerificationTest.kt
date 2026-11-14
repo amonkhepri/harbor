@@ -5,6 +5,7 @@ import org.briarproject.briar.api.matrix.MatrixDeviceTrustState
 import org.briarproject.briar.api.matrix.MatrixVerificationState
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -67,6 +68,7 @@ class MatrixDeviceVerificationTest {
 
 		assertTrue(latch1Comparing.await(5, SECONDS))
 		assertTrue(latch2Comparing.await(5, SECONDS))
+		assertTrue(FakeMatrixSdkState.verificationAcknowledgeCalls >= 1)
 
 		val comparing1 = state1.get() as MatrixVerificationState.Comparing
 		val comparing2 = state2.get() as MatrixVerificationState.Comparing
@@ -281,6 +283,61 @@ class MatrixDeviceVerificationTest {
 
 			controlledExecutor.runQueued()
 			assertEquals(1, FakeMatrixSdkState.syncServiceStopCalls)
+		} finally {
+			controlledClient.close()
+		}
+	}
+
+	@Test fun `client logout cancels active verification sessions and prevents subsequent approval`() {
+		val controlledExecutor = ControlledExecutor()
+		controlledExecutor.allowExecution = true
+		val controlledClient =
+			ReflectiveMatrixHomeserverDiscoveryClient(typingExecutor = controlledExecutor)
+		try {
+			assertEquals(NONE, controlledClient.login("https://matrix.example.org", "alice", "password"))
+			val states = CopyOnWriteArrayList<MatrixVerificationState>()
+			val handle = controlledClient.startVerification({ states.add(it) }, 10_000L)
+			assertNotNull(handle)
+			assertEquals(1, FakeMatrixSdkState.syncServiceStartCalls)
+
+			controlledClient.logout()
+
+			val deadline = System.currentTimeMillis() + 5000
+			while (FakeMatrixSdkState.syncServiceStopCalls < 1 && System.currentTimeMillis() < deadline) {
+				Thread.sleep(10)
+			}
+			assertEquals(1, FakeMatrixSdkState.syncServiceStopCalls)
+
+			handle!!.confirm()
+			assertEquals(0, FakeMatrixSdkState.verificationApproveCalls)
+			assertFalse(
+				states.any {
+					it is MatrixVerificationState.Verified ||
+						it is MatrixVerificationState.Failed
+				},
+			)
+		} finally {
+			controlledClient.close()
+		}
+	}
+
+	@Test fun `queued approval on typing executor is rejected after client close`() {
+		val controlledExecutor = ControlledExecutor()
+		controlledExecutor.allowExecution = true
+		val controlledClient =
+			ReflectiveMatrixHomeserverDiscoveryClient(typingExecutor = controlledExecutor)
+		try {
+			assertEquals(NONE, controlledClient.login("https://matrix.example.org", "alice", "password"))
+			val handle = controlledClient.startVerification({}, 10_000L)
+			assertNotNull(handle)
+
+			controlledExecutor.allowExecution = false
+			handle!!.confirm()
+
+			controlledClient.close()
+
+			controlledExecutor.runQueued()
+			assertEquals(0, FakeMatrixSdkState.verificationApproveCalls)
 		} finally {
 			controlledClient.close()
 		}

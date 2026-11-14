@@ -508,4 +508,29 @@ class MatrixSetupViewModelTest {
 		assertNotNull(handle)
 		assertTrue(handle!!.cancelled)
 	}
+
+	@Test fun pendingMainThreadComparingUpdateIsDiscardedAfterCancellation() {
+		val session = Session().apply { restored = true }
+		val bgQueue = QueueExecutor()
+		val mainQueue = QueueExecutor()
+		val model = MatrixSetupViewModel(session, bgQueue, true, mainQueue)
+		model.start()
+		bgQueue.runNext()
+
+		model.startVerification()
+		bgQueue.runNext()
+		mainQueue.runNext()
+		assertEquals(MatrixVerificationState.Requesting, model.state.value!!.verificationState)
+
+		session.lastVerificationListener?.invoke(
+			MatrixVerificationState.Comparing(listOf(MatrixVerificationEmoji("🐶", "Dog"))),
+		)
+		assertEquals(1, mainQueue.actions.size)
+
+		model.cancelVerification()
+		assertEquals(MatrixVerificationState.Cancelled, model.state.value!!.verificationState)
+
+		mainQueue.runNext()
+		assertEquals(MatrixVerificationState.Cancelled, model.state.value!!.verificationState)
+	}
 }
