@@ -59,6 +59,23 @@ class MatrixActiveNotificationsTest {
 		assertTrue(baseline.update("room", Any(), listOf(message("other account"))).isEmpty())
 	}
 
+	@Test fun sameTimestampReplayDoesNotNotifyAfterMoreThanTwoHundredEvents() {
+		val baseline = MatrixNotificationBaseline()
+		val session = Any()
+		val initial = message("initial")
+		assertTrue(baseline.update("room", session, listOf(initial)).isEmpty())
+		val batch = (1..250).map { message("event-$it") }
+		batch.chunked(50).forEach {
+			assertEquals(it, baseline.update("room", session, it))
+		}
+		assertTrue(baseline.update("room", session, listOf(initial)).isEmpty())
+		assertTrue(baseline.update("room", session, batch.take(50)).isEmpty())
+		val newer = message("newer").copy(sourceMessageOrder = 2)
+		assertEquals(listOf(newer), baseline.update("room", session, listOf(newer)))
+		assertTrue(baseline.update("room", session, batch).isEmpty())
+		assertTrue(baseline.update("room", session, listOf(newer)).isEmpty())
+	}
+
 	@Test fun openRoomAndPermissionSuppressNotifications() {
 		assertTrue(shouldNotifyMatrixRoom("room", "other", true))
 		assertFalse(shouldNotifyMatrixRoom("room", "room", true))

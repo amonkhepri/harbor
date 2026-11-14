@@ -30,11 +30,16 @@ internal class MatrixNotificationBaseline {
 			seen.clear()
 			latestOrder.clear()
 		}
-		val ids = messages.mapTo(LinkedHashSet()) { it.messageId }
 		val previous = seen[room]
 		val cutoff = latestOrder[room] ?: Long.MIN_VALUE
-		latestOrder[room] = maxOf(cutoff, messages.maxOfOrNull { it.sourceMessageOrder } ?: cutoff)
-		seen[room] = ((previous.orEmpty() + ids).toList().takeLast(200)).toSet()
+		val latest = maxOf(cutoff, messages.maxOfOrNull { it.sourceMessageOrder } ?: cutoff)
+		latestOrder[room] = latest
+		// Older events are excluded by the cutoff. Keep every ID at the cutoff:
+		// Matrix timestamps have second precision, so a fixed ID cap can re-alert on replay.
+		val boundaryIds = messages.filter { it.sourceMessageOrder == latest }
+			.mapTo(HashSet()) { it.messageId }
+		if (latest == cutoff) boundaryIds.addAll(previous.orEmpty())
+		seen[room] = boundaryIds
 		if (previous == null) return emptyList()
 		return messages.filter {
 			it.messageId !in previous &&
