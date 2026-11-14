@@ -42,6 +42,12 @@ class MatrixSetupViewModelTest {
 		var logouts = 0
 		var failLogout = false
 		var failSnapshot = false
+		var joins = 0
+		var joinAllowed = true
+		override fun prepareJoinRoom(identifier: String): (() -> Boolean) = {
+			joins++
+			joinAllowed
+		}
 		override fun getSnapshot(): Snapshot {
 			if (failSnapshot) error("sensitive snapshot response")
 			return current
@@ -70,6 +76,28 @@ class MatrixSetupViewModelTest {
 			current = Snapshot(MatrixAuthState.HOMESERVER_ENTRY, RecoverableErrorDetail.NONE)
 			if (failLogout) error("sensitive logout response")
 		}
+	}
+
+	@Test fun joinSuppressesRepeatedTapsAndRetriesFailure() {
+		val session = Session().apply {
+			restored = true
+			joinAllowed = false
+		}
+		val queue = QueueExecutor()
+		val model = MatrixSetupViewModel(session, queue, true)
+		model.start()
+		queue.runNext()
+		model.joinRoom("#room:example.org")
+		model.joinRoom("#room:example.org")
+		assertEquals(1, queue.actions.size)
+		queue.runNext()
+		assertTrue(model.state.value!!.actionFailed)
+		session.joinAllowed = true
+		model.joinRoom("#room:example.org")
+		queue.runNext()
+		assertTrue(model.state.value!!.roomJoined)
+		assertFalse(model.state.value!!.actionFailed)
+		assertEquals(2, session.joins)
 	}
 
 	@Test fun disabledSetupNeverStartsOrSubmits() {

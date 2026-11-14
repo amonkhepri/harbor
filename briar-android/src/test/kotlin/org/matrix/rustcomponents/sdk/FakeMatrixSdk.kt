@@ -768,6 +768,15 @@ class Client internal constructor(
 ) {
 	private var session: Session? = null
 
+	@Suppress("UNUSED_PARAMETER")
+	suspend fun joinRoomByIdOrAlias(identifier: String, servers: List<String>): Room {
+		FakeMatrixSdkState.joinCalls++
+		if (FakeMatrixSdkState.joinFails) throw ClientException.Generic("denied", "private response")
+		val id = if (identifier.startsWith("#")) "!resolved:example.org" else identifier
+		FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec(id, membership = Membership.JOINED))
+		return getRoom(id)!!
+	}
+
 	fun homeserver(): String? = homeserverUrl
 
 	/** Throws like the real SDK until a session exists from [login] or [restoreSession]. */

@@ -37,6 +37,9 @@ interface MatrixAuthSession {
 	fun start()
 	fun submitHomeserver(homeserverUrl: String)
 	fun submitCredentials(username: String, password: String)
+
+	/** Captures the current session before queued join work; failures never expose SDK text. */
+	fun prepareJoinRoom(identifier: String): (() -> Boolean)? = null
 	fun logout()
 	fun expireSession() {}
 	fun close()

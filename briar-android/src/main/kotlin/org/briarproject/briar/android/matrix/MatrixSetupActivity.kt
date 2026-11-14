@@ -36,6 +36,8 @@ class MatrixSetupActivity : BriarActivity() {
 	private lateinit var status: TextView
 	private lateinit var account: TextView
 	private lateinit var signOut: Button
+	private lateinit var roomIdentifier: EditText
+	private lateinit var joinRoom: Button
 
 	override fun injectActivity(component: ActivityComponent) {
 		component.inject(this)
@@ -55,6 +57,9 @@ class MatrixSetupActivity : BriarActivity() {
 		status = findViewById(R.id.matrixStatus)
 		account = findViewById(R.id.matrixAccount)
 		signOut = findViewById(R.id.matrixSignOut)
+		roomIdentifier = findViewById(R.id.matrixRoomIdentifier)
+		joinRoom = findViewById(R.id.matrixJoinRoom)
+		joinRoom.setOnClickListener { model.joinRoom(roomIdentifier.text.toString()) }
 		model = ViewModelProvider(
 			this,
 			object : ViewModelProvider.Factory {
@@ -102,6 +107,10 @@ class MatrixSetupActivity : BriarActivity() {
 		}
 		signOut.visibility = if (step == MatrixSetupStep.READY) View.VISIBLE else View.GONE
 		signOut.isEnabled = !state.busy
+		roomIdentifier.visibility = signOut.visibility
+		joinRoom.visibility = signOut.visibility
+		roomIdentifier.isEnabled = !state.busy
+		joinRoom.isEnabled = !state.busy
 		val canSubmit = step == MatrixSetupStep.HOMESERVER || credentialsVisible
 		submit.visibility = if (canSubmit) View.VISIBLE else View.GONE
 		submit.isEnabled = !state.busy
@@ -113,6 +122,8 @@ class MatrixSetupActivity : BriarActivity() {
 		val message = when {
 			state.busy -> R.string.matrix_working
 			state.logoutFailed -> R.string.matrix_sign_out_failed
+			state.actionFailed && step == MatrixSetupStep.READY -> R.string.matrix_join_failed
+			state.roomJoined -> R.string.matrix_room_joined
 			step == MatrixSetupStep.READY -> R.string.matrix_ready
 			error == RecoverableErrorDetail.UNSUPPORTED_AUTH_STEP -> R.string.matrix_unsupported
 			error == RecoverableErrorDetail.DEVICE_KEYSTORE_UNAVAILABLE ||

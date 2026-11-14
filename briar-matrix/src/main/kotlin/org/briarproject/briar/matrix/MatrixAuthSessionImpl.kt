@@ -105,6 +105,12 @@ class MatrixAuthSessionImpl(
 	}
 
 	@Synchronized
+	override fun prepareJoinRoom(identifier: String): (() -> Boolean)? {
+		if (getSnapshot().authState != MatrixAuthState.READY) return null
+		return (loginClient as? MatrixRoomSnapshotClient)?.prepareJoinRoom(identifier)
+	}
+
+	@Synchronized
 	override fun logout() {
 		if (isClosed) return
 		try {

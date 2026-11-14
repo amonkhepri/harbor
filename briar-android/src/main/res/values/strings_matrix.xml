@@ -17,4 +17,8 @@
 	<string name="matrix_sign_out">Sign out of Matrix</string>
 	<string name="matrix_sign_out_confirmation">Sign out of Matrix and remove its saved session and local cache from this device? Your Briar account will remain unchanged.</string>
 	<string name="matrix_sign_out_failed">Matrix sign-out could not be completed. Local session data may have been removed, but sign-out on the server could not be confirmed.</string>
+	<string name="matrix_room_identifier">Room alias (#room:server) or ID (!room:server)</string>
+	<string name="matrix_join_room">Join room</string>
+	<string name="matrix_room_joined">Room joined. Return to the inbox to see it.</string>
+	<string name="matrix_join_failed">Could not join room. Check the alias or ID and your access, then try again.</string>
 </resources>

@@ -46,6 +46,21 @@
 			android:layout_width="match_parent"
 			android:layout_height="wrap_content"
 			android:text="@string/matrix_continue" />
+		<EditText
+			android:id="@+id/matrixRoomIdentifier"
+			android:layout_width="match_parent"
+			android:layout_height="wrap_content"
+			android:hint="@string/matrix_room_identifier"
+			android:inputType="textNoSuggestions"
+			android:saveEnabled="false"
+			android:singleLine="true"
+			android:visibility="gone" />
+		<Button
+			android:id="@+id/matrixJoinRoom"
+			android:layout_width="match_parent"
+			android:layout_height="wrap_content"
+			android:text="@string/matrix_join_room"
+			android:visibility="gone" />
 		<Button
 			android:id="@+id/matrixSignOut"
 			android:layout_width="match_parent"

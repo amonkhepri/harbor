@@ -36,6 +36,7 @@ internal data class MatrixSetupState(
 	val actionFailed: Boolean = false,
 	val logoutFailed: Boolean = false,
 	val started: Boolean = false,
+	val roomJoined: Boolean = false,
 )
 
 internal class MatrixSetupViewModel(
@@ -62,6 +63,12 @@ internal class MatrixSetupViewModel(
 		runAction { session.submitCredentials(username.trim(), password) }
 	}
 
+	fun joinRoom(identifier: String) {
+		if (!enabled || state.value?.busy == true || currentStep() != MatrixSetupStep.READY) return
+		val join = session.prepareJoinRoom(identifier)
+		runAction(joiningRoom = true) { check(join?.invoke() == true) }
+	}
+
 	fun logout(confirmed: Boolean) {
 		if (!confirmed || currentStep() != MatrixSetupStep.READY) return
 		runAction(reconcileLogoutFailure = true) {
@@ -78,16 +85,18 @@ internal class MatrixSetupViewModel(
 	private fun runAction(
 		reconcileLogoutFailure: Boolean = false,
 		startingSession: Boolean = false,
+		joiningRoom: Boolean = false,
 		action: () -> Unit,
 	) {
 		if (!enabled || state.value?.busy == true) return
 		val previous = state.value ?: MatrixSetupState()
-		mutableState.value = previous.copy(busy = true, actionFailed = false, logoutFailed = false)
+		mutableState.value =
+			previous.copy(busy = true, actionFailed = false, logoutFailed = false, roomJoined = false)
 		try {
 			executor.execute {
 				val result = try {
 					action()
-					MatrixSetupState(session.getSnapshot(), started = true)
+					MatrixSetupState(session.getSnapshot(), started = true, roomJoined = joiningRoom)
 				} catch (_: Exception) {
 					// SDK exceptions may contain credentials or server responses. Do not log them.
 					// A failed start() must be retryable; a failed later action must not re-trigger start().

@@ -1152,6 +1152,41 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		}
 	}
 
+	override fun prepareJoinRoom(identifier: String): (() -> Boolean)? {
+		val value = identifier.trim()
+		if (!value.matches(Regex("[!#][^\\s:]+:[^\\s]+"))) return null
+		val generation = synchronized(lifecycleLock) { activeGeneration } ?: return null
+		var joined = false
+		return {
+			synchronized(this) {
+				fun current() = synchronized(lifecycleLock) { activeGeneration === generation }
+				if (!current()) return@synchronized false
+				if (joined) return@synchronized true
+				try {
+					val client = loginClient ?: return@synchronized false
+					val room = invokeCloseableValue(
+						client,
+						"joinRoomByIdOrAlias",
+						arrayOf(String::class.java, List::class.java),
+						arrayOf(value, emptyList<String>()),
+						::closeQuietly,
+					)
+					closeQuietly(room)
+					joined = current()
+					joined
+				} catch (_: InterruptedException) {
+					Thread.currentThread().interrupt()
+					false
+				} catch (e: Exception) {
+					if (isUnauthorized(e)) handleSessionExpired()
+					false
+				} catch (_: LinkageError) {
+					false
+				}
+			}
+		}
+	}
+
 	override fun prepareAcceptInvitation(roomId: String): PreparedAccept? {
 		val generation = synchronized(lifecycleLock) { activeGeneration } ?: return null
 		return object : PreparedAccept {
