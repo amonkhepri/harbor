@@ -1080,6 +1080,9 @@ class SessionVerificationController(private val client: Client? = null) : AutoCl
 
 	suspend fun requestDeviceVerification() {
 		FakeMatrixSdkState.verificationRequestCalls++
+		if (FakeMatrixSdkState.failVerificationRequest) {
+			throw IllegalStateException("forced verification request failure")
+		}
 		val peer = peer()
 		if (peer != null) {
 			val senderUserId = FakeMatrixSdkState.customVerificationRequestSenderId
@@ -1415,9 +1418,11 @@ object FakeMatrixSdkState {
 	)
 	var defaultVerificationEmojis: List<SessionVerificationEmoji> = initialDefaultVerificationEmojis
 	var customVerificationRequestSenderId: String? = null
+	var failVerificationRequest = false
 
 	fun reset() {
 		awaitBuilds()
+		failVerificationRequest = false
 		customVerificationRequestSenderId = null
 		defaultVerificationEmojis = initialDefaultVerificationEmojis
 		activeVerificationControllers.clear()

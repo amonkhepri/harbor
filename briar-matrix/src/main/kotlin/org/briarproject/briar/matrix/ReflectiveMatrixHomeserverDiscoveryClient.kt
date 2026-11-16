@@ -1663,10 +1663,14 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 				}
 			}
 		}
-		handleRef.set(handle)
-
 		val current = synchronized(lifecycleLock) {
-			(activeGeneration === generation).also { if (it) activeVerificationSessions.add(handle) }
+			if (activeGeneration === generation && !closed.get()) {
+				handleRef.set(handle)
+				activeVerificationSessions.add(handle)
+				true
+			} else {
+				false
+			}
 		}
 		if (!current) {
 			handle.cancel()

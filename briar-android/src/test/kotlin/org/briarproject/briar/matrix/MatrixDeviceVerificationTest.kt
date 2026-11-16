@@ -7,6 +7,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -411,6 +412,24 @@ class MatrixDeviceVerificationTest {
 
 		handle1!!.cancel()
 		handle2!!.cancel()
+	}
+
+	@Test fun `fast failure during requestDeviceVerification returns null and does not leak handle`() {
+		FakeMatrixSdkState.failVerificationRequest = true
+		val directExecutor = Executor { it.run() }
+		val testClient = ReflectiveMatrixHomeserverDiscoveryClient(typingExecutor = directExecutor)
+		try {
+			assertEquals(NONE, testClient.login("https://matrix.example.org", "alice", "password"))
+			val terminalState = AtomicReference<MatrixVerificationState>()
+			val handle = testClient.startVerification({ state ->
+				terminalState.set(state)
+			}, 5_000L)
+
+			assertNull("Handle must be null when session closed before registration", handle)
+			assertEquals(MatrixVerificationState.Failed, terminalState.get())
+		} finally {
+			testClient.close()
+		}
 	}
 
 	private class ControlledExecutor : Executor {

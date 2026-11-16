@@ -141,7 +141,25 @@ internal class MatrixSetupViewModel(
 	}
 
 	fun declineVerification() {
-		verificationHandle?.decline()
+		val attempt = verificationAttempt.incrementAndGet()
+		val handle = verificationHandle
+		verificationHandle = null
+		val current = mutableState.value ?: MatrixSetupState()
+		mutableState.value = current.copy(
+			verificationState = MatrixVerificationState.Failed,
+		)
+		executor.execute {
+			handle?.decline()
+			val trust = session.getDeviceTrustState()
+			mainExecutor.execute {
+				if (verificationAttempt.get() == attempt) {
+					val cur = mutableState.value ?: MatrixSetupState()
+					mutableState.value = cur.copy(
+						deviceTrustState = trust,
+					)
+				}
+			}
+		}
 	}
 
 	fun cancelVerification() {
