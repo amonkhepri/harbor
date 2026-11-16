@@ -95,6 +95,46 @@ class MatrixDeviceVerificationTest {
 		assertTrue(FakeMatrixSdkState.syncServiceStopCalls >= 2)
 	}
 
+	@Test fun `empty verification data fails session and never marks device trusted`() {
+		FakeMatrixSdkState.defaultVerificationEmojis = emptyList()
+		loginBoth()
+		val state1 = AtomicReference<MatrixVerificationState>()
+		val state2 = AtomicReference<MatrixVerificationState>()
+		val latch1Terminal = CountDownLatch(1)
+		val latch2Terminal = CountDownLatch(1)
+
+		val handle2 = client2.startVerification({ state ->
+			state2.set(state)
+			if (state is MatrixVerificationState.Failed || state is MatrixVerificationState.Cancelled) {
+				latch2Terminal.countDown()
+			}
+		}, 10_000L)
+
+		val handle1 = client1.startVerification({ state ->
+			state1.set(state)
+			if (state is MatrixVerificationState.Failed || state is MatrixVerificationState.Cancelled) {
+				latch1Terminal.countDown()
+			}
+		}, 10_000L)
+
+		assertNotNull(handle1)
+		assertNotNull(handle2)
+		assertTrue(latch1Terminal.await(5, SECONDS))
+		assertTrue(latch2Terminal.await(5, SECONDS))
+
+		assertEquals(MatrixVerificationState.Failed, state1.get())
+		assertEquals(MatrixVerificationState.Failed, state2.get())
+		assertEquals(MatrixDeviceTrustState.UNVERIFIED, client1.getDeviceTrustState())
+		assertEquals(MatrixDeviceTrustState.UNVERIFIED, client2.getDeviceTrustState())
+		assertTrue(FakeMatrixSdkState.verificationCancelCalls >= 1)
+
+		handle1!!.confirm()
+		handle2!!.confirm()
+		assertEquals(0, FakeMatrixSdkState.verificationApproveCalls)
+		assertEquals(MatrixDeviceTrustState.UNVERIFIED, client1.getDeviceTrustState())
+		assertEquals(MatrixDeviceTrustState.UNVERIFIED, client2.getDeviceTrustState())
+	}
+
 	@Test fun `mismatch decline never marks device trusted`() {
 		loginBoth()
 		val state1 = AtomicReference<MatrixVerificationState>()

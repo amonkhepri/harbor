@@ -1398,14 +1398,16 @@ object FakeMatrixSdkState {
 	var syncServiceStopCalls = 0
 	var syncServiceFinishCalls = 0
 	var syncOnceCalls = 0
-	val defaultVerificationEmojis = listOf(
+	private val initialDefaultVerificationEmojis = listOf(
 		SessionVerificationEmoji("🐶", "Dog"),
 		SessionVerificationEmoji("🐱", "Cat"),
 		SessionVerificationEmoji("🦊", "Fox"),
 	)
+	var defaultVerificationEmojis: List<SessionVerificationEmoji> = initialDefaultVerificationEmojis
 
 	fun reset() {
 		awaitBuilds()
+		defaultVerificationEmojis = initialDefaultVerificationEmojis
 		activeVerificationControllers.clear()
 		peerVerificationController = null
 		approvedControllers.clear()

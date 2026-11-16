@@ -91,23 +91,25 @@ internal class MatrixSetupViewModel(
 			verificationHandle = null
 			val trust = session.getDeviceTrustState()
 			mainExecutor.execute {
-				if (verificationAttempt.get() != attempt) return@execute
-				val current = mutableState.value ?: MatrixSetupState()
-				mutableState.value = current.copy(
-					verificationState = MatrixVerificationState.Requesting,
-					deviceTrustState = trust,
-				)
+				if (verificationAttempt.get() == attempt) {
+					val current = mutableState.value ?: MatrixSetupState()
+					mutableState.value = current.copy(
+						verificationState = MatrixVerificationState.Requesting,
+						deviceTrustState = trust,
+					)
+				}
 			}
 			val handle = session.startDeviceVerification({ vState ->
 				if (verificationAttempt.get() != attempt) return@startDeviceVerification
 				val t = session.getDeviceTrustState()
 				mainExecutor.execute {
-					if (verificationAttempt.get() != attempt) return@execute
-					val cur = mutableState.value ?: MatrixSetupState()
-					mutableState.value = cur.copy(
-						verificationState = vState,
-						deviceTrustState = t,
-					)
+					if (verificationAttempt.get() == attempt) {
+						val cur = mutableState.value ?: MatrixSetupState()
+						mutableState.value = cur.copy(
+							verificationState = vState,
+							deviceTrustState = t,
+						)
+					}
 				}
 			}, timeoutMs)
 			if (verificationAttempt.get() != attempt) {
@@ -118,18 +120,23 @@ internal class MatrixSetupViewModel(
 			if (handle == null) {
 				val t = session.getDeviceTrustState()
 				mainExecutor.execute {
-					if (verificationAttempt.get() != attempt) return@execute
-					val cur = mutableState.value ?: MatrixSetupState()
-					mutableState.value = cur.copy(
-						verificationState = MatrixVerificationState.Failed,
-						deviceTrustState = t,
-					)
+					if (verificationAttempt.get() == attempt) {
+						val cur = mutableState.value ?: MatrixSetupState()
+						mutableState.value = cur.copy(
+							verificationState = MatrixVerificationState.Failed,
+							deviceTrustState = t,
+						)
+					}
 				}
 			}
 		}
 	}
 
 	fun confirmVerification() {
+		val current = state.value?.verificationState
+		if (current !is MatrixVerificationState.Comparing || current.emojis.isEmpty()) {
+			return
+		}
 		verificationHandle?.confirm()
 	}
 
@@ -138,14 +145,25 @@ internal class MatrixSetupViewModel(
 	}
 
 	fun cancelVerification() {
-		verificationAttempt.incrementAndGet()
-		verificationHandle?.cancel()
+		val attempt = verificationAttempt.incrementAndGet()
+		val handle = verificationHandle
 		verificationHandle = null
 		val current = mutableState.value ?: MatrixSetupState()
 		mutableState.value = current.copy(
 			verificationState = MatrixVerificationState.Cancelled,
-			deviceTrustState = session.getDeviceTrustState(),
 		)
+		executor.execute {
+			handle?.cancel()
+			val trust = session.getDeviceTrustState()
+			mainExecutor.execute {
+				if (verificationAttempt.get() == attempt) {
+					val cur = mutableState.value ?: MatrixSetupState()
+					mutableState.value = cur.copy(
+						deviceTrustState = trust,
+					)
+				}
+			}
+		}
 	}
 
 	fun logout(confirmed: Boolean) {

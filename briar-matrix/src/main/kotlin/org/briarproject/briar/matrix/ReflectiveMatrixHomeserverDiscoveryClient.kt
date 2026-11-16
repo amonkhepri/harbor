@@ -1439,6 +1439,28 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			}
 		}
 
+		fun cancelAndFail() {
+			if (closed.compareAndSet(false, true)) {
+				stopTimer()
+				stopPollingThread()
+				synchronized(lifecycleLock) {
+					activeVerificationSessions.remove(handleRef.get())
+				}
+				typingExecutor.execute {
+					try {
+						invokeUnit(controller, "cancelVerification", emptyArray(), emptyArray())
+					} catch (_: Exception) {}
+					stopSyncService()
+					closeQuietly(controller)
+				}
+				if (isCurrent()) {
+					listener(MatrixVerificationState.Failed)
+				}
+			}
+		}
+
+		val hasNonEmptyData = AtomicBoolean(false)
+
 		val delegateProxy = Proxy.newProxyInstance(
 			delegateClass.classLoader,
 			arrayOf(delegateClass),
@@ -1509,7 +1531,12 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 					if (!closed.get() && isCurrent()) {
 						val data = args?.getOrNull(0)
 						val emojis = extractVerificationEmojis(data)
-						listener(MatrixVerificationState.Comparing(emojis))
+						if (emojis.isEmpty()) {
+							cancelAndFail()
+						} else {
+							hasNonEmptyData.set(true)
+							listener(MatrixVerificationState.Comparing(emojis))
+						}
 					}
 					null
 				}
@@ -1573,6 +1600,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 
 		val handle = object : MatrixVerificationSessionHandle {
 			override fun confirm() {
+				if (!hasNonEmptyData.get()) return
 				if (closed.get() || !isCurrent() || !confirmed.compareAndSet(false, true)) return
 				typingExecutor.execute {
 					if (closed.get() || !isCurrent()) return@execute

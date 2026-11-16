@@ -198,7 +198,7 @@ class MatrixSetupActivity : BriarActivity() {
 					"${it.symbol} ${it.description}"
 				}
 				verificationActions.visibility = View.VISIBLE
-				confirmVerification.isEnabled = !state.busy
+				confirmVerification.isEnabled = !state.busy && vState.emojis.isNotEmpty()
 				declineVerification.isEnabled = !state.busy
 				cancelVerification.visibility = View.VISIBLE
 				cancelVerification.isEnabled = !state.busy

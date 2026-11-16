@@ -117,7 +117,11 @@ class MatrixSetupViewModelTest {
 			}
 		}
 
-		override fun getDeviceTrustState(): MatrixDeviceTrustState = deviceTrust
+		var deviceTrustReads = 0
+		override fun getDeviceTrustState(): MatrixDeviceTrustState {
+			deviceTrustReads++
+			return deviceTrust
+		}
 
 		override fun startDeviceVerification(
 			listener: (MatrixVerificationState) -> Unit,
@@ -379,6 +383,65 @@ class MatrixSetupViewModelTest {
 		model.confirmVerification()
 		assertEquals(MatrixVerificationState.Verified, model.state.value!!.verificationState)
 		assertEquals(MatrixDeviceTrustState.VERIFIED, model.state.value!!.deviceTrustState)
+	}
+
+	@Test fun confirmIsIgnoredWhenComparingStateHasEmptyData() {
+		val session = Session().apply { restored = true }
+		val queue = QueueExecutor()
+		val model = MatrixSetupViewModel(session, queue, true)
+		model.start()
+		queue.runNext()
+
+		model.startVerification()
+		queue.runNext()
+		session.lastVerificationListener?.invoke(
+			MatrixVerificationState.Comparing(emptyList()),
+		)
+		assertEquals(
+			MatrixVerificationState.Comparing(emptyList()),
+			model.state.value!!.verificationState,
+		)
+
+		model.confirmVerification()
+		val handle = session.lastCreatedHandle
+		assertNotNull(handle)
+		assertFalse(handle!!.confirmed)
+		assertEquals(
+			MatrixVerificationState.Comparing(emptyList()),
+			model.state.value!!.verificationState,
+		)
+		assertEquals(MatrixDeviceTrustState.UNVERIFIED, model.state.value!!.deviceTrustState)
+	}
+
+	@Test fun cancelVerificationDispatchesTrustReadAndCancellationToExecutor() {
+		val session = Session().apply { restored = true }
+		val bgQueue = QueueExecutor()
+		val mainQueue = QueueExecutor()
+		val model = MatrixSetupViewModel(session, bgQueue, true, mainQueue)
+		model.start()
+		bgQueue.runNext()
+
+		model.startVerification()
+		bgQueue.runNext()
+		mainQueue.runNext()
+		assertEquals(MatrixVerificationState.Requesting, model.state.value!!.verificationState)
+		val handle = session.lastCreatedHandle
+		assertNotNull(handle)
+		assertFalse(handle!!.cancelled)
+
+		val readsBeforeCancel = session.deviceTrustReads
+		model.cancelVerification()
+		assertEquals(MatrixVerificationState.Cancelled, model.state.value!!.verificationState)
+		assertEquals(readsBeforeCancel, session.deviceTrustReads)
+		assertFalse(handle.cancelled)
+
+		bgQueue.runNext()
+		assertTrue(handle.cancelled)
+		assertEquals(readsBeforeCancel + 1, session.deviceTrustReads)
+
+		mainQueue.runNext()
+		assertEquals(MatrixVerificationState.Cancelled, model.state.value!!.verificationState)
+		assertEquals(MatrixDeviceTrustState.UNVERIFIED, model.state.value!!.deviceTrustState)
 	}
 
 	@Test fun verificationDeclineLeavesDeviceUntrusted() {
