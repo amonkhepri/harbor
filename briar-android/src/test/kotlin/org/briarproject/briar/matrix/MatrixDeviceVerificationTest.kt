@@ -383,6 +383,36 @@ class MatrixDeviceVerificationTest {
 		}
 	}
 
+	@Test fun `foreign sender verification request is ignored and never marks device trusted`() {
+		loginBoth()
+		FakeMatrixSdkState.customVerificationRequestSenderId = "@mallory:matrix.example.org"
+
+		val state1 = AtomicReference<MatrixVerificationState>()
+		val state2 = AtomicReference<MatrixVerificationState>()
+
+		val handle2 = client2.startVerification({ state -> state2.set(state) }, 5_000L)
+		val handle1 = client1.startVerification({ state -> state1.set(state) }, 5_000L)
+
+		assertNotNull(handle1)
+		assertNotNull(handle2)
+
+		val deadline = System.currentTimeMillis() + 300
+		while (System.currentTimeMillis() < deadline) {
+			Thread.sleep(10)
+		}
+
+		assertEquals(0, FakeMatrixSdkState.verificationAcknowledgeCalls)
+		assertEquals(0, FakeMatrixSdkState.verificationAcceptCalls)
+		assertEquals(MatrixVerificationState.Requesting, state1.get())
+		assertEquals(MatrixVerificationState.Requesting, state2.get())
+
+		assertEquals(MatrixDeviceTrustState.UNVERIFIED, client1.getDeviceTrustState())
+		assertEquals(MatrixDeviceTrustState.UNVERIFIED, client2.getDeviceTrustState())
+
+		handle1!!.cancel()
+		handle2!!.cancel()
+	}
+
 	private class ControlledExecutor : Executor {
 		val queue = ArrayDeque<Runnable>()
 		var allowExecution = false

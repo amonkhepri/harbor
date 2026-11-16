@@ -779,7 +779,7 @@ class Client internal constructor(
 ) {
 	suspend fun getNotificationSettings(): NotificationSettings = NotificationSettings()
 	private var session: Session? = null
-	private val sessionVerificationController = SessionVerificationController()
+	private val sessionVerificationController = SessionVerificationController(this)
 	private val clientEncryption = Encryption()
 
 	fun syncService(): SyncServiceBuilder = SyncServiceBuilder()
@@ -1063,7 +1063,7 @@ class MalformedRoom(
 	}
 }
 
-class SessionVerificationController : AutoCloseable {
+class SessionVerificationController(private val client: Client? = null) : AutoCloseable {
 	private var controllerDelegate: SessionVerificationControllerDelegate? = null
 	var isClosed = false
 
@@ -1082,8 +1082,18 @@ class SessionVerificationController : AutoCloseable {
 		FakeMatrixSdkState.verificationRequestCalls++
 		val peer = peer()
 		if (peer != null) {
+			val senderUserId = FakeMatrixSdkState.customVerificationRequestSenderId
+				?: (
+					try {
+						client?.userId()
+					} catch (_: Exception) {
+						null
+					}
+					)
+				?: FakeMatrixSdkState.currentUserId
+				?: "@alice:matrix.example.org"
 			peer.controllerDelegate?.didReceiveVerificationRequest(
-				SessionVerificationRequestDetails("flow-1", "device-2", UserProfile("@bob:matrix.example.org")),
+				SessionVerificationRequestDetails("flow-1", "device-2", UserProfile(senderUserId)),
 			)
 		} else {
 			controllerDelegate?.didStartSasVerification()
@@ -1404,9 +1414,11 @@ object FakeMatrixSdkState {
 		SessionVerificationEmoji("🦊", "Fox"),
 	)
 	var defaultVerificationEmojis: List<SessionVerificationEmoji> = initialDefaultVerificationEmojis
+	var customVerificationRequestSenderId: String? = null
 
 	fun reset() {
 		awaitBuilds()
+		customVerificationRequestSenderId = null
 		defaultVerificationEmojis = initialDefaultVerificationEmojis
 		activeVerificationControllers.clear()
 		peerVerificationController = null

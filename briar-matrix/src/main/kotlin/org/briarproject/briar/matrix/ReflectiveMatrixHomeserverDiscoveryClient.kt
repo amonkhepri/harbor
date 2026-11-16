@@ -1305,6 +1305,11 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 	): MatrixVerificationSessionHandle? = synchronized(this) {
 		val generation = synchronized(lifecycleLock) { activeGeneration } ?: return null
 		val client = loginClient ?: return null
+		val ownUserId = currentUserId() ?: try {
+			client.javaClass.getMethod("userId").invoke(client) as? String
+		} catch (_: Exception) {
+			null
+		}
 		fun isCurrent() = synchronized(lifecycleLock) { activeGeneration === generation }
 		val controller = try {
 			invokeCloseableValue(
@@ -1497,8 +1502,14 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 					}
 					typingExecutor.execute {
 						if (closed.get() || !isCurrent()) return@execute
+						if (ownUserId.isNullOrBlank() ||
+							senderId.isNullOrBlank() ||
+							senderId.trim() != ownUserId.trim()
+						) {
+							return@execute
+						}
 						try {
-							if (senderId != null && flowId != null) {
+							if (flowId != null) {
 								try {
 									invokeUnit(
 										controller,

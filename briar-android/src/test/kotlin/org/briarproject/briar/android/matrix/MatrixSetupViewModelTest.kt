@@ -596,4 +596,88 @@ class MatrixSetupViewModelTest {
 		mainQueue.runNext()
 		assertEquals(MatrixVerificationState.Cancelled, model.state.value!!.verificationState)
 	}
+
+	@Test fun joinRoomFailureDuringVerificationComparingPreservesComparingStateAndTrust() {
+		val session = Session().apply {
+			restored = true
+			deliverComparingSynchronously = true
+			deviceTrust = MatrixDeviceTrustState.UNVERIFIED
+		}
+		val queue = QueueExecutor()
+		val model = MatrixSetupViewModel(session, queue, true)
+		model.start()
+		queue.runNext()
+
+		model.startVerification()
+		queue.runNext()
+		val comparing = MatrixVerificationState.Comparing(listOf(MatrixVerificationEmoji("🐶", "Dog")))
+		assertEquals(comparing, model.state.value!!.verificationState)
+
+		session.joinAllowed = false
+		model.joinRoom("#failure:example.org")
+		assertTrue(model.state.value!!.busy)
+		assertEquals(1, queue.actions.size)
+		queue.runNext()
+
+		assertTrue(model.state.value!!.actionFailed)
+		assertFalse(model.state.value!!.busy)
+		assertEquals(comparing, model.state.value!!.verificationState)
+		assertEquals(MatrixDeviceTrustState.UNVERIFIED, model.state.value!!.deviceTrustState)
+	}
+
+	@Test fun joinRoomSuccessWhileVerificationTransitionsToComparingDoesNotOverwriteComparingState() {
+		val session = Session().apply { restored = true }
+		val bgQueue = QueueExecutor()
+		val mainQueue = QueueExecutor()
+		val model = MatrixSetupViewModel(session, bgQueue, true, mainQueue)
+		model.start()
+		bgQueue.runNext()
+
+		model.startVerification()
+		bgQueue.runNext()
+		mainQueue.runNext()
+		assertEquals(MatrixVerificationState.Requesting, model.state.value!!.verificationState)
+
+		model.joinRoom("#room:example.org")
+		assertEquals(1, bgQueue.actions.size)
+
+		val comparing = MatrixVerificationState.Comparing(listOf(MatrixVerificationEmoji("🐶", "Dog")))
+		session.lastVerificationListener?.invoke(comparing)
+		assertEquals(1, mainQueue.actions.size)
+		mainQueue.runNext()
+		assertEquals(comparing, model.state.value!!.verificationState)
+
+		bgQueue.runNext()
+
+		assertTrue(model.state.value!!.roomJoined)
+		assertFalse(model.state.value!!.actionFailed)
+		assertEquals(comparing, model.state.value!!.verificationState)
+	}
+
+	@Test fun joinRoomSuccessWhileVerificationTransitionsToVerifiedPreservesVerifiedStateAndTrust() {
+		val session = Session().apply { restored = true }
+		val bgQueue = QueueExecutor()
+		val mainQueue = QueueExecutor()
+		val model = MatrixSetupViewModel(session, bgQueue, true, mainQueue)
+		model.start()
+		bgQueue.runNext()
+
+		model.startVerification()
+		bgQueue.runNext()
+		mainQueue.runNext()
+
+		model.joinRoom("#room:example.org")
+
+		session.deviceTrust = MatrixDeviceTrustState.VERIFIED
+		session.lastVerificationListener?.invoke(MatrixVerificationState.Verified)
+		mainQueue.runNext()
+		assertEquals(MatrixVerificationState.Verified, model.state.value!!.verificationState)
+		assertEquals(MatrixDeviceTrustState.VERIFIED, model.state.value!!.deviceTrustState)
+
+		bgQueue.runNext()
+
+		assertTrue(model.state.value!!.roomJoined)
+		assertEquals(MatrixVerificationState.Verified, model.state.value!!.verificationState)
+		assertEquals(MatrixDeviceTrustState.VERIFIED, model.state.value!!.deviceTrustState)
+	}
 }
