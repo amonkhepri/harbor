@@ -8,6 +8,10 @@ import org.briarproject.briar.api.matrix.MatrixAuthSession.RecoverableErrorDetai
 import org.briarproject.briar.api.matrix.MatrixAuthSession.RecoverableErrorDetail.NONE
 import org.briarproject.briar.api.matrix.MatrixHomeserverDiscoveryClient
 import org.briarproject.briar.api.matrix.MatrixHomeserverDiscoveryClient.DiscoveryResult
+import org.briarproject.briar.api.matrix.MatrixDeviceTrustState
+import org.briarproject.briar.api.matrix.MatrixVerificationEmoji
+import org.briarproject.briar.api.matrix.MatrixVerificationSessionHandle
+import org.briarproject.briar.api.matrix.MatrixVerificationState
 import org.briarproject.briar.api.connector.ConnectorAttachmentMetadata
 import org.briarproject.briar.api.connector.ConnectorFileDownloader
 import org.briarproject.briar.api.connector.ConnectorFileDownloader.DownloadResult
@@ -28,6 +32,8 @@ import java.util.UUID
 import java.util.concurrent.CancellationException
 import java.util.concurrent.Executor
 import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledExecutorService
+import java.util.concurrent.ScheduledFuture
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.DataInputStream
@@ -87,12 +93,17 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 	private val typingExecutor: Executor = Executors.newSingleThreadExecutor { task ->
 		Thread(task, "matrix-typing").apply { isDaemon = true }
 	},
+	private val verificationTimerExecutor: ScheduledExecutorService =
+		Executors.newSingleThreadScheduledExecutor { task ->
+			Thread(task, "matrix-verification-timer").apply { isDaemon = true }
+		},
 ) : MatrixHomeserverDiscoveryClient,
 	MatrixLoginClient,
 	MatrixRoomSnapshotClient,
 	MatrixMessageSnapshotClient,
 	MatrixMessageSendClient,
-	MatrixFileDownloadClient {
+	MatrixFileDownloadClient,
+	MatrixDeviceVerificationClient {
 
 	private var loginClient: Any? = null
 	private val lifecycleLock = Any()
@@ -234,6 +245,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 	private val typingLanes = mutableMapOf<String, TypingLane>()
 	private val activeRoomSubscriptions = mutableSetOf<RoomSubscription>()
 	private val activeTypingSubscriptions = mutableSetOf<TypingSubscription>()
+	private val activeVerificationSessions = mutableSetOf<MatrixVerificationSessionHandle>()
 	private val inFlightReactions = java.util.Collections.synchronizedSet(mutableSetOf<String>())
 
 	// Unlike invokeUnit, this lane waits for real native completion, not a timeout. A hung
@@ -599,13 +611,14 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 	}
 
 	private fun beginGeneration(generation: Any) {
-		val (detached, detachedTyping) = synchronized(lifecycleLock) {
+		val (detached, detachedTyping, detachedVerification) = synchronized(lifecycleLock) {
 			activeGeneration = generation
 			typingLanes.clear()
-			Pair(detachRoomSubscriptions(), detachTypingSubscriptions())
+			Triple(detachRoomSubscriptions(), detachTypingSubscriptions(), detachVerificationSessions())
 		}
 		cancelRoomSubscriptions(detached)
 		cancelTypingSubscriptions(detachedTyping)
+		cancelVerificationSessions(detachedVerification)
 		val previous = loginClient
 		loginClient = null
 		activeStore = null
@@ -1265,6 +1278,430 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 				}
 			}
 		}
+	}
+
+	override fun getDeviceTrustState(): MatrixDeviceTrustState = synchronized(this) {
+		val client = loginClient ?: return MatrixDeviceTrustState.UNVERIFIED
+		try {
+			val encMethod = client.javaClass.methods.firstOrNull { it.name == "encryption" }
+				?: return MatrixDeviceTrustState.UNVERIFIED
+			val encryption = encMethod.invoke(client) ?: return MatrixDeviceTrustState.UNVERIFIED
+			val stateMethod = encryption.javaClass.methods.firstOrNull { it.name == "verificationState" }
+				?: return MatrixDeviceTrustState.UNVERIFIED
+			val state = stateMethod.invoke(encryption)
+			if (state?.toString() == "VERIFIED") {
+				MatrixDeviceTrustState.VERIFIED
+			} else {
+				MatrixDeviceTrustState.UNVERIFIED
+			}
+		} catch (_: Exception) {
+			MatrixDeviceTrustState.UNVERIFIED
+		}
+	}
+
+	override fun startVerification(
+		listener: (MatrixVerificationState) -> Unit,
+		timeoutMs: Long,
+	): MatrixVerificationSessionHandle? = synchronized(this) {
+		val generation = synchronized(lifecycleLock) { activeGeneration } ?: return null
+		val client = loginClient ?: return null
+		val ownUserId = currentUserId() ?: try {
+			client.javaClass.getMethod("userId").invoke(client) as? String
+		} catch (_: Exception) {
+			null
+		}
+		fun isCurrent() = synchronized(lifecycleLock) { activeGeneration === generation }
+		val controller = try {
+			invokeCloseableValue(
+				client,
+				"getSessionVerificationController",
+				emptyArray(),
+				emptyArray(),
+				::closeQuietly,
+			)
+		} catch (_: Exception) {
+			return null
+		}
+
+		val delegateClass = try {
+			Class.forName(
+				"org.matrix.rustcomponents.sdk.SessionVerificationControllerDelegate",
+				true,
+				client.javaClass.classLoader,
+			)
+		} catch (_: Exception) {
+			closeQuietly(controller)
+			return null
+		}
+
+		val scheduledFutureRef = AtomicReference<ScheduledFuture<*>?>()
+		val closed = AtomicBoolean(false)
+		val syncThreadRef = AtomicReference<Thread?>()
+		val handleRef = AtomicReference<MatrixVerificationSessionHandle?>()
+
+		val syncService = try {
+			val syncServiceMethod = client.javaClass.methods.firstOrNull {
+				it.name == "syncService" && it.parameterTypes.isEmpty()
+			}
+			if (syncServiceMethod != null) {
+				val builder = syncServiceMethod.invoke(client)
+				invokeCloseableValue(builder, "finish", emptyArray(), emptyArray(), ::closeQuietly)
+			} else {
+				null
+			}
+		} catch (_: Exception) {
+			null
+		}
+
+		if (syncService != null) {
+			typingExecutor.execute {
+				if (closed.get() || !isCurrent()) return@execute
+				try {
+					invokeUnit(syncService, "start", emptyArray(), emptyArray())
+				} catch (_: Exception) {}
+			}
+		} else {
+			val syncOnceMethod = client.javaClass.methods.firstOrNull { it.name == "syncOnceV2" }
+			if (syncOnceMethod != null) {
+				val syncSettingsClass = try {
+					Class.forName(
+						"org.matrix.rustcomponents.sdk.SyncSettingsV2",
+						true,
+						client.javaClass.classLoader,
+					)
+				} catch (_: Exception) {
+					null
+				}
+				val syncSettings = syncSettingsClass?.let { clazz ->
+					try {
+						clazz.constructors.firstOrNull { it.parameterCount == 4 }
+							?.newInstance(null, false, 3, null)
+					} catch (_: Exception) {
+						null
+					}
+				}
+				val thread = Thread({
+					while (!closed.get() && isCurrent()) {
+						try {
+							if (syncSettings != null) {
+								invokeUnit(
+									client,
+									"syncOnceV2",
+									arrayOf(syncSettingsClass),
+									arrayOf(syncSettings),
+								)
+							} else {
+								invokeUnit(client, "syncOnceV2", emptyArray(), emptyArray())
+							}
+						} catch (_: Exception) {
+							if (closed.get() || !isCurrent()) break
+							try {
+								Thread.sleep(1000)
+							} catch (_: InterruptedException) {
+								break
+							}
+						}
+					}
+				}, "matrix-verification-sync").apply {
+					isDaemon = true
+					start()
+				}
+				syncThreadRef.set(thread)
+			}
+		}
+
+		fun stopTimer() {
+			scheduledFutureRef.getAndSet(null)?.cancel(false)
+		}
+
+		fun stopPollingThread() {
+			syncThreadRef.getAndSet(null)?.interrupt()
+		}
+
+		fun stopSyncService() {
+			if (syncService != null) {
+				try {
+					invokeUnit(syncService, "stop", emptyArray(), emptyArray())
+				} catch (_: Exception) {}
+				closeQuietly(syncService)
+			}
+		}
+
+		fun finishSession(terminalState: MatrixVerificationState) {
+			if (closed.compareAndSet(false, true)) {
+				stopTimer()
+				stopPollingThread()
+				synchronized(lifecycleLock) {
+					activeVerificationSessions.remove(handleRef.get())
+				}
+				typingExecutor.execute {
+					stopSyncService()
+					closeQuietly(controller)
+				}
+				if (isCurrent()) {
+					listener(terminalState)
+				}
+			}
+		}
+
+		fun cancelAndFail() {
+			if (closed.compareAndSet(false, true)) {
+				stopTimer()
+				stopPollingThread()
+				synchronized(lifecycleLock) {
+					activeVerificationSessions.remove(handleRef.get())
+				}
+				typingExecutor.execute {
+					try {
+						invokeUnit(controller, "cancelVerification", emptyArray(), emptyArray())
+					} catch (_: Exception) {}
+					stopSyncService()
+					closeQuietly(controller)
+				}
+				if (isCurrent()) {
+					listener(MatrixVerificationState.Failed)
+				}
+			}
+		}
+
+		val hasNonEmptyData = AtomicBoolean(false)
+
+		val delegateProxy = Proxy.newProxyInstance(
+			delegateClass.classLoader,
+			arrayOf(delegateClass),
+		) { _, method, args ->
+			when (method.name) {
+				"didReceiveVerificationRequest" -> {
+					val details = args?.getOrNull(0)
+					val flowId = details?.let { d ->
+						try {
+							d.javaClass.getMethod("getFlowId").invoke(d) as? String
+						} catch (_: Exception) {
+							null
+						}
+					}
+					val senderId = details?.let { d ->
+						try {
+							val profile = d.javaClass.getMethod("getSenderProfile").invoke(d)
+							profile?.javaClass?.getMethod("getUserId")?.invoke(profile) as? String
+						} catch (_: Exception) {
+							null
+						} ?: run {
+							try {
+								d.javaClass.getMethod("getUserId").invoke(d) as? String
+							} catch (_: Exception) {
+								null
+							}
+						} ?: run {
+							try {
+								d.javaClass.getMethod("getSenderId").invoke(d) as? String
+							} catch (_: Exception) {
+								null
+							}
+						}
+					}
+					typingExecutor.execute {
+						if (closed.get() || !isCurrent()) return@execute
+						if (ownUserId.isNullOrBlank() ||
+							senderId.isNullOrBlank() ||
+							senderId.trim() != ownUserId.trim()
+						) {
+							return@execute
+						}
+						try {
+							if (flowId != null) {
+								try {
+									invokeUnit(
+										controller,
+										"acknowledgeVerificationRequest",
+										arrayOf(String::class.java, String::class.java),
+										arrayOf(senderId, flowId),
+									)
+								} catch (_: Exception) {}
+							}
+							if (closed.get() || !isCurrent()) return@execute
+							invokeUnit(controller, "acceptVerificationRequest", emptyArray(), emptyArray())
+						} catch (_: Exception) {}
+					}
+					null
+				}
+				"didAcceptVerificationRequest" -> {
+					typingExecutor.execute {
+						if (closed.get() || !isCurrent()) return@execute
+						try {
+							invokeUnit(controller, "startSasVerification", emptyArray(), emptyArray())
+						} catch (_: Exception) {}
+					}
+					null
+				}
+				"didStartSasVerification" -> {
+					if (!closed.get() && isCurrent()) listener(MatrixVerificationState.AwaitingPeer)
+					null
+				}
+				"didReceiveVerificationData" -> {
+					if (!closed.get() && isCurrent()) {
+						val data = args?.getOrNull(0)
+						val emojis = extractVerificationEmojis(data)
+						if (emojis.isEmpty()) {
+							cancelAndFail()
+						} else {
+							hasNonEmptyData.set(true)
+							listener(MatrixVerificationState.Comparing(emojis))
+						}
+					}
+					null
+				}
+				"didFinish" -> {
+					if (isCurrent()) finishSession(MatrixVerificationState.Verified)
+					null
+				}
+				"didCancel" -> {
+					if (isCurrent()) finishSession(MatrixVerificationState.Cancelled)
+					null
+				}
+				"didFail" -> {
+					if (isCurrent()) finishSession(MatrixVerificationState.Failed)
+					null
+				}
+				"hashCode" -> System.identityHashCode(controller)
+				"equals" -> false
+				"toString" -> "SessionVerificationControllerDelegateProxy"
+				else -> null
+			}
+		}
+
+		try {
+			controller.javaClass.getMethod("setDelegate", delegateClass).invoke(controller, delegateProxy)
+			if (!closed.get() && isCurrent()) listener(MatrixVerificationState.Requesting)
+			typingExecutor.execute {
+				if (closed.get() || !isCurrent()) return@execute
+				try {
+					invokeUnit(controller, "requestDeviceVerification", emptyArray(), emptyArray())
+				} catch (_: Exception) {
+					finishSession(MatrixVerificationState.Failed)
+				}
+			}
+		} catch (e: Exception) {
+			finishSession(MatrixVerificationState.Failed)
+			return null
+		}
+
+		val timeoutTask = verificationTimerExecutor.schedule({
+			if (closed.compareAndSet(false, true)) {
+				stopTimer()
+				stopPollingThread()
+				synchronized(lifecycleLock) {
+					activeVerificationSessions.remove(handleRef.get())
+				}
+				typingExecutor.execute {
+					try {
+						invokeUnit(controller, "cancelVerification", emptyArray(), emptyArray())
+					} catch (_: Exception) {}
+					stopSyncService()
+					closeQuietly(controller)
+				}
+				if (isCurrent()) {
+					listener(MatrixVerificationState.TimedOut)
+				}
+			}
+		}, timeoutMs, TimeUnit.MILLISECONDS)
+		scheduledFutureRef.set(timeoutTask)
+
+		val confirmed = AtomicBoolean(false)
+
+		val handle = object : MatrixVerificationSessionHandle {
+			override fun confirm() {
+				if (!hasNonEmptyData.get()) return
+				if (closed.get() || !isCurrent() || !confirmed.compareAndSet(false, true)) return
+				typingExecutor.execute {
+					if (closed.get() || !isCurrent()) return@execute
+					try {
+						invokeUnit(controller, "approveVerification", emptyArray(), emptyArray())
+					} catch (_: Exception) {
+						finishSession(MatrixVerificationState.Failed)
+					}
+				}
+			}
+
+			override fun decline() {
+				if (closed.compareAndSet(false, true)) {
+					stopTimer()
+					stopPollingThread()
+					synchronized(lifecycleLock) {
+						activeVerificationSessions.remove(this)
+					}
+					typingExecutor.execute {
+						try {
+							invokeUnit(controller, "declineVerification", emptyArray(), emptyArray())
+						} catch (_: Exception) {}
+						stopSyncService()
+						closeQuietly(controller)
+					}
+					if (isCurrent()) {
+						listener(MatrixVerificationState.Failed)
+					}
+				}
+			}
+
+			override fun cancel() {
+				if (closed.compareAndSet(false, true)) {
+					stopTimer()
+					stopPollingThread()
+					synchronized(lifecycleLock) {
+						activeVerificationSessions.remove(this)
+					}
+					typingExecutor.execute {
+						try {
+							invokeUnit(controller, "cancelVerification", emptyArray(), emptyArray())
+						} catch (_: Exception) {}
+						stopSyncService()
+						closeQuietly(controller)
+					}
+					if (isCurrent()) {
+						listener(MatrixVerificationState.Cancelled)
+					}
+				}
+			}
+		}
+		val current = synchronized(lifecycleLock) {
+			if (activeGeneration === generation && !closed.get()) {
+				handleRef.set(handle)
+				activeVerificationSessions.add(handle)
+				true
+			} else {
+				false
+			}
+		}
+		if (!current) {
+			handle.cancel()
+			return null
+		}
+
+		return handle
+	}
+
+	private fun extractVerificationEmojis(data: Any?): List<MatrixVerificationEmoji> {
+		if (data == null) return emptyList()
+		try {
+			val getEmojisMethod = data.javaClass.methods.firstOrNull { it.name == "getEmojis" }
+			if (getEmojisMethod != null) {
+				val list = getEmojisMethod.invoke(data) as? List<*> ?: return emptyList()
+				return list.mapNotNull { item ->
+					if (item == null) return@mapNotNull null
+					val symbol = item.javaClass.getMethod("symbol").invoke(item) as? String ?: ""
+					val desc = item.javaClass.getMethod("description").invoke(item) as? String ?: ""
+					MatrixVerificationEmoji(symbol, desc)
+				}
+			}
+			val getValuesMethod = data.javaClass.methods.firstOrNull { it.name == "getValues" }
+			if (getValuesMethod != null) {
+				val list = getValuesMethod.invoke(data) as? List<*> ?: return emptyList()
+				return list.mapNotNull { item ->
+					item?.let { MatrixVerificationEmoji(it.toString(), "") }
+				}
+			}
+		} catch (_: Exception) {}
+		return emptyList()
 	}
 
 	override fun prepareAcceptInvitation(roomId: String): PreparedAccept? {
@@ -2228,6 +2665,16 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		subscriptions.forEach { it.cancel() }
 	}
 
+	private fun detachVerificationSessions(): List<MatrixVerificationSessionHandle> {
+		val detached = activeVerificationSessions.toList()
+		activeVerificationSessions.clear()
+		return detached
+	}
+
+	private fun cancelVerificationSessions(sessions: List<MatrixVerificationSessionHandle>) {
+		sessions.forEach { it.cancel() }
+	}
+
 	@Synchronized
 	override fun observeTyping(
 		roomId: String,
@@ -2964,16 +3411,18 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 
 	@Synchronized
 	override fun logout() {
-		val (detached, detachedTyping) = synchronized(lifecycleLock) {
+		val (detached, detachedTyping, detachedVerification) = synchronized(lifecycleLock) {
 			activeGeneration = null
 			typingLanes.clear()
 			val r = detachRoomSubscriptions()
 			val t = detachTypingSubscriptions()
+			val v = detachVerificationSessions()
 			activeStore?.let { sessionFile(it).delete() }
-			Pair(r, t)
+			Triple(r, t, v)
 		}
 		cancelRoomSubscriptions(detached)
 		cancelTypingSubscriptions(detachedTyping)
+		cancelVerificationSessions(detachedVerification)
 		val downloadDirsToClear = synchronized(activeDownloadDirs) {
 			val copy = ArrayList(activeDownloadDirs)
 			activeDownloadDirs.clear()
@@ -3023,13 +3472,14 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 
 	@Synchronized
 	override fun close() {
-		val (detached, detachedTyping) = synchronized(lifecycleLock) {
+		val (detached, detachedTyping, detachedVerification) = synchronized(lifecycleLock) {
 			activeGeneration = null
 			typingLanes.clear()
-			Pair(detachRoomSubscriptions(), detachTypingSubscriptions())
+			Triple(detachRoomSubscriptions(), detachTypingSubscriptions(), detachVerificationSessions())
 		}
 		cancelRoomSubscriptions(detached)
 		cancelTypingSubscriptions(detachedTyping)
+		cancelVerificationSessions(detachedVerification)
 		val downloadDirsToClear = synchronized(activeDownloadDirs) {
 			val copy = ArrayList(activeDownloadDirs)
 			activeDownloadDirs.clear()

@@ -19,6 +19,8 @@ import org.briarproject.briar.android.activity.ActivityComponent
 import org.briarproject.briar.android.activity.BriarActivity
 import org.briarproject.briar.api.matrix.MatrixAuthSession
 import org.briarproject.briar.api.matrix.MatrixAuthSession.RecoverableErrorDetail
+import org.briarproject.briar.api.matrix.MatrixDeviceTrustState
+import org.briarproject.briar.api.matrix.MatrixVerificationState
 import java.util.concurrent.Executor
 import javax.inject.Inject
 
@@ -38,6 +40,13 @@ class MatrixSetupActivity : BriarActivity() {
 	private lateinit var signOut: Button
 	private lateinit var roomIdentifier: EditText
 	private lateinit var joinRoom: Button
+	private lateinit var deviceTrust: TextView
+	private lateinit var verifyDevice: Button
+	private lateinit var verificationData: TextView
+	private lateinit var verificationActions: View
+	private lateinit var confirmVerification: Button
+	private lateinit var declineVerification: Button
+	private lateinit var cancelVerification: Button
 
 	override fun injectActivity(component: ActivityComponent) {
 		component.inject(this)
@@ -60,6 +69,17 @@ class MatrixSetupActivity : BriarActivity() {
 		roomIdentifier = findViewById(R.id.matrixRoomIdentifier)
 		joinRoom = findViewById(R.id.matrixJoinRoom)
 		joinRoom.setOnClickListener { model.joinRoom(roomIdentifier.text.toString()) }
+		deviceTrust = findViewById(R.id.matrixDeviceTrust)
+		verifyDevice = findViewById(R.id.matrixVerifyDevice)
+		verificationData = findViewById(R.id.matrixVerificationData)
+		verificationActions = findViewById(R.id.matrixVerificationActions)
+		confirmVerification = findViewById(R.id.matrixConfirmVerification)
+		declineVerification = findViewById(R.id.matrixDeclineVerification)
+		cancelVerification = findViewById(R.id.matrixCancelVerification)
+		verifyDevice.setOnClickListener { model.startVerification() }
+		confirmVerification.setOnClickListener { model.confirmVerification() }
+		declineVerification.setOnClickListener { model.declineVerification() }
+		cancelVerification.setOnClickListener { model.cancelVerification() }
 		model = ViewModelProvider(
 			this,
 			object : ViewModelProvider.Factory {
@@ -140,6 +160,74 @@ class MatrixSetupActivity : BriarActivity() {
 		val userId = signedInUserId(state.snapshot)
 		account.visibility = if (userId != null) View.VISIBLE else View.GONE
 		account.text = userId?.let { getString(R.string.matrix_signed_in_as, it) }.orEmpty()
+
+		val ready = step == MatrixSetupStep.READY
+		deviceTrust.visibility = if (ready) View.VISIBLE else View.GONE
+		deviceTrust.setText(
+			if (state.deviceTrustState == MatrixDeviceTrustState.VERIFIED) {
+				R.string.matrix_device_verified
+			} else {
+				R.string.matrix_device_unverified
+			},
+		)
+		when (val vState = if (ready) state.verificationState else MatrixVerificationState.Idle) {
+			is MatrixVerificationState.Idle -> {
+				verifyDevice.visibility =
+					if (ready && state.deviceTrustState != MatrixDeviceTrustState.VERIFIED) {
+						View.VISIBLE
+					} else {
+						View.GONE
+					}
+				verifyDevice.isEnabled = !state.busy
+				verificationData.visibility = View.GONE
+				verificationActions.visibility = View.GONE
+				cancelVerification.visibility = View.GONE
+			}
+			is MatrixVerificationState.Requesting, is MatrixVerificationState.AwaitingPeer -> {
+				verifyDevice.visibility = View.GONE
+				verificationData.visibility = View.VISIBLE
+				verificationData.setText(R.string.matrix_verification_waiting)
+				verificationActions.visibility = View.GONE
+				cancelVerification.visibility = View.VISIBLE
+				cancelVerification.isEnabled = !state.busy
+			}
+			is MatrixVerificationState.Comparing -> {
+				verifyDevice.visibility = View.GONE
+				verificationData.visibility = View.VISIBLE
+				verificationData.text = vState.emojis.joinToString("  ") {
+					"${it.symbol} ${it.description}"
+				}
+				verificationActions.visibility = View.VISIBLE
+				confirmVerification.isEnabled = !state.busy && vState.emojis.isNotEmpty()
+				declineVerification.isEnabled = !state.busy
+				cancelVerification.visibility = View.VISIBLE
+				cancelVerification.isEnabled = !state.busy
+			}
+			is MatrixVerificationState.Verified -> {
+				verifyDevice.visibility = View.GONE
+				verificationData.visibility = View.VISIBLE
+				verificationData.setText(R.string.matrix_verification_success)
+				verificationActions.visibility = View.GONE
+				cancelVerification.visibility = View.GONE
+			}
+			is MatrixVerificationState.Cancelled,
+			is MatrixVerificationState.Failed,
+			is MatrixVerificationState.TimedOut,
+			-> {
+				verifyDevice.visibility = View.VISIBLE
+				verifyDevice.isEnabled = !state.busy
+				verificationData.visibility = View.VISIBLE
+				val res = when (vState) {
+					MatrixVerificationState.Failed -> R.string.matrix_verification_failed
+					MatrixVerificationState.TimedOut -> R.string.matrix_verification_timed_out
+					else -> R.string.matrix_verification_cancelled
+				}
+				verificationData.setText(res)
+				verificationActions.visibility = View.GONE
+				cancelVerification.visibility = View.GONE
+			}
+		}
+
 		if (step == MatrixSetupStep.READY) {
 			(getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager)
 				.hideSoftInputFromWindow(password.windowToken, 0)

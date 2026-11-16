@@ -8,7 +8,11 @@ import org.briarproject.briar.api.connector.ConnectorSources
 import org.briarproject.briar.api.matrix.MatrixAuthSession
 import org.briarproject.briar.api.matrix.MatrixAuthSession.RecoverableErrorDetail
 import org.briarproject.briar.api.matrix.MatrixAuthState
+import org.briarproject.briar.api.matrix.MatrixDeviceTrustState
+import org.briarproject.briar.api.matrix.MatrixVerificationSessionHandle
+import org.briarproject.briar.api.matrix.MatrixVerificationState
 import java.util.concurrent.Executor
+import java.util.concurrent.atomic.AtomicLong
 
 internal enum class MatrixSetupStep { HOMESERVER, CREDENTIALS, READY, UNAVAILABLE }
 
@@ -37,15 +41,24 @@ internal data class MatrixSetupState(
 	val logoutFailed: Boolean = false,
 	val started: Boolean = false,
 	val roomJoined: Boolean = false,
+	val deviceTrustState: MatrixDeviceTrustState = MatrixDeviceTrustState.UNVERIFIED,
+	val verificationState: MatrixVerificationState = MatrixVerificationState.Idle,
 )
 
 internal class MatrixSetupViewModel(
 	private val session: MatrixAuthSession,
 	private val executor: Executor,
 	private val enabled: Boolean,
+	private val mainExecutor: Executor = Executor { command ->
+		androidx.arch.core.executor.ArchTaskExecutor.getInstance().postToMainThread(command)
+	},
 ) : ViewModel() {
 	private val mutableState = MutableLiveData(MatrixSetupState())
 	val state: LiveData<MatrixSetupState> = mutableState
+
+	@Volatile
+	private var verificationHandle: MatrixVerificationSessionHandle? = null
+	private val verificationAttempt = AtomicLong(0)
 
 	fun start() {
 		if (!enabled || state.value?.started == true) return
@@ -69,15 +82,128 @@ internal class MatrixSetupViewModel(
 		runAction(joiningRoom = true) { check(join?.invoke() == true) }
 	}
 
+	fun startVerification(timeoutMs: Long = 60_000L) {
+		if (!enabled || currentStep() != MatrixSetupStep.READY) return
+		val attempt = verificationAttempt.incrementAndGet()
+		executor.execute {
+			if (verificationAttempt.get() != attempt) return@execute
+			verificationHandle?.cancel()
+			verificationHandle = null
+			val trust = session.getDeviceTrustState()
+			mainExecutor.execute {
+				if (verificationAttempt.get() == attempt) {
+					val current = mutableState.value ?: MatrixSetupState()
+					mutableState.value = current.copy(
+						verificationState = MatrixVerificationState.Requesting,
+						deviceTrustState = trust,
+					)
+				}
+			}
+			val handle = session.startDeviceVerification({ vState ->
+				if (verificationAttempt.get() != attempt) return@startDeviceVerification
+				val t = session.getDeviceTrustState()
+				mainExecutor.execute {
+					if (verificationAttempt.get() == attempt) {
+						val cur = mutableState.value ?: MatrixSetupState()
+						mutableState.value = cur.copy(
+							verificationState = vState,
+							deviceTrustState = t,
+						)
+					}
+				}
+			}, timeoutMs)
+			if (verificationAttempt.get() != attempt) {
+				handle?.cancel()
+				return@execute
+			}
+			verificationHandle = handle
+			if (handle == null) {
+				val t = session.getDeviceTrustState()
+				mainExecutor.execute {
+					if (verificationAttempt.get() == attempt) {
+						val cur = mutableState.value ?: MatrixSetupState()
+						mutableState.value = cur.copy(
+							verificationState = MatrixVerificationState.Failed,
+							deviceTrustState = t,
+						)
+					}
+				}
+			}
+		}
+	}
+
+	fun confirmVerification() {
+		val current = state.value?.verificationState
+		if (current !is MatrixVerificationState.Comparing || current.emojis.isEmpty()) {
+			return
+		}
+		verificationHandle?.confirm()
+	}
+
+	fun declineVerification() {
+		val attempt = verificationAttempt.incrementAndGet()
+		val handle = verificationHandle
+		verificationHandle = null
+		val current = mutableState.value ?: MatrixSetupState()
+		mutableState.value = current.copy(
+			verificationState = MatrixVerificationState.Failed,
+		)
+		executor.execute {
+			handle?.decline()
+			val trust = session.getDeviceTrustState()
+			mainExecutor.execute {
+				if (verificationAttempt.get() == attempt) {
+					val cur = mutableState.value ?: MatrixSetupState()
+					mutableState.value = cur.copy(
+						deviceTrustState = trust,
+					)
+				}
+			}
+		}
+	}
+
+	fun cancelVerification() {
+		val attempt = verificationAttempt.incrementAndGet()
+		val handle = verificationHandle
+		verificationHandle = null
+		val current = mutableState.value ?: MatrixSetupState()
+		mutableState.value = current.copy(
+			verificationState = MatrixVerificationState.Cancelled,
+		)
+		executor.execute {
+			handle?.cancel()
+			val trust = session.getDeviceTrustState()
+			mainExecutor.execute {
+				if (verificationAttempt.get() == attempt) {
+					val cur = mutableState.value ?: MatrixSetupState()
+					mutableState.value = cur.copy(
+						deviceTrustState = trust,
+					)
+				}
+			}
+		}
+	}
+
 	fun logout(confirmed: Boolean) {
 		if (!confirmed || currentStep() != MatrixSetupStep.READY) return
+		verificationAttempt.incrementAndGet()
+		val handle = verificationHandle
+		verificationHandle = null
 		runAction(reconcileLogoutFailure = true) {
 			try {
+				handle?.cancel()
 				session.logout()
 			} finally {
 				ConnectorDraftStore.clearSource(ConnectorSources.MATRIX_ID)
 			}
 		}
+	}
+
+	public override fun onCleared() {
+		verificationAttempt.incrementAndGet()
+		verificationHandle?.cancel()
+		verificationHandle = null
+		super.onCleared()
 	}
 
 	private fun currentStep(): MatrixSetupStep? = state.value?.snapshot?.let(::setupStep)
@@ -96,11 +222,34 @@ internal class MatrixSetupViewModel(
 			executor.execute {
 				val result = try {
 					action()
-					MatrixSetupState(session.getSnapshot(), started = true, roomJoined = joiningRoom)
+					val current = mutableState.value ?: previous
+					val trust = try {
+						session.getDeviceTrustState()
+					} catch (_: Exception) {
+						null
+					}
+					MatrixSetupState(
+						session.getSnapshot(),
+						started = true,
+						roomJoined = joiningRoom,
+						deviceTrustState = if (reconcileLogoutFailure) {
+							MatrixDeviceTrustState.UNVERIFIED
+						} else if (current.deviceTrustState == MatrixDeviceTrustState.VERIFIED) {
+							MatrixDeviceTrustState.VERIFIED
+						} else {
+							trust ?: current.deviceTrustState
+						},
+						verificationState = if (reconcileLogoutFailure) {
+							MatrixVerificationState.Idle
+						} else {
+							current.verificationState
+						},
+					)
 				} catch (_: Exception) {
 					// SDK exceptions may contain credentials or server responses. Do not log them.
 					// A failed start() must be retryable; a failed later action must not re-trigger start().
-					val stillStarted = if (startingSession) false else previous.started
+					val current = mutableState.value ?: previous
+					val stillStarted = if (startingSession) false else current.started
 					if (reconcileLogoutFailure) {
 						val snapshot = try {
 							session.getSnapshot()
@@ -108,26 +257,45 @@ internal class MatrixSetupViewModel(
 							// An unreadable session must not be presented as connected.
 							null
 						}
-						failureState(MatrixSetupState(snapshot, started = stillStarted)).copy(logoutFailed = true)
+						val logoutFailState = MatrixSetupState(
+							snapshot = snapshot,
+							started = stillStarted,
+							deviceTrustState = MatrixDeviceTrustState.UNVERIFIED,
+							verificationState = MatrixVerificationState.Idle,
+						)
+						failureState(logoutFailState).copy(logoutFailed = true)
 					} else {
-						failureState(previous.copy(started = stillStarted))
+						failureState(current.copy(started = stillStarted))
 					}
 				}
 				mutableState.postValue(result)
 			}
 		} catch (_: RuntimeException) {
-			val stillStarted = if (startingSession) false else previous.started
-			mutableState.value = failureState(previous.copy(started = stillStarted))
+			val current = mutableState.value ?: previous
+			val stillStarted = if (startingSession) false else current.started
+			val stateToFail = if (reconcileLogoutFailure) {
+				MatrixSetupState(
+					snapshot = current.snapshot,
+					started = stillStarted,
+					deviceTrustState = MatrixDeviceTrustState.UNVERIFIED,
+					verificationState = MatrixVerificationState.Idle,
+				)
+			} else {
+				current.copy(started = stillStarted)
+			}
+			mutableState.value = failureState(stateToFail)
 				.copy(logoutFailed = reconcileLogoutFailure)
 		}
 	}
 
 	private fun failureState(previous: MatrixSetupState) = MatrixSetupState(
-		previous.snapshot ?: MatrixAuthSession.Snapshot(
+		snapshot = previous.snapshot ?: MatrixAuthSession.Snapshot(
 			MatrixAuthState.CLOSED,
 			RecoverableErrorDetail.NONE,
 		),
 		actionFailed = true,
 		started = previous.started,
+		deviceTrustState = previous.deviceTrustState,
+		verificationState = previous.verificationState,
 	)
 }

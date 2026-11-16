@@ -40,6 +40,13 @@ interface MatrixAuthSession {
 
 	/** Captures the current session before queued join work; failures never expose SDK text. */
 	fun prepareJoinRoom(identifier: String): (() -> Boolean)? = null
+
+	fun getDeviceTrustState(): MatrixDeviceTrustState = MatrixDeviceTrustState.UNVERIFIED
+	fun startDeviceVerification(
+		listener: (MatrixVerificationState) -> Unit,
+		timeoutMs: Long = 60_000L,
+	): MatrixVerificationSessionHandle? = null
+
 	fun logout()
 	fun expireSession() {}
 	fun close()

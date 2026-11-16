@@ -5,8 +5,11 @@ import org.briarproject.briar.api.matrix.MatrixAuthSession.RecoverableErrorDetai
 import org.briarproject.briar.api.matrix.MatrixAuthSession.RecoverableErrorDetail.SESSION_EXPIRED
 import org.briarproject.briar.api.matrix.MatrixAuthSession.Snapshot
 import org.briarproject.briar.api.matrix.MatrixAuthState
+import org.briarproject.briar.api.matrix.MatrixDeviceTrustState
 import org.briarproject.briar.api.matrix.MatrixHomeserverDiscoveryClient
 import org.briarproject.briar.api.matrix.MatrixHomeserverDiscoveryClient.DiscoveryResult
+import org.briarproject.briar.api.matrix.MatrixVerificationSessionHandle
+import org.briarproject.briar.api.matrix.MatrixVerificationState
 import org.briarproject.briar.matrix.MatrixLoginClient.RestoreResult
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -108,6 +111,22 @@ class MatrixAuthSessionImpl(
 	override fun prepareJoinRoom(identifier: String): (() -> Boolean)? {
 		if (getSnapshot().authState != MatrixAuthState.READY) return null
 		return (loginClient as? MatrixRoomSnapshotClient)?.prepareJoinRoom(identifier)
+	}
+
+	@Synchronized
+	override fun getDeviceTrustState(): MatrixDeviceTrustState {
+		if (getSnapshot().authState != MatrixAuthState.READY) return MatrixDeviceTrustState.UNVERIFIED
+		return (loginClient as? MatrixDeviceVerificationClient)?.getDeviceTrustState()
+			?: MatrixDeviceTrustState.UNVERIFIED
+	}
+
+	@Synchronized
+	override fun startDeviceVerification(
+		listener: (MatrixVerificationState) -> Unit,
+		timeoutMs: Long,
+	): MatrixVerificationSessionHandle? {
+		if (getSnapshot().authState != MatrixAuthState.READY) return null
+		return (loginClient as? MatrixDeviceVerificationClient)?.startVerification(listener, timeoutMs)
 	}
 
 	@Synchronized
