@@ -3,6 +3,7 @@ package org.briarproject.briar.matrix
 import org.briarproject.briar.api.matrix.MatrixAuthSession.RecoverableErrorDetail.HOMESERVER_DISCOVERY_FAILED
 import org.briarproject.briar.api.matrix.MatrixAuthSession.RecoverableErrorDetail.INVALID_HOMESERVER
 import org.briarproject.briar.api.matrix.MatrixAuthSession.RecoverableErrorDetail.NONE
+import org.briarproject.briar.api.matrix.MatrixAuthSession.RecoverableErrorDetail.SESSION_EXPIRED
 import org.briarproject.briar.api.matrix.MatrixHomeserverDiscoveryClient.DiscoveryResult
 import org.briarproject.briar.matrix.MatrixLoginClient.RestoreResult
 import org.junit.After
@@ -331,6 +332,74 @@ class ReflectiveMatrixHomeserverDiscoveryClientTest {
 	}
 
 	@Test
+	fun `getInvitedRooms filters spaces and non-invited rooms, sorted by room id`() {
+		val client = newSessionClient()
+		client.login("https://matrix.example.org", "alice", "swordfish")
+		FakeMatrixSdkState.roomsToReturn = listOf(
+			FakeRoomSpec(
+				roomId = "!zzz:example.org",
+				displayName = "Zebra",
+				membership = Membership.INVITED,
+				topic = "Zebra Topic",
+			),
+			FakeRoomSpec(
+				roomId = "!aaa:example.org",
+				displayName = "Alpha",
+				membership = Membership.INVITED,
+			),
+			FakeRoomSpec(
+				roomId = "!space:example.org",
+				displayName = "A Space",
+				isSpace = true,
+				membership = Membership.INVITED,
+			),
+			FakeRoomSpec(roomId = "!joined:example.org", membership = Membership.JOINED),
+			FakeRoomSpec(roomId = "!left:example.org", membership = Membership.LEFT),
+		)
+
+		val result = client.getInvitedRooms(10)
+
+		assertEquals(
+			listOf("!aaa:example.org" to "Alpha", "!zzz:example.org" to "Zebra"),
+			result.map { it.roomId to it.displayName },
+		)
+		assertEquals(true, result[0].isInvited)
+		assertEquals(true, result[1].isInvited)
+		assertEquals(null, result[0].topic)
+		assertEquals("Zebra Topic", result[1].topic)
+		assertEquals(null, result[0].unreadCount)
+		assertEquals(null, result[1].unreadCount)
+		assertEquals(
+			"closes every room handle rooms() returns, not just the kept ones",
+			5,
+			FakeMatrixSdkState.roomCloseCount,
+		)
+	}
+
+	@Test
+	fun `timeline operations for invited room return safe failure without opening timeline`() {
+		val client = newSessionClient()
+		client.login("https://matrix.example.org", "alice", "swordfish")
+		FakeMatrixSdkState.roomsToReturn = listOf(
+			FakeRoomSpec(
+				roomId = "!invited:example.org",
+				displayName = "Invited Room",
+				membership = Membership.INVITED,
+			),
+		)
+
+		val messages = client.getRecentMessages("!invited:example.org", 10)
+		assertNull(messages)
+		assertEquals(false, client.sendTextMessage("!invited:example.org", "hello"))
+		assertEquals(false, client.editTextMessage("!invited:example.org", "\$m1", "edited"))
+		assertEquals(false, client.deleteMessage("!invited:example.org", "\$m1"))
+		assertEquals(false, client.sendReaction("!invited:example.org", "\$m1", "👍"))
+		assertEquals(false, client.removeReaction("!invited:example.org", "\$m1", "👍"))
+		assertEquals(false, client.markRead("!invited:example.org"))
+		assertEquals(0, FakeMatrixSdkState.timelineCallCount)
+	}
+
+	@Test
 	fun `getJoinedRooms fails closed and closes every room after a runtime mapping mismatch`() {
 		val client = newSessionClient()
 		client.login("https://matrix.example.org", "alice", "swordfish")
@@ -383,6 +452,25 @@ class ReflectiveMatrixHomeserverDiscoveryClientTest {
 		for (topic in listOf("Room purpose", "", null)) {
 			FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec("!a:example.org", topic = topic))
 			assertEquals(topic, client.getJoinedRooms(10).single().topic)
+		}
+	}
+
+	@Test
+	fun `room snapshots preserve direct group and unavailable flags`() {
+		val client = newSessionClient()
+		client.login("https://matrix.example.org", "alice", "swordfish")
+		for (direct in listOf(true, false, null)) {
+			for (membership in listOf(Membership.JOINED, Membership.INVITED)) {
+				FakeMatrixSdkState.roomsToReturn = listOf(
+					FakeRoomSpec("!a:example.org", membership = membership, isDirect = direct),
+				)
+				val rooms = if (membership == Membership.JOINED) {
+					client.getJoinedRooms(10)
+				} else {
+					client.getInvitedRooms(10)
+				}
+				assertEquals(direct, rooms.single().isDirect)
+			}
 		}
 	}
 
@@ -486,14 +574,47 @@ class ReflectiveMatrixHomeserverDiscoveryClientTest {
 		storeConfiguration.directory.copyRecursively(coldStore.directory, overwrite = true)
 
 		val freshClient = newSessionClient()
+		var expiredSignalled = false
+		freshClient.setOnSessionExpiredListener { expiredSignalled = true }
 		val restoreResult = freshClient.restore(coldStore)
 
 		assertTrue(
 			"Expected Failed result for transient error, got $restoreResult",
 			restoreResult is MatrixLoginClient.RestoreResult.Failed,
 		)
+		assertFalse("Transient failure must not force reconnect", expiredSignalled)
 		val file = java.io.File(coldStore.directory, "session")
 		assertTrue("Session file should NOT be deleted on transient error", file.exists())
+	}
+
+	@Test
+	fun `restore with unauthorized error marks session expired and retains homeserver url`() {
+		val storeConfiguration = fakeStoreConfiguration()
+		val client = newSessionClient()
+		client.login("https://matrix.example.org", "alice", "swordfish", storeConfiguration)
+		client.close()
+
+		FakeMatrixSdkState.restoreSessionException =
+			RuntimeException("M_UNKNOWN_TOKEN: The access token was not recognized")
+
+		val coldStore = MatrixStoreConfiguration(
+			testFolder.newFolder("cold-expired"),
+			storeConfiguration.databaseName,
+			storeConfiguration.copyEncryptionKey(),
+		)
+		storeConfiguration.directory.copyRecursively(coldStore.directory, overwrite = true)
+
+		val freshClient = newSessionClient()
+		var listenerCalled = false
+		freshClient.setOnSessionExpiredListener { listenerCalled = true }
+
+		val restoreResult = freshClient.restore(coldStore)
+
+		assertEquals(
+			RestoreResult.Failed(SESSION_EXPIRED, "https://matrix.example.org"),
+			restoreResult,
+		)
+		assertTrue(listenerCalled)
 	}
 
 	/** Polls until [condition] holds or [timeoutMs] elapses, for asserting on the fake's background completion thread. */

@@ -9,6 +9,7 @@ ext.matrixSdkVersion = '26.08.05'
 
 apply plugin: 'com.android.application'
 apply plugin: 'org.jetbrains.kotlin.android'
+apply plugin: 'org.jetbrains.kotlin.kapt'
 apply plugin: 'witness'
 apply from: 'witness.gradle'
 
@@ -194,6 +195,8 @@ android {
 		buildConfigField "boolean", "TELEGRAM_CONNECTOR_ENABLED",
 			"${telegramConnectorEnabled}"
 		buildConfigField "boolean", "MATRIX_CONNECTOR_ENABLED", "${matrixConnectorEnabled}"
+		// Lets the manifest hide Matrix-only components (MX-089 share target).
+		resValue "bool", "matrix_connector_enabled", "${matrixConnectorEnabled}"
 		buildConfigField "int", "TELEGRAM_API_ID", "${telegramApiId}"
 		buildConfigField "String", "TELEGRAM_API_HASH", telegramApiHashLiteral
 
@@ -337,8 +340,8 @@ dependencies {
 	}
 	implementation 'org.nanohttpd:nanohttpd:2.3.1'
 
-	annotationProcessor "com.google.dagger:dagger-compiler:$dagger_version"
-	annotationProcessor "com.github.bumptech.glide:compiler:$glideVersion"
+	kapt "com.google.dagger:dagger-compiler:$dagger_version"
+	kapt "com.github.bumptech.glide:compiler:$glideVersion"
 
 	compileOnly 'javax.annotation:jsr250-api:1.0'
 

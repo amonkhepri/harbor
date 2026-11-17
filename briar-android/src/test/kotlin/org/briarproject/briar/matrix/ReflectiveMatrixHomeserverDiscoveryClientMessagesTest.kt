@@ -1,6 +1,7 @@
 package org.briarproject.briar.matrix
 
 import org.briarproject.briar.api.connector.ConnectorAttachmentMetadata
+import org.briarproject.briar.api.connector.ConnectorMessageReceiptState
 import org.briarproject.briar.api.connector.ConnectorMessageType
 import org.briarproject.briar.api.connector.ConnectorReactionSummary
 import org.briarproject.briar.api.matrix.MatrixAuthSession.RecoverableErrorDetail.NONE
@@ -22,6 +23,7 @@ import org.matrix.rustcomponents.sdk.MediaSource
 import org.matrix.rustcomponents.sdk.MessageType
 import org.matrix.rustcomponents.sdk.Reaction
 import org.matrix.rustcomponents.sdk.ReactionSenderData
+import org.matrix.rustcomponents.sdk.Receipt
 import org.matrix.rustcomponents.sdk.TimelineDiff
 import org.matrix.rustcomponents.sdk.TimelineItem
 import java.util.concurrent.TimeUnit
@@ -433,6 +435,36 @@ class ReflectiveMatrixHomeserverDiscoveryClientMessagesTest {
 		val result = client.getRecentMessages("!room:example.org", 1)
 
 		assertEquals(listOf(ConnectorReactionSummary("👍", 2)), result?.single()?.reactions)
+	}
+
+	@Test
+	fun `getRecentMessages caps reaction sender IDs while preserving the full count`() {
+		val client = loggedInClient()
+		FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec("!room:example.org"))
+		FakeMatrixSdkState.timelineDiffsToReturn = listOf(
+			TimelineDiff.Reset(
+				listOf(
+					remoteEvent(
+						"\$reacted:example.org",
+						"body",
+						2_000uL,
+						reactions = listOf(
+							Reaction("👍", List(60) { ReactionSenderData("@user$it:example.org") }),
+							Reaction("", listOf(ReactionSenderData())),
+							Reaction("😂", emptyList()),
+						),
+					),
+				),
+			),
+		)
+
+		val result = client.getRecentMessages("!room:example.org", 1)
+
+		val reaction = result!!.single().reactions.single()
+		assertEquals(60, reaction.count)
+		assertEquals(50, reaction.senderIds.size)
+		assertEquals("@user0:example.org", reaction.senderIds.first())
+		assertEquals("@user49:example.org", reaction.senderIds.last())
 	}
 
 	@Test
@@ -1190,6 +1222,83 @@ class ReflectiveMatrixHomeserverDiscoveryClientMessagesTest {
 		assertEquals(0, FakeMatrixSdkState.eventTimelineItemDestroyCount)
 	}
 
+	@Test
+	fun `peer read advances correct event indicator and missing receipt remains unknown`() {
+		val client = loggedInClient()
+		FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec("!room:example.org"))
+
+		// Case 1: Outgoing messages with no receipts anywhere -> unknown.
+		FakeMatrixSdkState.timelineDiffsToReturn = listOf(
+			TimelineDiff.Reset(
+				listOf(
+					remoteEvent("\$m1:example.org", "first", 1_000uL, own = true),
+					remoteEvent("\$m2:example.org", "second", 2_000uL, own = true),
+				),
+			),
+		)
+		val initial = client.getRecentMessages("!room:example.org", 10)!!
+		assertEquals(2, initial.size)
+		assertEquals(ConnectorMessageReceiptState.UNKNOWN, initial[0].receiptState)
+		assertEquals(ConnectorMessageReceiptState.UNKNOWN, initial[1].receiptState)
+
+		// Case 2: Peer has read receipt on the first message -> m1 is READ, m2 is UNREAD.
+		FakeMatrixSdkState.timelineDiffsToReturn = listOf(
+			TimelineDiff.Reset(
+				listOf(
+					remoteEvent(
+						"\$m1:example.org",
+						"first",
+						1_000uL,
+						own = true,
+						readReceipts = mapOf("@bob:example.org" to Receipt(1_000uL)),
+					),
+					remoteEvent("\$m2:example.org", "second", 2_000uL, own = true),
+				),
+			),
+		)
+		val withBobReadM1 = client.getRecentMessages("!room:example.org", 10)!!
+		assertEquals(ConnectorMessageReceiptState.READ, withBobReadM1[0].receiptState)
+		assertEquals(ConnectorMessageReceiptState.UNREAD, withBobReadM1[1].receiptState)
+
+		// Case 3: Peer read advances to m2 -> both m1 and m2 are READ.
+		FakeMatrixSdkState.timelineDiffsToReturn = listOf(
+			TimelineDiff.Reset(
+				listOf(
+					remoteEvent("\$m1:example.org", "first", 1_000uL, own = true),
+					remoteEvent(
+						"\$m2:example.org",
+						"second",
+						2_000uL,
+						own = true,
+						readReceipts = mapOf("@bob:example.org" to Receipt(2_000uL)),
+					),
+				),
+			),
+		)
+		val withBobReadM2 = client.getRecentMessages("!room:example.org", 10)!!
+		assertEquals(ConnectorMessageReceiptState.READ, withBobReadM2[0].receiptState)
+		assertEquals(ConnectorMessageReceiptState.READ, withBobReadM2[1].receiptState)
+
+		// Case 4: Only own read receipt present -> not peer read, missing receipt remains unknown.
+		FakeMatrixSdkState.timelineDiffsToReturn = listOf(
+			TimelineDiff.Reset(
+				listOf(
+					remoteEvent(
+						"\$m1:example.org",
+						"first",
+						1_000uL,
+						own = true,
+						readReceipts = mapOf("@alice:matrix.example.org" to Receipt(1_000uL)),
+					),
+					remoteEvent("\$m2:example.org", "second", 2_000uL, own = true),
+				),
+			),
+		)
+		val ownOnly = client.getRecentMessages("!room:example.org", 10)!!
+		assertEquals(ConnectorMessageReceiptState.UNKNOWN, ownOnly[0].receiptState)
+		assertEquals(ConnectorMessageReceiptState.UNKNOWN, ownOnly[1].receiptState)
+	}
+
 	private fun loggedInClient(timeoutMs: Long = 1_000L): ReflectiveMatrixHomeserverDiscoveryClient =
 		ReflectiveMatrixHomeserverDiscoveryClient(discoveryTimeoutMs = timeoutMs).also { client ->
 			assertEquals(
@@ -1248,6 +1357,7 @@ class ReflectiveMatrixHomeserverDiscoveryClientMessagesTest {
 		edited: Boolean = false,
 		isReply: Boolean = false,
 		reactions: List<Reaction> = emptyList(),
+		readReceipts: Map<String, Receipt> = emptyMap(),
 	): TimelineItem = TimelineItem(
 		FakeTimelineEventSpec(
 			EventOrTransactionId.EventId(eventId),
@@ -1259,6 +1369,7 @@ class ReflectiveMatrixHomeserverDiscoveryClientMessagesTest {
 			edited,
 			isReply,
 			reactions,
+			readReceipts = readReceipts,
 		),
 	)
 

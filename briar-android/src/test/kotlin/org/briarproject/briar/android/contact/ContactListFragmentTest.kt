@@ -1,21 +1,29 @@
 package org.briarproject.briar.android.contact
 
+import android.content.Intent
 import android.view.MenuInflater
+import android.view.View
 import android.widget.FrameLayout
 import android.widget.PopupMenu
+import androidx.fragment.app.FragmentActivity
 import org.briarproject.briar.R
+import org.briarproject.briar.android.activity.ActivityComponent
 import org.briarproject.briar.android.connector.ConnectorConversationActivity
 import org.briarproject.briar.android.contact.ConnectorInboxAvailabilityState.ACCOUNT_UNAVAILABLE
 import org.briarproject.briar.android.contact.ConnectorInboxAvailabilityState.EMPTY
 import org.briarproject.briar.android.contact.ConnectorInboxAvailabilityState.LOAD_FAILED
 import org.briarproject.briar.android.contact.ConnectorInboxAvailabilityState.LOADING
 import org.briarproject.briar.android.contact.ConnectorInboxAvailabilityState.NONE
+import org.briarproject.briar.android.fragment.BaseFragment
+import org.briarproject.briar.android.fragment.BaseFragment.BaseFragmentListener
 import org.briarproject.briar.api.connector.ConnectorSources
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.mockito.Mockito.mock
+import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
@@ -66,6 +74,7 @@ class ContactListFragmentTest {
 		mapOf(
 			NONE to R.string.no_contacts,
 			LOADING to R.string.connector_inbox_loading,
+			ConnectorInboxAvailabilityState.SESSION_EXPIRED to R.string.connector_inbox_session_expired,
 			ACCOUNT_UNAVAILABLE to R.string.connector_inbox_account_unavailable,
 			EMPTY to R.string.connector_inbox_empty,
 			LOAD_FAILED to R.string.connector_inbox_load_failed,
@@ -77,7 +86,11 @@ class ContactListFragmentTest {
 	@Test
 	fun testTelegramAvailabilityDoesNotAddEmptyAction() {
 		ConnectorInboxAvailabilityState.values().forEach { state ->
-			val expected = if (state == NONE) R.string.no_contacts_action else 0
+			val expected = when (state) {
+				NONE -> R.string.no_contacts_action
+				ConnectorInboxAvailabilityState.SESSION_EXPIRED -> R.string.connector_reconnect
+				else -> 0
+			}
 			assertEquals(expected, ContactListFragment.emptyActionTextForState(state))
 		}
 	}
@@ -90,6 +103,15 @@ class ContactListFragmentTest {
 			LOADING,
 			ContactListFragment.aggregateAvailabilityState(
 				mapOf(ConnectorSources.TELEGRAM to EMPTY, ConnectorSources.MATRIX to LOADING),
+			),
+		)
+		assertEquals(
+			ConnectorInboxAvailabilityState.SESSION_EXPIRED,
+			ContactListFragment.aggregateAvailabilityState(
+				mapOf(
+					ConnectorSources.TELEGRAM to ACCOUNT_UNAVAILABLE,
+					ConnectorSources.MATRIX to ConnectorInboxAvailabilityState.SESSION_EXPIRED,
+				),
 			),
 		)
 		assertEquals(
@@ -142,9 +164,10 @@ class ContactListFragmentTest {
 			item,
 		)
 
+		assertNotNull(intent)
 		assertEquals(
 			ConnectorConversationActivity::class.java.name,
-			intent.component?.className,
+			intent!!.component?.className,
 		)
 		assertEquals("matrix", intent.getStringExtra(ConnectorConversationActivity.SOURCE_ID))
 		assertEquals(
@@ -152,6 +175,175 @@ class ContactListFragmentTest {
 			intent.getStringExtra(ConnectorConversationActivity.THREAD_ID),
 		)
 		assertEquals("Room title", intent.getStringExtra(ConnectorConversationActivity.THREAD_TITLE))
+	}
+
+	@Test
+	fun testInvitedMatrixInboxItemReturnsNullConversationIntent() {
+		val item = FakeConnectorInboxThreadItem(
+			connectorSource = ConnectorSources.MATRIX,
+			connectorThreadId = "!room:example.org",
+			title = "Room title",
+			isInvited = true,
+		)
+
+		val intent = ContactListFragment.createConnectorConversationIntent(
+			RuntimeEnvironment.getApplication(),
+			item,
+		)
+
+		assertNull(intent)
+	}
+
+	@Test
+	fun testInvitedTelegramInboxItemReturnsNullConversationIntent() {
+		val item = FakeConnectorInboxThreadItem(
+			connectorSource = ConnectorSources.TELEGRAM,
+			connectorThreadId = "555",
+			title = "Telegram Chat",
+			isInvited = true,
+		)
+
+		val intent = ContactListFragment.createConnectorConversationIntent(
+			RuntimeEnvironment.getApplication(),
+			item,
+		)
+
+		assertNull(intent)
+	}
+
+	@Test
+	fun testInvitationRequiresExplicitAcceptanceBeforeOpeningConversation() {
+		val activity = Robolectric.buildActivity(TestActivity::class.java).setup().get()
+		val fragment = TestContactListFragment()
+		activity.supportFragmentManager.beginTransaction().add(fragment, "tag").commitNow()
+
+		val invitedItem = FakeConnectorInboxThreadItem(
+			connectorSource = ConnectorSources.MATRIX,
+			connectorThreadId = "!invited:example.org",
+			title = "Invited Room",
+			isInvited = true,
+		)
+		activity.setTheme(R.style.BriarTheme)
+		val vm = mock(ContactListViewModel::class.java)
+		ContactListFragment::class.java.getDeclaredField("viewModel").apply {
+			isAccessible = true
+			set(fragment, vm)
+		}
+		val prepared = mock(
+			org.briarproject.briar.api.connector.ConnectorRoomInvitationAccepter
+				.PreparedAccept::class.java,
+		)
+		org.mockito.Mockito.`when`(vm.prepareAcceptInvitation(invitedItem)).thenReturn(prepared)
+		fragment.onConnectorItemClick(View(activity), invitedItem)
+		assertNull(fragment.startedIntent)
+		assertEquals(
+			0,
+			org.mockito.Mockito.mockingDetails(vm).invocations.count {
+				it.method.name == "acceptInvitation"
+			},
+		)
+		val dialog = org.robolectric.shadows.ShadowDialog.getLatestDialog()
+			as androidx.appcompat.app.AlertDialog
+		dialog.getButton(android.content.DialogInterface.BUTTON_POSITIVE).performClick()
+		org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+		val acceptCall = org.mockito.Mockito.mockingDetails(vm).invocations.single {
+			it.method.name == "acceptInvitation"
+		}
+		assertEquals(prepared, acceptCall.arguments[0])
+
+		val joinedItem = FakeConnectorInboxThreadItem(
+			connectorSource = ConnectorSources.MATRIX,
+			connectorThreadId = "!joined:example.org",
+			title = "Joined Room",
+			isInvited = false,
+		)
+		fragment.onConnectorItemClick(View(activity), joinedItem)
+		assertNotNull(fragment.startedIntent)
+		assertEquals(
+			"!joined:example.org",
+			fragment.startedIntent?.getStringExtra(ConnectorConversationActivity.THREAD_ID),
+		)
+	}
+
+	@Test
+	fun testDeclineRequiresConfirmationWithoutOpeningConversation() {
+		val activity = Robolectric.buildActivity(TestActivity::class.java).setup().get()
+		val fragment = TestContactListFragment()
+		activity.supportFragmentManager.beginTransaction().add(fragment, "tag").commitNow()
+
+		val invitedItem = FakeConnectorInboxThreadItem(
+			connectorSource = ConnectorSources.MATRIX,
+			connectorThreadId = "!invited:example.org",
+			title = "Invited Room",
+			isInvited = true,
+		)
+		activity.setTheme(R.style.BriarTheme)
+		val vm = mock(ContactListViewModel::class.java)
+		ContactListFragment::class.java.getDeclaredField("viewModel").apply {
+			isAccessible = true
+			set(fragment, vm)
+		}
+		val prepared = mock(
+			org.briarproject.briar.api.connector.ConnectorRoomInvitationAccepter
+				.PreparedAccept::class.java,
+		)
+		org.mockito.Mockito.`when`(vm.prepareAcceptInvitation(invitedItem)).thenReturn(prepared)
+		val decline = mock(
+			org.briarproject.briar.api.connector.ConnectorRoomInvitationDecliner.PreparedDecline::class.java,
+		)
+		org.mockito.Mockito.`when`(vm.prepareDeclineInvitation(invitedItem)).thenReturn(decline)
+		fragment.onConnectorItemClick(View(activity), invitedItem)
+		assertNull(fragment.startedIntent)
+		assertEquals(
+			0,
+			org.mockito.Mockito.mockingDetails(vm).invocations.count {
+				it.method.name == "declineInvitation"
+			},
+		)
+		val dialog = org.robolectric.shadows.ShadowDialog.getLatestDialog()
+			as androidx.appcompat.app.AlertDialog
+		dialog.getButton(android.content.DialogInterface.BUTTON_NEUTRAL).performClick()
+		org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+		val confirmation = org.robolectric.shadows.ShadowDialog.getLatestDialog()
+			as androidx.appcompat.app.AlertDialog
+		assertEquals(
+			0,
+			org.mockito.Mockito.mockingDetails(vm).invocations.count {
+				it.method.name == "declineInvitation"
+			},
+		)
+		confirmation.getButton(android.content.DialogInterface.BUTTON_POSITIVE).performClick()
+		org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+		val declineCall = org.mockito.Mockito.mockingDetails(vm).invocations.single {
+			it.method.name == "declineInvitation"
+		}
+		assertEquals(decline, declineCall.arguments[0])
+
+		assertNull(fragment.startedIntent)
+	}
+
+	class TestContactListFragment : ContactListFragment() {
+		var startedIntent: Intent? = null
+		override fun injectFragment(component: ActivityComponent) {}
+		override fun onCreateView(
+			inflater: android.view.LayoutInflater,
+			container: android.view.ViewGroup?,
+			savedInstanceState: android.os.Bundle?,
+		): View = View(inflater.context)
+		override fun startActivity(intent: Intent) {
+			startedIntent = intent
+		}
+	}
+
+	class TestActivity :
+		FragmentActivity(),
+		BaseFragmentListener {
+		override fun getActivityComponent(): ActivityComponent = mock(ActivityComponent::class.java)
+		override fun showNextFragment(f: BaseFragment) {}
+		override fun handleException(e: java.lang.Exception) {}
+		override fun runOnDbThread(runnable: Runnable) {
+			runnable.run()
+		}
 	}
 
 	@Test
@@ -167,9 +359,10 @@ class ContactListFragmentTest {
 			item,
 		)
 
+		assertNotNull(intent)
 		assertEquals(
 			ConnectorConversationActivity::class.java.name,
-			intent.component?.className,
+			intent!!.component?.className,
 		)
 		assertEquals("telegram", intent.getStringExtra(ConnectorConversationActivity.SOURCE_ID))
 		assertEquals("555", intent.getStringExtra(ConnectorConversationActivity.THREAD_ID))

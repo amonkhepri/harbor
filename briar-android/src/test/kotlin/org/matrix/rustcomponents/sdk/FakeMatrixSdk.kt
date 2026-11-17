@@ -43,9 +43,17 @@ enum class SlidingSyncVersion { NONE, NATIVE }
 
 enum class EncryptionState { NOT_ENCRYPTED, ENCRYPTED, UNKNOWN }
 
+enum class VerificationState { UNKNOWN, VERIFIED, UNVERIFIED }
+
+interface VerificationStateListener {
+	fun onUpdate(state: VerificationState)
+}
+
 enum class Membership { INVITED, JOINED, LEFT, KNOCKED, BANNED }
 
 enum class ReceiptType { READ, READ_PRIVATE, FULLY_READ }
+
+data class Receipt(val timestamp: ULong = 0uL)
 
 class RoomInfo(val numUnreadMessages: ULong = 0uL, val isMarkedUnread: Boolean = false) {
 	fun destroy() {
@@ -61,9 +69,12 @@ class Room(
 	private val roomMembership: Membership,
 	private val unreadMessagesCount: ULong? = null,
 	private val roomTopic: String? = null,
+	private val direct: Boolean? = null,
 ) {
 	fun id(): String = roomId
 	fun displayName(): String? = roomDisplayName
+	suspend fun isEncrypted(): Boolean = false
+	suspend fun isDirect(): Boolean = direct ?: error("Direct flag unavailable")
 	fun topic(): String? = roomTopic
 	fun isSpace(): Boolean = space
 	fun membership(): Membership = roomMembership
@@ -123,6 +134,15 @@ class Room(
 		FakeMatrixSdkState.markedUnreadRooms[roomId] = newValue
 	}
 
+	suspend fun join() {
+		FakeMatrixSdkState.joinCalls++
+		FakeMatrixSdkState.onJoin?.invoke()
+		if (FakeMatrixSdkState.joinFails) throw ClientException.Generic("failed", "failed")
+		FakeMatrixSdkState.roomsToReturn = FakeMatrixSdkState.roomsToReturn.map {
+			if (it.roomId == roomId) it.copy(membership = Membership.JOINED) else it
+		}
+	}
+
 	suspend fun leave() {
 		FakeMatrixSdkState.leaveCalls++
 		if (FakeMatrixSdkState.leaveFails) throw ClientException.Generic("failed", "failed")
@@ -139,6 +159,8 @@ interface TypingNotificationsListener {
 }
 
 class Timeline {
+	private val ownedListeners = mutableListOf<TimelineListener>()
+
 	suspend fun addListener(listener: TimelineListener): TaskHandle {
 		FakeMatrixSdkState.listenerAddCount++
 		FakeMatrixSdkState.timelineOperationOrder.add("listener")
@@ -146,6 +168,7 @@ class Timeline {
 			FakeMatrixSdkState.activeTimelineListeners.remove(listener)
 		}
 		FakeMatrixSdkState.activeTimelineListeners.add(listener)
+		ownedListeners.add(listener)
 		if (!FakeMatrixSdkState.listenerRegistrationSuspendAsynchronously) {
 			deliverTimelineUpdate(listener)
 			return task
@@ -295,7 +318,8 @@ class Timeline {
 
 	fun close() {
 		FakeMatrixSdkState.timelineCloseCount++
-		FakeMatrixSdkState.activeTimelineListeners.clear()
+		FakeMatrixSdkState.activeTimelineListeners.removeAll(ownedListeners.toSet())
+		ownedListeners.clear()
 	}
 
 	private fun deliverTimelineUpdate(listener: TimelineListener) {
@@ -350,6 +374,7 @@ data class FakeTimelineEventSpec(
 	val reactions: List<Reaction> = emptyList(),
 	val redacted: Boolean = false,
 	val editable: Boolean = own,
+	val readReceipts: Map<String, Receipt> = emptyMap(),
 ) {
 	fun toEventTimelineItem(): EventTimelineItem {
 		val content = if (redacted) {
@@ -365,7 +390,7 @@ data class FakeTimelineEventSpec(
 				),
 			)
 		}
-		return EventTimelineItem(identifier, sender, own, content, timestamp, editable)
+		return EventTimelineItem(identifier, sender, own, content, timestamp, editable, readReceipts)
 	}
 }
 
@@ -381,6 +406,7 @@ class EventTimelineItem(
 	val content: TimelineItemContent,
 	val timestamp: ULong,
 	private val editable: Boolean = own,
+	val readReceipts: Map<String, Receipt> = emptyMap(),
 ) {
 	fun isOwn(): Boolean = own
 	fun isEditable(): Boolean = editable
@@ -751,7 +777,32 @@ class Client internal constructor(
 	private val homeserverUrl: String?,
 	private val sessionDelegate: ClientSessionDelegate?,
 ) {
+	suspend fun getNotificationSettings(): NotificationSettings = NotificationSettings()
 	private var session: Session? = null
+	private val sessionVerificationController = SessionVerificationController(this)
+	private val clientEncryption = Encryption()
+
+	fun syncService(): SyncServiceBuilder = SyncServiceBuilder()
+
+	@Suppress("UNUSED_PARAMETER")
+	suspend fun syncOnceV2(settings: SyncSettingsV2? = null): SyncResponseV2 {
+		FakeMatrixSdkState.syncOnceCalls++
+		return SyncResponseV2()
+	}
+
+	suspend fun getSessionVerificationController(): SessionVerificationController =
+		sessionVerificationController
+
+	fun encryption(): Encryption = clientEncryption
+
+	@Suppress("UNUSED_PARAMETER")
+	suspend fun joinRoomByIdOrAlias(identifier: String, servers: List<String>): Room {
+		FakeMatrixSdkState.joinCalls++
+		if (FakeMatrixSdkState.joinFails) throw ClientException.Generic("denied", "private response")
+		val id = if (identifier.startsWith("#")) "!resolved:example.org" else identifier
+		FakeMatrixSdkState.roomsToReturn = listOf(FakeRoomSpec(id, membership = Membership.JOINED))
+		return getRoom(id)!!
+	}
 
 	fun homeserver(): String? = homeserverUrl
 
@@ -771,6 +822,7 @@ class Client internal constructor(
 				fake.membership,
 				fake.unreadMessagesCount,
 				fake.topic,
+				fake.isDirect,
 			)
 		}
 	} as List<Room>
@@ -785,6 +837,7 @@ class Client internal constructor(
 				fake.membership,
 				fake.unreadMessagesCount,
 				fake.topic,
+				fake.isDirect,
 			)
 		}
 
@@ -990,6 +1043,7 @@ data class FakeRoomSpec(
 	val malformedRoomId: Boolean = false,
 	val unreadMessagesCount: ULong? = null,
 	val topic: String? = null,
+	val isDirect: Boolean? = null,
 )
 
 /** Test-only malformed runtime handle returned through `Client.rooms()`'s erased list type. */
@@ -1008,6 +1062,188 @@ class MalformedRoom(
 		FakeMatrixSdkState.closedRoomHandles.add(closeTrackingId)
 	}
 }
+
+class SessionVerificationController(private val client: Client? = null) : AutoCloseable {
+	private var controllerDelegate: SessionVerificationControllerDelegate? = null
+	var isClosed = false
+
+	init {
+		FakeMatrixSdkState.activeVerificationControllers.add(this)
+	}
+
+	private fun peer(): SessionVerificationController? =
+		FakeMatrixSdkState.activeVerificationControllers.firstOrNull { it !== this && !it.isClosed }
+
+	fun setDelegate(delegate: SessionVerificationControllerDelegate) {
+		this.controllerDelegate = delegate
+	}
+
+	suspend fun requestDeviceVerification() {
+		FakeMatrixSdkState.verificationRequestCalls++
+		if (FakeMatrixSdkState.failVerificationRequest) {
+			throw IllegalStateException("forced verification request failure")
+		}
+		val peer = peer()
+		if (peer != null) {
+			val senderUserId = FakeMatrixSdkState.customVerificationRequestSenderId
+				?: (
+					try {
+						client?.userId()
+					} catch (_: Exception) {
+						null
+					}
+					)
+				?: FakeMatrixSdkState.currentUserId
+				?: "@alice:matrix.example.org"
+			peer.controllerDelegate?.didReceiveVerificationRequest(
+				SessionVerificationRequestDetails("flow-1", "device-2", UserProfile(senderUserId)),
+			)
+		} else {
+			controllerDelegate?.didStartSasVerification()
+			controllerDelegate?.didReceiveVerificationData(
+				SessionVerificationData.Emojis(FakeMatrixSdkState.defaultVerificationEmojis, byteArrayOf()),
+			)
+		}
+	}
+
+	suspend fun acknowledgeVerificationRequest(senderId: String, flowId: String) {
+		FakeMatrixSdkState.verificationAcknowledgeCalls++
+	}
+
+	suspend fun acceptVerificationRequest() {
+		FakeMatrixSdkState.verificationAcceptCalls++
+		peer()?.controllerDelegate?.didAcceptVerificationRequest()
+	}
+
+	suspend fun startSasVerification() {
+		FakeMatrixSdkState.verificationStartSasCalls++
+		val peer = peer()
+		controllerDelegate?.didStartSasVerification()
+		peer?.controllerDelegate?.didStartSasVerification()
+		val emojis = SessionVerificationData.Emojis(
+			FakeMatrixSdkState.defaultVerificationEmojis,
+			byteArrayOf(),
+		)
+		controllerDelegate?.didReceiveVerificationData(emojis)
+		peer?.controllerDelegate?.didReceiveVerificationData(emojis)
+	}
+
+	suspend fun approveVerification() {
+		FakeMatrixSdkState.verificationApproveCalls++
+		val peer = peer()
+		if (peer != null) {
+			FakeMatrixSdkState.approvedControllers.add(this)
+			if (FakeMatrixSdkState.approvedControllers.contains(peer)) {
+				FakeMatrixSdkState.verified = true
+				controllerDelegate?.didFinish()
+				peer.controllerDelegate?.didFinish()
+			}
+		} else {
+			FakeMatrixSdkState.verified = true
+			controllerDelegate?.didFinish()
+		}
+	}
+
+	suspend fun declineVerification() {
+		FakeMatrixSdkState.verificationDeclineCalls++
+		FakeMatrixSdkState.verified = false
+		val peer = peer()
+		controllerDelegate?.didFail()
+		peer?.controllerDelegate?.didFail()
+	}
+
+	suspend fun cancelVerification() {
+		FakeMatrixSdkState.verificationCancelCalls++
+		FakeMatrixSdkState.verified = false
+		val peer = peer()
+		controllerDelegate?.didCancel()
+		peer?.controllerDelegate?.didCancel()
+	}
+
+	override fun close() {
+		isClosed = true
+		FakeMatrixSdkState.approvedControllers.remove(this)
+		FakeMatrixSdkState.activeVerificationControllers.remove(this)
+	}
+}
+
+interface SessionVerificationControllerDelegate {
+	fun didReceiveVerificationRequest(details: SessionVerificationRequestDetails)
+	fun didAcceptVerificationRequest()
+	fun didStartSasVerification()
+	fun didReceiveVerificationData(data: SessionVerificationData)
+	fun didFail()
+	fun didCancel()
+	fun didFinish()
+}
+
+sealed class SessionVerificationData {
+	class Emojis(
+		private val emojis: List<SessionVerificationEmoji>,
+		private val indices: ByteArray = byteArrayOf(),
+	) : SessionVerificationData() {
+		fun getEmojis(): List<SessionVerificationEmoji> = emojis
+		fun getIndices(): ByteArray = indices
+	}
+	class Decimals(private val values: List<UShort>) : SessionVerificationData() {
+		fun getValues(): List<UShort> = values
+	}
+}
+
+class SessionVerificationEmoji(private val symbol: String, private val description: String) {
+	fun symbol(): String = symbol
+	fun description(): String = description
+}
+
+class UserProfile(
+	val userId: String = "@alice:matrix.example.org",
+	val displayName: String? = null,
+	val avatarUrl: String? = null,
+)
+
+class SessionVerificationRequestDetails(
+	val flowId: String = "flow-1",
+	val deviceId: String = "device-1",
+	val senderProfile: UserProfile = UserProfile(),
+)
+
+class Encryption {
+	fun verificationState(): VerificationState =
+		if (FakeMatrixSdkState.verified) VerificationState.VERIFIED else VerificationState.UNVERIFIED
+
+	fun verificationStateListener(listener: VerificationStateListener): TaskHandle = TaskHandle()
+}
+
+class SyncService : AutoCloseable {
+	var isStarted = false
+
+	suspend fun start() {
+		FakeMatrixSdkState.syncServiceStartCalls++
+		isStarted = true
+	}
+
+	suspend fun stop() {
+		FakeMatrixSdkState.syncServiceStopCalls++
+		isStarted = false
+	}
+
+	override fun close() {
+		isStarted = false
+	}
+}
+
+class SyncServiceBuilder : AutoCloseable {
+	suspend fun finish(): SyncService {
+		FakeMatrixSdkState.syncServiceFinishCalls++
+		return SyncService()
+	}
+
+	override fun close() {}
+}
+
+class SyncSettingsV2(val timeoutMs: ULong? = null, val fullState: Boolean = false)
+
+class SyncResponseV2
 
 object FakeMatrixSdkState {
 	val builds = mutableListOf<Thread>()
@@ -1047,6 +1283,9 @@ object FakeMatrixSdkState {
 	var lastBuiltClient: Client? = null
 	var roomsToReturn: List<FakeRoomSpec> = emptyList()
 	var roomCloseCount = 0
+	var joinCalls = 0
+	var joinFails = false
+	var onJoin: (() -> Unit)? = null
 	var leaveCalls = 0
 	var leaveFails = false
 	val closedRoomHandles = mutableListOf<String>()
@@ -1157,9 +1396,50 @@ object FakeMatrixSdkState {
 	var lastMediaThumbnailWidth: ULong? = null
 	var lastMediaThumbnailHeight: ULong? = null
 	var onGetMediaThumbnail: (() -> Unit)? = null
+	val activeVerificationControllers = mutableListOf<SessionVerificationController>()
+	var peerVerificationController: SessionVerificationController? = null
+	val approvedControllers = mutableSetOf<SessionVerificationController>()
+	var verified = false
+	var verificationRequestCalls = 0
+	var verificationAcknowledgeCalls = 0
+	var verificationAcceptCalls = 0
+	var verificationStartSasCalls = 0
+	var verificationApproveCalls = 0
+	var verificationDeclineCalls = 0
+	var verificationCancelCalls = 0
+	var syncServiceStartCalls = 0
+	var syncServiceStopCalls = 0
+	var syncServiceFinishCalls = 0
+	var syncOnceCalls = 0
+	private val initialDefaultVerificationEmojis = listOf(
+		SessionVerificationEmoji("🐶", "Dog"),
+		SessionVerificationEmoji("🐱", "Cat"),
+		SessionVerificationEmoji("🦊", "Fox"),
+	)
+	var defaultVerificationEmojis: List<SessionVerificationEmoji> = initialDefaultVerificationEmojis
+	var customVerificationRequestSenderId: String? = null
+	var failVerificationRequest = false
 
 	fun reset() {
 		awaitBuilds()
+		failVerificationRequest = false
+		customVerificationRequestSenderId = null
+		defaultVerificationEmojis = initialDefaultVerificationEmojis
+		activeVerificationControllers.clear()
+		peerVerificationController = null
+		approvedControllers.clear()
+		verified = false
+		verificationRequestCalls = 0
+		verificationAcknowledgeCalls = 0
+		verificationAcceptCalls = 0
+		verificationStartSasCalls = 0
+		verificationApproveCalls = 0
+		verificationDeclineCalls = 0
+		verificationCancelCalls = 0
+		syncServiceStartCalls = 0
+		syncServiceStopCalls = 0
+		syncServiceFinishCalls = 0
+		syncOnceCalls = 0
 		getMediaThumbnailCallCount = 0
 		mediaSourceDestroyCount = 0
 		mediaThumbnailFailureToThrow = null
@@ -1206,6 +1486,9 @@ object FakeMatrixSdkState {
 		lastBuiltClient = null
 		roomsToReturn = emptyList()
 		roomCloseCount = 0
+		joinCalls = 0
+		joinFails = false
+		onJoin = null
 		leaveCalls = 0
 		leaveFails = false
 		closedRoomHandles.clear()
@@ -1287,4 +1570,29 @@ object FakeMatrixSdkState {
 		lastMarkAsReadReceiptType = null
 		markAsReadFailureToThrow = null
 	}
+}
+
+// Server state survives client recreation, unlike local UI state.
+enum class RoomNotificationMode { MUTE, ALL_MESSAGES, MENTIONS_AND_KEYWORDS_ONLY }
+data class RoomNotificationSettings(val mode: RoomNotificationMode, val isDefault: Boolean)
+class NotificationSettings : AutoCloseable {
+	companion object {
+		val modes = mutableMapOf<String, RoomNotificationMode>()
+		var failUpdate = false
+		var ignoreUpdate = false
+	}
+
+	@Suppress("UNUSED_PARAMETER")
+	suspend fun getRoomNotificationSettings(roomId: String, encrypted: Boolean, direct: Boolean) =
+		RoomNotificationSettings(modes[roomId] ?: RoomNotificationMode.ALL_MESSAGES, false)
+	suspend fun setRoomNotificationMode(roomId: String, mode: RoomNotificationMode) {
+		check(!failUpdate)
+		if (!ignoreUpdate) modes[roomId] = mode
+	}
+
+	@Suppress("UNUSED_PARAMETER")
+	suspend fun unmuteRoom(roomId: String, encrypted: Boolean, direct: Boolean) {
+		setRoomNotificationMode(roomId, RoomNotificationMode.ALL_MESSAGES)
+	}
+	override fun close() {}
 }

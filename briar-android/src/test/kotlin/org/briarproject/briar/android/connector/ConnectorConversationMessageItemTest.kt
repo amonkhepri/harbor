@@ -2,6 +2,7 @@ package org.briarproject.briar.android.connector
 
 import org.briarproject.briar.api.connector.ConnectorAttachmentMetadata
 import org.briarproject.briar.api.connector.ConnectorMessage
+import org.briarproject.briar.api.connector.ConnectorMessageReceiptState
 import org.briarproject.briar.api.connector.ConnectorMessageType
 import org.briarproject.briar.api.connector.ConnectorReactionSummary
 import org.briarproject.briar.api.connector.ConnectorSource
@@ -427,6 +428,27 @@ class ConnectorConversationMessageItemTest {
 		reactions = reactions,
 		attachment = attachment,
 	)
+
+	@Test
+	fun testFromMessagesPreservesAndMergesReceiptState() {
+		val message = connectorMessage("1", 10, true, "msg", 1L).copy(
+			receiptState = ConnectorMessageReceiptState.READ,
+		)
+		val item = ConnectorConversationMessageItem.from(message)
+		assertEquals(ConnectorMessageReceiptState.READ, item.receiptState)
+
+		val items = ConnectorConversationMessageItem.fromMessages(
+			listOf(
+				connectorMessage("1", 10, true, "msg", 1L).copy(
+					receiptState = ConnectorMessageReceiptState.UNREAD,
+				),
+				connectorMessage("1", 10, true, "msg", 1L).copy(
+					receiptState = ConnectorMessageReceiptState.READ,
+				),
+			),
+		)
+		assertEquals(ConnectorMessageReceiptState.READ, items.single().receiptState)
+	}
 
 	companion object {
 		private val CONNECTOR_SOURCE = ConnectorSource("sample", "Sample")

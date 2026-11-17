@@ -1,7 +1,9 @@
 package org.briarproject.briar.android.contact
 
 import android.content.Context
+import android.content.res.ColorStateList
 import android.content.res.Resources
+import android.graphics.Color
 import android.view.View
 import android.widget.ImageView
 import android.widget.TextView
@@ -31,11 +33,14 @@ class ConnectorInboxThreadViewHolder(view: View) : RecyclerView.ViewHolder(view)
 		date.visibility = dateVisibility(item)
 		date.text = dateText(date.context, item)
 		sourceIcon.setImageResource(sourceIconRes(item))
+		sourceIcon.imageTintList =
+			if (isMatrixGroup(item)) ColorStateList.valueOf(Color.WHITE) else null
 		sourceIcon.contentDescription =
 			sourceContentDescription(sourceIcon.resources, item)
 		badge.text = sourceLabel(item)
 		val unreadCount = item.unreadCount
-		if (item.connectorSource.id == ConnectorSources.MATRIX_ID &&
+		if (!item.isInvited &&
+			item.connectorSource.id == ConnectorSources.MATRIX_ID &&
 			unreadCount != null &&
 			unreadCount > 0
 		) {
@@ -43,7 +48,8 @@ class ConnectorInboxThreadViewHolder(view: View) : RecyclerView.ViewHolder(view)
 			unreadBadge.text = unreadText(unreadCount)
 			unreadBadge.contentDescription =
 				unreadContentDescription(unreadBadge.resources, unreadCount)
-		} else if (item.connectorSource.id == ConnectorSources.MATRIX_ID &&
+		} else if (!item.isInvited &&
+			item.connectorSource.id == ConnectorSources.MATRIX_ID &&
 			item.isMarkedUnread == true
 		) {
 			unreadBadge.visibility = View.VISIBLE
@@ -56,6 +62,15 @@ class ConnectorInboxThreadViewHolder(view: View) : RecyclerView.ViewHolder(view)
 			unreadBadge.contentDescription = null
 		}
 		preview.text = when {
+			item.isInvited ->
+				if (item.hasPreviewText() && item.previewText.isNotBlank()) {
+					preview.resources.getString(
+						R.string.connector_thread_invitation_with_topic,
+						previewText(preview.resources, item),
+					)
+				} else {
+					preview.resources.getString(R.string.connector_thread_invitation)
+				}
 			item.previewType == ConnectorMessageType.PHOTO ->
 				previewText(preview.resources, item, R.string.connector_message_photo)
 			item.previewType == ConnectorMessageType.FILE ->
@@ -124,22 +139,31 @@ class ConnectorInboxThreadViewHolder(view: View) : RecyclerView.ViewHolder(view)
 		fun sourceIconRes(item: ConnectorInboxThreadItem): Int =
 			if (item.connectorSource.id == ConnectorSources.TELEGRAM_ID) {
 				R.drawable.ic_telegram
+			} else if (isMatrixGroup(item)) {
+				R.drawable.ic_group
 			} else {
 				R.drawable.ic_link_menu
 			}
 
 		fun sourceContentDescription(resources: Resources, item: ConnectorInboxThreadItem): CharSequence =
 			resources.getString(
-				R.string.connector_thread_source_content_description,
+				if (isMatrixGroup(item)) {
+					R.string.connector_thread_group_content_description
+				} else {
+					R.string.connector_thread_source_content_description
+				},
 				item.connectorSource.displayName,
 			)
 
+		fun isMatrixGroup(item: ConnectorInboxThreadItem): Boolean =
+			item.connectorSource.id == ConnectorSources.MATRIX_ID && item.isDirect == false
+
 		fun dateVisibility(item: ConnectorInboxThreadItem): Int =
-			if (item.latestActivityMillis > 0) View.VISIBLE else View.GONE
+			if (!item.isInvited && item.latestActivityMillis > 0) View.VISIBLE else View.GONE
 
 		fun dateText(context: Context, item: ConnectorInboxThreadItem): CharSequence {
 			val latestActivityMillis = item.latestActivityMillis
-			if (latestActivityMillis <= 0) return ""
+			if (item.isInvited || latestActivityMillis <= 0) return ""
 			return formatDate(context, latestActivityMillis)
 		}
 

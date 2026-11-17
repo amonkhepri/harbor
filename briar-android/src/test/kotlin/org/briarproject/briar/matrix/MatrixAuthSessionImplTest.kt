@@ -35,12 +35,14 @@ class MatrixAuthSessionImplTest {
 		assertEquals(MatrixAuthState.CREDENTIAL_ENTRY, session.getSnapshot().authState)
 		session.submitCredentials("", "")
 		assertEquals(MatrixAuthState.READY, session.getSnapshot().authState)
+		assertEquals("@:matrix.example.org", session.getSnapshot().userId)
 		assertEquals("https://matrix.example.org", FakeMatrixSdkState.lastHomeserverUrl)
 		assertEquals(1, FakeMatrixSdkState.loginCallCount)
 
 		session.logout()
 
 		assertEquals(MatrixAuthState.HOMESERVER_ENTRY, session.getSnapshot().authState)
+		assertNull(session.getSnapshot().userId)
 		assertEquals(1, FakeMatrixSdkState.logoutCallCount)
 		assertEquals(2, FakeMatrixSdkState.clientCloseCount)
 	}
@@ -61,6 +63,7 @@ class MatrixAuthSessionImplTest {
 		assertEquals(MatrixAuthState.RECOVERABLE_ERROR, snapshot.authState)
 		assertEquals(INVALID_CREDENTIALS, snapshot.errorDetail)
 		assertEquals("https://matrix.invalid", snapshot.homeserverUrl)
+		assertNull(snapshot.userId)
 		assertEquals(1, loginClient.loginCount)
 	}
 
@@ -111,6 +114,7 @@ class MatrixAuthSessionImplTest {
 		val snapshot = freshSession.getSnapshot()
 		assertEquals(MatrixAuthState.READY, snapshot.authState)
 		assertEquals("https://matrix.example.org", snapshot.homeserverUrl)
+		assertEquals("@alice:matrix.example.org", snapshot.userId)
 	}
 
 	@Test
@@ -269,6 +273,50 @@ class MatrixAuthSessionImplTest {
 		assertEquals(MatrixAuthState.CLOSED, session.getSnapshot().authState)
 	}
 
+	@Test
+	fun `client expiry signal exposes reconnect state and re-login restores ready`() {
+		val loginClient = FakeLoginClient(NONE)
+		val session = MatrixAuthSessionImpl(
+			FakeDiscoveryClient(DiscoveryResult.Resolved("https://matrix.example.org")),
+			loginClient,
+		)
+
+		session.start()
+		session.submitHomeserver("matrix.example.org")
+		session.submitCredentials("user", "pass")
+		assertEquals(MatrixAuthState.READY, session.getSnapshot().authState)
+		assertEquals("@user:matrix.example.org", session.getSnapshot().userId)
+
+		loginClient.triggerSessionExpired()
+		val snapshot = session.getSnapshot()
+		assertEquals(MatrixAuthState.RECOVERABLE_ERROR, snapshot.authState)
+		assertNull(snapshot.userId)
+		assertEquals(RecoverableErrorDetail.SESSION_EXPIRED, snapshot.errorDetail)
+		assertEquals("https://matrix.example.org", snapshot.homeserverUrl)
+
+		// Reconnect: credentials can be re-submitted against the retained homeserver.
+		session.submitCredentials("user", "pass")
+		assertEquals(MatrixAuthState.READY, session.getSnapshot().authState)
+		assertEquals(NONE, session.getSnapshot().errorDetail)
+		assertEquals(2, loginClient.loginCount)
+	}
+
+	@Test
+	fun `user ID is kept out of the snapshot string form`() {
+		val loginClient = FakeLoginClient(NONE)
+		val session = MatrixAuthSessionImpl(
+			FakeDiscoveryClient(DiscoveryResult.Resolved("https://matrix.example.org")),
+			loginClient,
+		)
+		session.start()
+		session.submitHomeserver("matrix.example.org")
+		session.submitCredentials("user", "pass")
+
+		val text = session.getSnapshot().toString()
+		assertEquals(false, text.contains("@user:matrix.example.org"))
+		assertEquals(false, text.contains("user"))
+	}
+
 	private fun fakeStoreConfiguration(): MatrixStoreConfiguration = MatrixStoreConfiguration(
 		testFolder.newFolder("matrix-sdk"),
 		"matrix-sdk",
@@ -297,14 +345,29 @@ class MatrixAuthSessionImplTest {
 	private class FakeLoginClient(private val result: RecoverableErrorDetail) : MatrixLoginClient {
 		var loginCount = 0
 		var closeCount = 0
+		private var lastUsername: String? = null
+		private var sessionExpiredListener: (() -> Unit)? = null
+
+		override fun setOnSessionExpiredListener(listener: (() -> Unit)?) {
+			sessionExpiredListener = listener
+		}
+
+		fun triggerSessionExpired() {
+			sessionExpiredListener?.invoke()
+		}
+
 		override fun login(
 			homeserverUrl: String,
 			username: String,
 			password: String,
 			storeConfiguration: MatrixStoreConfiguration?,
-		) = result.also { loginCount++ }
+		) = result.also {
+			loginCount++
+			lastUsername = username
+		}
 		override fun restore(storeConfiguration: MatrixStoreConfiguration) =
 			MatrixLoginClient.RestoreResult.NotFound
+		override fun currentUserId(): String? = lastUsername?.let { "@$it:matrix.example.org" }
 		override fun logout() = Unit
 		override fun close() {
 			closeCount++

@@ -11,4 +11,7 @@ data class ConnectorThread(
 	val unreadCount: Int? = null,
 	val isMarkedUnread: Boolean? = null,
 	val topic: String? = null,
+	val isInvited: Boolean = false,
+	/** True for a direct chat, false for a group room, null when unknown. */
+	val isDirect: Boolean? = null,
 )

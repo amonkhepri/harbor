@@ -20,6 +20,12 @@ interface ConnectorInboxThreadItem : InboxThreadItem {
 	val isMarkedUnread: Boolean?
 		get() = null
 
+	val isDirect: Boolean?
+		get() = null
+
+	val isInvited: Boolean
+		get() = false
+
 	override val stableId: String
 		get() = "${connectorSource.id}:$connectorThreadId"
 

@@ -183,6 +183,11 @@ public class BriarRecyclerView extends FrameLayout {
 		emptyAction.setText(res);
 	}
 
+	public void setEmptyActionListener(OnClickListener listener) {
+		if (recyclerView == null) initViews();
+		emptyAction.setOnClickListener(listener);
+	}
+
 	public void showProgressBar() {
 		if (recyclerView == null) initViews();
 		recyclerView.setVisibility(INVISIBLE);

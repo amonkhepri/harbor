@@ -23,8 +23,10 @@ import org.briarproject.briar.android.contact.add.remote.AddContactActivity;
 import org.briarproject.briar.android.contact.add.remote.PendingContactListActivity;
 import org.briarproject.briar.android.conversation.ConversationActivity;
 import org.briarproject.briar.android.fragment.BaseFragment;
+import org.briarproject.briar.android.matrix.MatrixSetupActivity;
 import org.briarproject.briar.android.util.BriarSnackbarBuilder;
 import org.briarproject.briar.android.view.BriarRecyclerView;
+import org.briarproject.briar.api.connector.ConnectorRoomInvitationAccepter.PreparedAccept;
 import org.briarproject.briar.api.connector.ConnectorSource;
 import org.briarproject.nullsafety.MethodsNotNullByDefault;
 import org.briarproject.nullsafety.ParametersNotNullByDefault;
@@ -37,6 +39,7 @@ import javax.annotation.Nullable;
 import javax.inject.Inject;
 
 import androidx.annotation.UiThread;
+import androidx.appcompat.app.AlertDialog;
 import androidx.lifecycle.ViewModelProvider;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import io.github.kobakei.materialfabspeeddial.FabSpeedDial;
@@ -113,6 +116,11 @@ public class ContactListFragment extends BaseFragment
 		list.setEmptyImage(R.drawable.il_empty_state_contact_list);
 		list.setEmptyText(getString(R.string.no_contacts));
 		list.setEmptyAction(getString(R.string.no_contacts_action));
+		list.setEmptyActionListener(v -> {
+			if (connectorAvailabilityState == ConnectorInboxAvailabilityState.SESSION_EXPIRED) {
+				startActivity(new Intent(getContext(), MatrixSetupActivity.class));
+			}
+		});
 
 		viewModel.getContactListItems()
 				.observe(getViewLifecycleOwner(), result -> {
@@ -157,11 +165,58 @@ public class ContactListFragment extends BaseFragment
 
 	@Override
 	public void onConnectorItemClick(View view, ConnectorInboxThreadItem item) {
-		startActivity(createConnectorConversationIntent(getActivity(), item));
+		if (item.isInvited()) {
+			PreparedAccept prepared = viewModel.prepareAcceptInvitation(item);
+			if (prepared == null) return;
+			new AlertDialog.Builder(requireContext())
+					.setMessage(R.string.connector_accept_invitation_confirm)
+					.setNegativeButton(R.string.cancel, null)
+					.setNeutralButton(R.string.connector_decline_invitation_action, (d, w) -> {
+						var decline = viewModel.prepareDeclineInvitation(item);
+						if (decline == null) return;
+						new AlertDialog.Builder(requireContext())
+								.setMessage(R.string.connector_decline_invitation_confirm)
+								.setNegativeButton(R.string.cancel, null)
+								.setPositiveButton(R.string.connector_decline_invitation_action,
+										(dialog, which) -> viewModel.declineInvitation(decline, success -> {
+											if (!success && isAdded() && getView() != null) {
+												Snackbar.make(getView(), R.string.connector_decline_invitation_failed,
+														Snackbar.LENGTH_LONG).show();
+											}
+										})).show();
+					})
+					.setPositiveButton(R.string.connector_accept_invitation_action,
+							(dialog, which) -> viewModel.acceptInvitation(prepared, success -> {
+								if (!isAdded() || getView() == null) return;
+								if (success) {
+									Intent i = new Intent(requireContext(),
+											ConnectorConversationActivity.class);
+									i.putExtra(ConnectorConversationActivity.SOURCE_ID,
+											item.getConnectorSource().getId());
+									i.putExtra(ConnectorConversationActivity.THREAD_ID,
+											item.getConnectorThreadId());
+									i.putExtra(ConnectorConversationActivity.THREAD_TITLE, item.getTitle());
+									startActivity(i);
+								} else {
+									Snackbar.make(getView(), R.string.connector_accept_invitation_failed,
+											Snackbar.LENGTH_LONG).show();
+								}
+							}))
+					.show();
+			return;
+		}
+		Intent i = createConnectorConversationIntent(getActivity(), item);
+		if (i != null) {
+			startActivity(i);
+		}
 	}
 
+	@Nullable
 	static Intent createConnectorConversationIntent(Context context,
 			ConnectorInboxThreadItem item) {
+		if (item.isInvited()) {
+			return null;
+		}
 		Intent i = new Intent(context, ConnectorConversationActivity.class);
 		i.putExtra(ConnectorConversationActivity.SOURCE_ID,
 				item.getConnectorSource().getId());
@@ -225,22 +280,30 @@ public class ContactListFragment extends BaseFragment
 	@Override
 	public void onStart() {
 		super.onStart();
-		viewModel.clearAllContactNotifications();
-		viewModel.clearAllContactAddedNotifications();
-		viewModel.loadContacts();
-		viewModel.loadConnectorThreads();
-		viewModel.checkForPendingContacts();
-		list.startPeriodicUpdate(CONNECTOR_REFRESH_INTERVAL_MS,
-				viewModel::loadConnectorThreads);
+		if (viewModel != null) {
+			viewModel.clearAllContactNotifications();
+			viewModel.clearAllContactAddedNotifications();
+			viewModel.loadContacts();
+			viewModel.loadConnectorThreads();
+			viewModel.checkForPendingContacts();
+			if (list != null) {
+				list.startPeriodicUpdate(CONNECTOR_REFRESH_INTERVAL_MS,
+						viewModel::loadConnectorThreads);
+			}
+		}
 	}
 
 	@Override
 	public void onStop() {
 		super.onStop();
-		list.stopPeriodicUpdate();
+		if (list != null) {
+			list.stopPeriodicUpdate();
+		}
 		dismissSnackBar();
 		// Close the speed dial to prevent a crash (#1672)
-		speedDial.closeMenu();
+		if (speedDial != null) {
+			speedDial.closeMenu();
+		}
 	}
 
 	@UiThread
@@ -341,6 +404,7 @@ public class ContactListFragment extends BaseFragment
 			Map<ConnectorSource, ConnectorInboxAvailabilityState> states) {
 		for (ConnectorInboxAvailabilityState candidate : Arrays.asList(
 				ConnectorInboxAvailabilityState.LOADING,
+				ConnectorInboxAvailabilityState.SESSION_EXPIRED,
 				ConnectorInboxAvailabilityState.LOAD_FAILED,
 				ConnectorInboxAvailabilityState.ACCOUNT_UNAVAILABLE,
 				ConnectorInboxAvailabilityState.EMPTY)) {
@@ -353,6 +417,8 @@ public class ContactListFragment extends BaseFragment
 		switch (state) {
 			case LOADING:
 				return R.string.connector_inbox_loading;
+			case SESSION_EXPIRED:
+				return R.string.connector_inbox_session_expired;
 			case ACCOUNT_UNAVAILABLE:
 				return R.string.connector_inbox_account_unavailable;
 			case EMPTY:
@@ -365,7 +431,13 @@ public class ContactListFragment extends BaseFragment
 	}
 
 	static int emptyActionTextForState(ConnectorInboxAvailabilityState state) {
-		return state == ConnectorInboxAvailabilityState.NONE ?
-				R.string.no_contacts_action : 0;
+		switch (state) {
+			case NONE:
+				return R.string.no_contacts_action;
+			case SESSION_EXPIRED:
+				return R.string.connector_reconnect;
+			default:
+				return 0;
+		}
 	}
 }

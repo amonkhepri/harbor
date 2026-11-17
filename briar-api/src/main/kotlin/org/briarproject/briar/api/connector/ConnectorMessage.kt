@@ -13,13 +13,30 @@ data class ConnectorMessage(
 	val isReply: Boolean = false,
 	val reactions: List<ConnectorReactionSummary> = emptyList(),
 	val attachment: ConnectorAttachmentMetadata? = null,
+	val receiptState: ConnectorMessageReceiptState = ConnectorMessageReceiptState.UNKNOWN,
 )
 
-data class ConnectorReactionSummary(val key: String, val count: Int, val isOwn: Boolean = false)
+data class ConnectorReactionSummary(
+	val key: String,
+	val count: Int,
+	val isOwn: Boolean = false,
+	/** Matrix user IDs, bounded by [MAX_SENDERS]; empty when sender details are unavailable. */
+	val senderIds: List<String> = emptyList(),
+) {
+	companion object {
+		const val MAX_SENDERS = 50
+	}
+}
 
 enum class ConnectorMessageType {
 	TEXT,
 	PHOTO,
 	FILE,
 	DELETED,
+}
+
+enum class ConnectorMessageReceiptState {
+	UNKNOWN,
+	UNREAD,
+	READ,
 }

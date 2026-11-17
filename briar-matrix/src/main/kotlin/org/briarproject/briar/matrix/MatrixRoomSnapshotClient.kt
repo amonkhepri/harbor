@@ -7,12 +7,33 @@ package org.briarproject.briar.matrix
  * so a room-listing regression can't block login/restore/logout.
  */
 interface MatrixRoomSnapshotClient {
+	fun prepareRoomNotifications(
+		roomId: String,
+	): org.briarproject.briar.api.connector.ConnectorRoomNotifications.PreparedNotifications? = null
+
+	fun prepareJoinRoom(identifier: String): (() -> Boolean)? = null
+
+	fun prepareAcceptInvitation(
+		roomId: String,
+	): org.briarproject.briar.api.connector.ConnectorRoomInvitationAccepter.PreparedAccept? = null
+
+	fun prepareDeclineInvitation(
+		roomId: String,
+	): org.briarproject.briar.api.connector.ConnectorRoomInvitationDecliner.PreparedDecline? = null
+
 	/**
 	 * Returns currently joined, non-space rooms in deterministic order, bounded
 	 * to [limit]. Never throws; returns an empty list when no session is
 	 * retained or room enumeration fails.
 	 */
 	fun getJoinedRooms(limit: Int): List<MatrixRoomSnapshot>
+
+	/**
+	 * Returns currently invited, non-space rooms in deterministic order, bounded
+	 * to [limit] (MX-062). Never throws; returns an empty list when no session is
+	 * retained or room enumeration fails.
+	 */
+	fun getInvitedRooms(limit: Int): List<MatrixRoomSnapshot> = emptyList()
 
 	/** Reads only the requested room's topic; null if unavailable or no session is retained. */
 	fun getRoomTopic(roomId: String): String? = null
@@ -24,4 +45,6 @@ data class MatrixRoomSnapshot(
 	val unreadCount: Int? = null,
 	val isMarkedUnread: Boolean? = null,
 	val topic: String? = null,
+	val isInvited: Boolean = false,
+	val isDirect: Boolean? = null,
 )

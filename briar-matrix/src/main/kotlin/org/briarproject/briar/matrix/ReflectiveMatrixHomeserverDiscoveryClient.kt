@@ -1,5 +1,6 @@
 package org.briarproject.briar.matrix
 
+import org.briarproject.briar.api.connector.ConnectorRoomNotifications.PreparedNotifications
 import org.briarproject.briar.api.matrix.MatrixAuthSession.RecoverableErrorDetail
 import org.briarproject.briar.api.matrix.MatrixAuthSession.RecoverableErrorDetail.HOMESERVER_DISCOVERY_FAILED
 import org.briarproject.briar.api.matrix.MatrixAuthSession.RecoverableErrorDetail.INVALID_CREDENTIALS
@@ -7,15 +8,22 @@ import org.briarproject.briar.api.matrix.MatrixAuthSession.RecoverableErrorDetai
 import org.briarproject.briar.api.matrix.MatrixAuthSession.RecoverableErrorDetail.NONE
 import org.briarproject.briar.api.matrix.MatrixHomeserverDiscoveryClient
 import org.briarproject.briar.api.matrix.MatrixHomeserverDiscoveryClient.DiscoveryResult
+import org.briarproject.briar.api.matrix.MatrixDeviceTrustState
+import org.briarproject.briar.api.matrix.MatrixVerificationEmoji
+import org.briarproject.briar.api.matrix.MatrixVerificationSessionHandle
+import org.briarproject.briar.api.matrix.MatrixVerificationState
 import org.briarproject.briar.api.connector.ConnectorAttachmentMetadata
 import org.briarproject.briar.api.connector.ConnectorFileDownloader
 import org.briarproject.briar.api.connector.ConnectorFileDownloader.DownloadResult
 import org.briarproject.briar.api.connector.ConnectorFileDownloader.FailureCause
 import org.briarproject.briar.api.connector.ConnectorFileSender
 import org.briarproject.briar.api.connector.ConnectorImageSender
+import org.briarproject.briar.api.connector.ConnectorMessageReceiptState
 import org.briarproject.briar.api.connector.ConnectorMessageType
 import org.briarproject.briar.api.connector.ConnectorReactionSummary
 import org.briarproject.briar.api.connector.ConnectorUnreadMarker.PreparedMarkUnread
+import org.briarproject.briar.api.connector.ConnectorRoomInvitationDecliner.PreparedDecline
+import org.briarproject.briar.api.connector.ConnectorRoomInvitationAccepter.PreparedAccept
 import org.briarproject.briar.api.connector.ConnectorRoomLeaver.PreparedLeave
 import org.briarproject.briar.api.connector.ConnectorRoomObserver.RoomSubscription
 import org.briarproject.briar.api.connector.ConnectorTypingObserver.TypingSubscription
@@ -24,6 +32,8 @@ import java.util.UUID
 import java.util.concurrent.CancellationException
 import java.util.concurrent.Executor
 import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledExecutorService
+import java.util.concurrent.ScheduledFuture
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.DataInputStream
@@ -83,23 +93,151 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 	private val typingExecutor: Executor = Executors.newSingleThreadExecutor { task ->
 		Thread(task, "matrix-typing").apply { isDaemon = true }
 	},
+	private val verificationTimerExecutor: ScheduledExecutorService =
+		Executors.newSingleThreadScheduledExecutor { task ->
+			Thread(task, "matrix-verification-timer").apply { isDaemon = true }
+		},
 ) : MatrixHomeserverDiscoveryClient,
 	MatrixLoginClient,
 	MatrixRoomSnapshotClient,
 	MatrixMessageSnapshotClient,
 	MatrixMessageSendClient,
-	MatrixFileDownloadClient {
+	MatrixFileDownloadClient,
+	MatrixDeviceVerificationClient {
 
 	private var loginClient: Any? = null
 	private val lifecycleLock = Any()
 	private var activeGeneration: Any? = null
 	private var activeStore: MatrixStoreConfiguration? = null
+
+	@Volatile
+	private var onSessionExpiredListener: (() -> Unit)? = null
+
+	override fun setOnSessionExpiredListener(listener: (() -> Unit)?) {
+		onSessionExpiredListener = listener
+	}
+
+	@Synchronized
+	override fun currentUserId(): String? = try {
+		loginClient
+			?.let { it.javaClass.getMethod("userId").invoke(it) as? String }
+			?.takeIf { it.isNotBlank() }
+	} catch (_: Exception) {
+		null
+	}
+
+	/** Signals an SDK unknown/missing-token result; never logs the throwable or token. */
+	private fun handleSessionExpired() {
+		onSessionExpiredListener?.invoke()
+	}
+
+	/**
+	 * True only for SDK results proving the access token is no longer accepted
+	 * (`M_UNKNOWN_TOKEN` / `M_MISSING_TOKEN`). Network, server and permission
+	 * failures stay transient so they never force a reconnect.
+	 */
+	private fun isUnauthorized(throwable: Throwable): Boolean {
+		val target = (throwable as? InvocationTargetException)?.targetException ?: throwable
+		if (target is IOException || target is InterruptedException) return false
+		if (target.javaClass.simpleName in EXPIRED_TOKEN_NAMES) return true
+		if (target.javaClass.simpleName == "MatrixApi") {
+			try {
+				val kind = target.javaClass.getMethod("getKind").invoke(target)
+				if (kind?.javaClass?.simpleName in EXPIRED_TOKEN_NAMES) return true
+				val code = target.javaClass.getMethod("getCode").invoke(target) as? String
+				if (code in EXPIRED_TOKEN_CODES) return true
+			} catch (_: ReflectiveOperationException) {
+			}
+		}
+		val msg = target.message.orEmpty()
+		return EXPIRED_TOKEN_CODES.any { msg.contains(it) }
+	}
+
 	private val activeDownloadDirs = java.util.Collections.newSetFromMap(
 		java.util.concurrent.ConcurrentHashMap<File, Boolean>(),
 	)
 	private val activeAttachmentRoots = java.util.Collections.newSetFromMap(
 		java.util.concurrent.ConcurrentHashMap<File, Boolean>(),
 	)
+
+	override fun prepareRoomNotifications(roomId: String): PreparedNotifications? {
+		val generation = synchronized(lifecycleLock) { activeGeneration } ?: return null
+		return object : PreparedNotifications {
+			override fun isCurrent() = synchronized(lifecycleLock) {
+				activeGeneration === generation
+			}
+			override fun readMuted() = access(null)
+			override fun setMuted(muted: Boolean) = access(muted)
+
+			private fun access(muted: Boolean?): Boolean? =
+				synchronized(this@ReflectiveMatrixHomeserverDiscoveryClient) {
+					if (!isCurrent()) return@synchronized null
+					val captured = loginClient ?: return@synchronized null
+					var room: Any? = null
+					var settings: Any? = null
+					try {
+						room = captured.javaClass.getMethod("getRoom", String::class.java)
+							.invoke(captured, roomId) ?: return@synchronized null
+						val membership = room.javaClass.getMethod("membership").invoke(room) as? Enum<*>
+						if (membership?.name != "JOINED") return@synchronized null
+						val encrypted = invokeCloseableValue(room, "isEncrypted", emptyArray(), emptyArray(), {})
+						val direct = invokeCloseableValue(room, "isDirect", emptyArray(), emptyArray(), {})
+						settings = invokeCloseableValue(
+							captured,
+							"getNotificationSettings",
+							emptyArray(),
+							emptyArray(),
+							::closeQuietly,
+						)
+						val types = arrayOf<Class<*>>(
+							String::class.java,
+							Boolean::class.javaPrimitiveType!!,
+							Boolean::class.javaPrimitiveType!!,
+						)
+						val args = arrayOf<Any?>(roomId, encrypted, direct)
+						if (muted == true) {
+							val mode = Class.forName("org.matrix.rustcomponents.sdk.RoomNotificationMode")
+							invokeUnit(
+								settings,
+								"setRoomNotificationMode",
+								arrayOf(String::class.java, mode),
+								arrayOf(roomId, mode.getField("MUTE").get(null)),
+							)
+						} else if (muted == false) {
+							invokeUnit(settings, "unmuteRoom", types, args)
+						}
+						val confirmed = invokeCloseableValue(
+							settings,
+							"getRoomNotificationSettings",
+							types,
+							args,
+							{},
+						)
+						if (!isCurrent()) return@synchronized null
+						val mode = confirmed.javaClass.getMethod("getMode").invoke(confirmed) as? Enum<*>
+						val confirmedMuted = when (mode?.name) {
+							"MUTE" -> true
+							"ALL_MESSAGES", "MENTIONS_AND_KEYWORDS_ONLY" -> false
+							else -> null
+						}
+						// An acknowledged write is not proof that the requested mode took effect.
+						if (muted != null && confirmedMuted != muted) null else confirmedMuted
+					} catch (e: InterruptedException) {
+						Thread.currentThread().interrupt()
+						null
+					} catch (e: Exception) {
+						if (isUnauthorized(e)) handleSessionExpired()
+						null
+					} catch (_: LinkageError) {
+						null
+					} finally {
+						closeQuietly(settings)
+						closeQuietly(room)
+					}
+				}
+		}
+	}
+
 	private class TypingLane {
 		val queue = java.util.ArrayDeque<() -> Unit>()
 		var busy = false
@@ -107,6 +245,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 	private val typingLanes = mutableMapOf<String, TypingLane>()
 	private val activeRoomSubscriptions = mutableSetOf<RoomSubscription>()
 	private val activeTypingSubscriptions = mutableSetOf<TypingSubscription>()
+	private val activeVerificationSessions = mutableSetOf<MatrixVerificationSessionHandle>()
 	private val inFlightReactions = java.util.Collections.synchronizedSet(mutableSetOf<String>())
 
 	// Unlike invokeUnit, this lane waits for real native completion, not a timeout. A hung
@@ -147,7 +286,12 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 								}
 							}
 							val target = room
-							if (target == null || (typing && !wanted())) {
+							val targetMembership = try {
+								(target?.javaClass?.getMethod("membership")?.invoke(target) as? Enum<*>)?.name
+							} catch (e: Exception) {
+								null
+							}
+							if (target == null || targetMembership != "JOINED" || (typing && !wanted())) {
 								complete()
 							} else {
 								synchronized(lifecycleLock) {
@@ -338,9 +482,11 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		var success = false
 		var claimedStore = false
 		var failureDetail: RecoverableErrorDetail? = null
+		var savedHomeserverUrl: String? = null
 		return try {
 			val sessionClass = Class.forName(SESSION_CLASS_NAME)
 			val session = readSessionFile(file, sessionClass, storeConfiguration)
+			savedHomeserverUrl = sessionClass.getMethod("getHomeserverUrl").invoke(session) as? String
 			claimStore(storeConfiguration)
 			claimedStore = true
 			val builderClass = Class.forName(CLIENT_BUILDER_CLASS_NAME)
@@ -348,7 +494,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			builder = track(
 				builders,
 				builderClass.getMethod("homeserverUrl", String::class.java)
-					.invoke(builder, sessionClass.getMethod("getHomeserverUrl").invoke(session)),
+					.invoke(builder, savedHomeserverUrl),
 			)
 			builder = track(builders, applyStore(builders, builder, builderClass, storeConfiguration))
 			builder =
@@ -370,9 +516,15 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		} catch (e: DiscoveryAdapterFailure) {
 			MatrixLoginClient.RestoreResult.NotFound
 		} catch (e: InvocationTargetException) {
-			val mapped = mapThrowable(e.targetException ?: e)
+			val target = e.targetException ?: e
+			val mapped = if (isUnauthorized(target)) {
+				handleSessionExpired()
+				RecoverableErrorDetail.SESSION_EXPIRED
+			} else {
+				mapThrowable(target)
+			}
 			failureDetail = mapped
-			MatrixLoginClient.RestoreResult.Failed(mapped)
+			MatrixLoginClient.RestoreResult.Failed(mapped, savedHomeserverUrl)
 		} catch (e: ReflectiveOperationException) {
 			MatrixLoginClient.RestoreResult.NotFound
 		} catch (e: LinkageError) {
@@ -459,13 +611,14 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 	}
 
 	private fun beginGeneration(generation: Any) {
-		val (detached, detachedTyping) = synchronized(lifecycleLock) {
+		val (detached, detachedTyping, detachedVerification) = synchronized(lifecycleLock) {
 			activeGeneration = generation
 			typingLanes.clear()
-			Pair(detachRoomSubscriptions(), detachTypingSubscriptions())
+			Triple(detachRoomSubscriptions(), detachTypingSubscriptions(), detachVerificationSessions())
 		}
 		cancelRoomSubscriptions(detached)
 		cancelTypingSubscriptions(detachedTyping)
+		cancelVerificationSessions(detachedVerification)
 		val previous = loginClient
 		loginClient = null
 		activeStore = null
@@ -685,6 +838,31 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		} catch (e: ClassCastException) {
 			emptyList()
 		} catch (e: InvocationTargetException) {
+			if (isUnauthorized(e)) handleSessionExpired()
+			emptyList()
+		} catch (e: ReflectiveOperationException) {
+			emptyList()
+		} catch (e: LinkageError) {
+			emptyList()
+		} finally {
+			rooms.forEach(::closeQuietly)
+		}
+	}
+
+	@Synchronized
+	override fun getInvitedRooms(limit: Int): List<MatrixRoomSnapshot> {
+		val client = loginClient ?: return emptyList()
+		var rooms = emptyList<Any>()
+		return try {
+			@Suppress("UNCHECKED_CAST")
+			rooms = client.javaClass.getMethod("rooms").invoke(client) as List<Any>
+			rooms.mapNotNull(::toInvitedRoomSnapshot)
+				.sortedBy { it.roomId }
+				.take(limit.coerceAtLeast(0))
+		} catch (e: ClassCastException) {
+			emptyList()
+		} catch (e: InvocationTargetException) {
+			if (isUnauthorized(e)) handleSessionExpired()
 			emptyList()
 		} catch (e: ReflectiveOperationException) {
 			emptyList()
@@ -723,11 +901,55 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			val displayName = (roomClass.getMethod("displayName").invoke(room) as? String)
 				?.takeIf { it.isNotEmpty() } ?: id
 			val (unreadCount, markedUnread) = readUnreadState(room)
-			MatrixRoomSnapshot(id, displayName, unreadCount, markedUnread, readTopic(room))
+			MatrixRoomSnapshot(
+				id,
+				displayName,
+				unreadCount,
+				markedUnread,
+				readTopic(room),
+				isDirect = readDirectFlag(room),
+			)
 		}
 	} catch (e: InvocationTargetException) {
 		null
 	} catch (e: ReflectiveOperationException) {
+		null
+	} catch (e: LinkageError) {
+		null
+	}
+
+	private fun toInvitedRoomSnapshot(room: Any): MatrixRoomSnapshot? = try {
+		val roomClass = room.javaClass
+		val isSpace = roomClass.getMethod("isSpace").invoke(room) as Boolean
+		val membership = roomClass.getMethod("membership").invoke(room)
+		val isInvited = (membership as? Enum<*>)?.name == "INVITED"
+		if (isSpace || !isInvited) {
+			null
+		} else {
+			val id = roomClass.getMethod("id").invoke(room) as String
+			val displayName = (roomClass.getMethod("displayName").invoke(room) as? String)
+				?.takeIf { it.isNotEmpty() } ?: id
+			MatrixRoomSnapshot(
+				roomId = id,
+				displayName = displayName,
+				unreadCount = null,
+				isMarkedUnread = null,
+				topic = readTopic(room),
+				isInvited = true,
+				isDirect = readDirectFlag(room),
+			)
+		}
+	} catch (e: InvocationTargetException) {
+		null
+	} catch (e: ReflectiveOperationException) {
+		null
+	} catch (e: LinkageError) {
+		null
+	}
+
+	private fun readDirectFlag(room: Any): Boolean? = try {
+		invokeCloseableValue(room, "isDirect", emptyArray(), emptyArray(), {}) as? Boolean
+	} catch (e: Exception) {
 		null
 	} catch (e: LinkageError) {
 		null
@@ -785,6 +1007,10 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		return try {
 			room = client.javaClass.getMethod("getRoom", String::class.java).invoke(client, roomId)
 				?: throw SnapshotAdapterFailure()
+			val membership = room.javaClass.getMethod("membership").invoke(room) as? Enum<*>
+			if (membership?.name != "JOINED") {
+				return null
+			}
 			val loadedTimeline =
 				invokeCloseableValue(room, "timeline", emptyArray(), emptyArray(), ::closeQuietly)
 			timeline = loadedTimeline
@@ -808,6 +1034,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			Thread.currentThread().interrupt()
 			initialSnapshot
 		} catch (e: Exception) {
+			if (isUnauthorized(e)) handleSessionExpired()
 			initialSnapshot
 		} catch (e: LinkageError) {
 			initialSnapshot
@@ -849,6 +1076,10 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		return try {
 			room = client.javaClass.getMethod("getRoom", String::class.java).invoke(client, roomId)
 				?: throw SnapshotAdapterFailure()
+			val membership = room.javaClass.getMethod("membership").invoke(room) as? Enum<*>
+			if (membership?.name != "JOINED") {
+				return false
+			}
 			val loadedTimeline =
 				invokeCloseableValue(room, "timeline", emptyArray(), emptyArray(), ::closeQuietly)
 			timeline = loadedTimeline
@@ -876,6 +1107,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			Thread.currentThread().interrupt()
 			false
 		} catch (e: Exception) {
+			if (isUnauthorized(e)) handleSessionExpired()
 			false
 		} catch (e: LinkageError) {
 			false
@@ -916,6 +1148,10 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		return try {
 			room = client.javaClass.getMethod("getRoom", String::class.java).invoke(client, roomId)
 				?: throw SnapshotAdapterFailure()
+			val membership = room.javaClass.getMethod("membership").invoke(room) as? Enum<*>
+			if (membership?.name != "JOINED") {
+				return false
+			}
 			val loadedTimeline =
 				invokeCloseableValue(room, "timeline", emptyArray(), emptyArray(), ::closeQuietly)
 			timeline = loadedTimeline
@@ -950,6 +1186,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			Thread.currentThread().interrupt()
 			false
 		} catch (e: Exception) {
+			if (isUnauthorized(e)) handleSessionExpired()
 			false
 		} catch (e: LinkageError) {
 			false
@@ -1008,6 +1245,533 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		}
 	}
 
+	override fun prepareJoinRoom(identifier: String): (() -> Boolean)? {
+		val value = identifier.trim()
+		if (!value.matches(Regex("[!#][^\\s:]+:[^\\s]+"))) return null
+		val generation = synchronized(lifecycleLock) { activeGeneration } ?: return null
+		var joined = false
+		return {
+			synchronized(this) {
+				fun current() = synchronized(lifecycleLock) { activeGeneration === generation }
+				if (!current()) return@synchronized false
+				if (joined) return@synchronized true
+				try {
+					val client = loginClient ?: return@synchronized false
+					val room = invokeCloseableValue(
+						client,
+						"joinRoomByIdOrAlias",
+						arrayOf(String::class.java, List::class.java),
+						arrayOf(value, emptyList<String>()),
+						::closeQuietly,
+					)
+					closeQuietly(room)
+					joined = current()
+					joined
+				} catch (_: InterruptedException) {
+					Thread.currentThread().interrupt()
+					false
+				} catch (e: Exception) {
+					if (isUnauthorized(e)) handleSessionExpired()
+					false
+				} catch (_: LinkageError) {
+					false
+				}
+			}
+		}
+	}
+
+	override fun getDeviceTrustState(): MatrixDeviceTrustState = synchronized(this) {
+		val client = loginClient ?: return MatrixDeviceTrustState.UNVERIFIED
+		try {
+			val encMethod = client.javaClass.methods.firstOrNull { it.name == "encryption" }
+				?: return MatrixDeviceTrustState.UNVERIFIED
+			val encryption = encMethod.invoke(client) ?: return MatrixDeviceTrustState.UNVERIFIED
+			val stateMethod = encryption.javaClass.methods.firstOrNull { it.name == "verificationState" }
+				?: return MatrixDeviceTrustState.UNVERIFIED
+			val state = stateMethod.invoke(encryption)
+			if (state?.toString() == "VERIFIED") {
+				MatrixDeviceTrustState.VERIFIED
+			} else {
+				MatrixDeviceTrustState.UNVERIFIED
+			}
+		} catch (_: Exception) {
+			MatrixDeviceTrustState.UNVERIFIED
+		}
+	}
+
+	override fun startVerification(
+		listener: (MatrixVerificationState) -> Unit,
+		timeoutMs: Long,
+	): MatrixVerificationSessionHandle? = synchronized(this) {
+		val generation = synchronized(lifecycleLock) { activeGeneration } ?: return null
+		val client = loginClient ?: return null
+		val ownUserId = currentUserId() ?: try {
+			client.javaClass.getMethod("userId").invoke(client) as? String
+		} catch (_: Exception) {
+			null
+		}
+		fun isCurrent() = synchronized(lifecycleLock) { activeGeneration === generation }
+		val controller = try {
+			invokeCloseableValue(
+				client,
+				"getSessionVerificationController",
+				emptyArray(),
+				emptyArray(),
+				::closeQuietly,
+			)
+		} catch (_: Exception) {
+			return null
+		}
+
+		val delegateClass = try {
+			Class.forName(
+				"org.matrix.rustcomponents.sdk.SessionVerificationControllerDelegate",
+				true,
+				client.javaClass.classLoader,
+			)
+		} catch (_: Exception) {
+			closeQuietly(controller)
+			return null
+		}
+
+		val scheduledFutureRef = AtomicReference<ScheduledFuture<*>?>()
+		val closed = AtomicBoolean(false)
+		val syncThreadRef = AtomicReference<Thread?>()
+		val handleRef = AtomicReference<MatrixVerificationSessionHandle?>()
+
+		val syncService = try {
+			val syncServiceMethod = client.javaClass.methods.firstOrNull {
+				it.name == "syncService" && it.parameterTypes.isEmpty()
+			}
+			if (syncServiceMethod != null) {
+				val builder = syncServiceMethod.invoke(client)
+				invokeCloseableValue(builder, "finish", emptyArray(), emptyArray(), ::closeQuietly)
+			} else {
+				null
+			}
+		} catch (_: Exception) {
+			null
+		}
+
+		if (syncService != null) {
+			typingExecutor.execute {
+				if (closed.get() || !isCurrent()) return@execute
+				try {
+					invokeUnit(syncService, "start", emptyArray(), emptyArray())
+				} catch (_: Exception) {}
+			}
+		} else {
+			val syncOnceMethod = client.javaClass.methods.firstOrNull { it.name == "syncOnceV2" }
+			if (syncOnceMethod != null) {
+				val syncSettingsClass = try {
+					Class.forName(
+						"org.matrix.rustcomponents.sdk.SyncSettingsV2",
+						true,
+						client.javaClass.classLoader,
+					)
+				} catch (_: Exception) {
+					null
+				}
+				val syncSettings = syncSettingsClass?.let { clazz ->
+					try {
+						clazz.constructors.firstOrNull { it.parameterCount == 4 }
+							?.newInstance(null, false, 3, null)
+					} catch (_: Exception) {
+						null
+					}
+				}
+				val thread = Thread({
+					while (!closed.get() && isCurrent()) {
+						try {
+							if (syncSettings != null) {
+								invokeUnit(
+									client,
+									"syncOnceV2",
+									arrayOf(syncSettingsClass),
+									arrayOf(syncSettings),
+								)
+							} else {
+								invokeUnit(client, "syncOnceV2", emptyArray(), emptyArray())
+							}
+						} catch (_: Exception) {
+							if (closed.get() || !isCurrent()) break
+							try {
+								Thread.sleep(1000)
+							} catch (_: InterruptedException) {
+								break
+							}
+						}
+					}
+				}, "matrix-verification-sync").apply {
+					isDaemon = true
+					start()
+				}
+				syncThreadRef.set(thread)
+			}
+		}
+
+		fun stopTimer() {
+			scheduledFutureRef.getAndSet(null)?.cancel(false)
+		}
+
+		fun stopPollingThread() {
+			syncThreadRef.getAndSet(null)?.interrupt()
+		}
+
+		fun stopSyncService() {
+			if (syncService != null) {
+				try {
+					invokeUnit(syncService, "stop", emptyArray(), emptyArray())
+				} catch (_: Exception) {}
+				closeQuietly(syncService)
+			}
+		}
+
+		fun finishSession(terminalState: MatrixVerificationState) {
+			if (closed.compareAndSet(false, true)) {
+				stopTimer()
+				stopPollingThread()
+				synchronized(lifecycleLock) {
+					activeVerificationSessions.remove(handleRef.get())
+				}
+				typingExecutor.execute {
+					stopSyncService()
+					closeQuietly(controller)
+				}
+				if (isCurrent()) {
+					listener(terminalState)
+				}
+			}
+		}
+
+		fun cancelAndFail() {
+			if (closed.compareAndSet(false, true)) {
+				stopTimer()
+				stopPollingThread()
+				synchronized(lifecycleLock) {
+					activeVerificationSessions.remove(handleRef.get())
+				}
+				typingExecutor.execute {
+					try {
+						invokeUnit(controller, "cancelVerification", emptyArray(), emptyArray())
+					} catch (_: Exception) {}
+					stopSyncService()
+					closeQuietly(controller)
+				}
+				if (isCurrent()) {
+					listener(MatrixVerificationState.Failed)
+				}
+			}
+		}
+
+		val hasNonEmptyData = AtomicBoolean(false)
+
+		val delegateProxy = Proxy.newProxyInstance(
+			delegateClass.classLoader,
+			arrayOf(delegateClass),
+		) { _, method, args ->
+			when (method.name) {
+				"didReceiveVerificationRequest" -> {
+					val details = args?.getOrNull(0)
+					val flowId = details?.let { d ->
+						try {
+							d.javaClass.getMethod("getFlowId").invoke(d) as? String
+						} catch (_: Exception) {
+							null
+						}
+					}
+					val senderId = details?.let { d ->
+						try {
+							val profile = d.javaClass.getMethod("getSenderProfile").invoke(d)
+							profile?.javaClass?.getMethod("getUserId")?.invoke(profile) as? String
+						} catch (_: Exception) {
+							null
+						} ?: run {
+							try {
+								d.javaClass.getMethod("getUserId").invoke(d) as? String
+							} catch (_: Exception) {
+								null
+							}
+						} ?: run {
+							try {
+								d.javaClass.getMethod("getSenderId").invoke(d) as? String
+							} catch (_: Exception) {
+								null
+							}
+						}
+					}
+					typingExecutor.execute {
+						if (closed.get() || !isCurrent()) return@execute
+						if (ownUserId.isNullOrBlank() ||
+							senderId.isNullOrBlank() ||
+							senderId.trim() != ownUserId.trim()
+						) {
+							return@execute
+						}
+						try {
+							if (flowId != null) {
+								try {
+									invokeUnit(
+										controller,
+										"acknowledgeVerificationRequest",
+										arrayOf(String::class.java, String::class.java),
+										arrayOf(senderId, flowId),
+									)
+								} catch (_: Exception) {}
+							}
+							if (closed.get() || !isCurrent()) return@execute
+							invokeUnit(controller, "acceptVerificationRequest", emptyArray(), emptyArray())
+						} catch (_: Exception) {}
+					}
+					null
+				}
+				"didAcceptVerificationRequest" -> {
+					typingExecutor.execute {
+						if (closed.get() || !isCurrent()) return@execute
+						try {
+							invokeUnit(controller, "startSasVerification", emptyArray(), emptyArray())
+						} catch (_: Exception) {}
+					}
+					null
+				}
+				"didStartSasVerification" -> {
+					if (!closed.get() && isCurrent()) listener(MatrixVerificationState.AwaitingPeer)
+					null
+				}
+				"didReceiveVerificationData" -> {
+					if (!closed.get() && isCurrent()) {
+						val data = args?.getOrNull(0)
+						val emojis = extractVerificationEmojis(data)
+						if (emojis.isEmpty()) {
+							cancelAndFail()
+						} else {
+							hasNonEmptyData.set(true)
+							listener(MatrixVerificationState.Comparing(emojis))
+						}
+					}
+					null
+				}
+				"didFinish" -> {
+					if (isCurrent()) finishSession(MatrixVerificationState.Verified)
+					null
+				}
+				"didCancel" -> {
+					if (isCurrent()) finishSession(MatrixVerificationState.Cancelled)
+					null
+				}
+				"didFail" -> {
+					if (isCurrent()) finishSession(MatrixVerificationState.Failed)
+					null
+				}
+				"hashCode" -> System.identityHashCode(controller)
+				"equals" -> false
+				"toString" -> "SessionVerificationControllerDelegateProxy"
+				else -> null
+			}
+		}
+
+		try {
+			controller.javaClass.getMethod("setDelegate", delegateClass).invoke(controller, delegateProxy)
+			if (!closed.get() && isCurrent()) listener(MatrixVerificationState.Requesting)
+			typingExecutor.execute {
+				if (closed.get() || !isCurrent()) return@execute
+				try {
+					invokeUnit(controller, "requestDeviceVerification", emptyArray(), emptyArray())
+				} catch (_: Exception) {
+					finishSession(MatrixVerificationState.Failed)
+				}
+			}
+		} catch (e: Exception) {
+			finishSession(MatrixVerificationState.Failed)
+			return null
+		}
+
+		val timeoutTask = verificationTimerExecutor.schedule({
+			if (closed.compareAndSet(false, true)) {
+				stopTimer()
+				stopPollingThread()
+				synchronized(lifecycleLock) {
+					activeVerificationSessions.remove(handleRef.get())
+				}
+				typingExecutor.execute {
+					try {
+						invokeUnit(controller, "cancelVerification", emptyArray(), emptyArray())
+					} catch (_: Exception) {}
+					stopSyncService()
+					closeQuietly(controller)
+				}
+				if (isCurrent()) {
+					listener(MatrixVerificationState.TimedOut)
+				}
+			}
+		}, timeoutMs, TimeUnit.MILLISECONDS)
+		scheduledFutureRef.set(timeoutTask)
+
+		val confirmed = AtomicBoolean(false)
+
+		val handle = object : MatrixVerificationSessionHandle {
+			override fun confirm() {
+				if (!hasNonEmptyData.get()) return
+				if (closed.get() || !isCurrent() || !confirmed.compareAndSet(false, true)) return
+				typingExecutor.execute {
+					if (closed.get() || !isCurrent()) return@execute
+					try {
+						invokeUnit(controller, "approveVerification", emptyArray(), emptyArray())
+					} catch (_: Exception) {
+						finishSession(MatrixVerificationState.Failed)
+					}
+				}
+			}
+
+			override fun decline() {
+				if (closed.compareAndSet(false, true)) {
+					stopTimer()
+					stopPollingThread()
+					synchronized(lifecycleLock) {
+						activeVerificationSessions.remove(this)
+					}
+					typingExecutor.execute {
+						try {
+							invokeUnit(controller, "declineVerification", emptyArray(), emptyArray())
+						} catch (_: Exception) {}
+						stopSyncService()
+						closeQuietly(controller)
+					}
+					if (isCurrent()) {
+						listener(MatrixVerificationState.Failed)
+					}
+				}
+			}
+
+			override fun cancel() {
+				if (closed.compareAndSet(false, true)) {
+					stopTimer()
+					stopPollingThread()
+					synchronized(lifecycleLock) {
+						activeVerificationSessions.remove(this)
+					}
+					typingExecutor.execute {
+						try {
+							invokeUnit(controller, "cancelVerification", emptyArray(), emptyArray())
+						} catch (_: Exception) {}
+						stopSyncService()
+						closeQuietly(controller)
+					}
+					if (isCurrent()) {
+						listener(MatrixVerificationState.Cancelled)
+					}
+				}
+			}
+		}
+		val current = synchronized(lifecycleLock) {
+			if (activeGeneration === generation && !closed.get()) {
+				handleRef.set(handle)
+				activeVerificationSessions.add(handle)
+				true
+			} else {
+				false
+			}
+		}
+		if (!current) {
+			handle.cancel()
+			return null
+		}
+
+		return handle
+	}
+
+	private fun extractVerificationEmojis(data: Any?): List<MatrixVerificationEmoji> {
+		if (data == null) return emptyList()
+		try {
+			val getEmojisMethod = data.javaClass.methods.firstOrNull { it.name == "getEmojis" }
+			if (getEmojisMethod != null) {
+				val list = getEmojisMethod.invoke(data) as? List<*> ?: return emptyList()
+				return list.mapNotNull { item ->
+					if (item == null) return@mapNotNull null
+					val symbol = item.javaClass.getMethod("symbol").invoke(item) as? String ?: ""
+					val desc = item.javaClass.getMethod("description").invoke(item) as? String ?: ""
+					MatrixVerificationEmoji(symbol, desc)
+				}
+			}
+			val getValuesMethod = data.javaClass.methods.firstOrNull { it.name == "getValues" }
+			if (getValuesMethod != null) {
+				val list = getValuesMethod.invoke(data) as? List<*> ?: return emptyList()
+				return list.mapNotNull { item ->
+					item?.let { MatrixVerificationEmoji(it.toString(), "") }
+				}
+			}
+		} catch (_: Exception) {}
+		return emptyList()
+	}
+
+	override fun prepareAcceptInvitation(roomId: String): PreparedAccept? {
+		val generation = synchronized(lifecycleLock) { activeGeneration } ?: return null
+		return object : PreparedAccept {
+			private var accepted = false
+			override fun isCurrent() = synchronized(lifecycleLock) { activeGeneration === generation }
+			override fun accept(): Boolean = synchronized(this@ReflectiveMatrixHomeserverDiscoveryClient) {
+				if (!isCurrent()) return@synchronized false
+				if (accepted) return@synchronized true
+				var room: Any? = null
+				try {
+					val client = loginClient ?: return@synchronized false
+					room = client.javaClass.getMethod("getRoom", String::class.java).invoke(client, roomId)
+						?: return@synchronized false
+					val membership = room.javaClass.getMethod("membership").invoke(room) as? Enum<*>
+					if (membership?.name == "JOINED") return@synchronized true
+					if (membership?.name != "INVITED") return@synchronized false
+					invokeUnit(room, "join", emptyArray(), emptyArray())
+					accepted = isCurrent()
+					accepted
+				} catch (e: InterruptedException) {
+					Thread.currentThread().interrupt()
+					false
+				} catch (e: Exception) {
+					if (isUnauthorized(e)) handleSessionExpired()
+					false
+				} catch (e: LinkageError) {
+					false
+				} finally {
+					closeQuietly(room)
+				}
+			}
+		}
+	}
+
+	override fun prepareDeclineInvitation(roomId: String): PreparedDecline? {
+		val generation = synchronized(lifecycleLock) { activeGeneration } ?: return null
+		return object : PreparedDecline {
+			private var declined = false
+			override fun isCurrent() = synchronized(lifecycleLock) { activeGeneration === generation }
+			override fun decline(): Boolean = synchronized(this@ReflectiveMatrixHomeserverDiscoveryClient) {
+				if (!isCurrent()) return@synchronized false
+				if (declined) return@synchronized true
+				var room: Any? = null
+				try {
+					val client = loginClient ?: return@synchronized false
+					room = client.javaClass.getMethod("getRoom", String::class.java).invoke(client, roomId)
+						?: return@synchronized false
+					val membership = room.javaClass.getMethod("membership").invoke(room) as? Enum<*>
+					if (membership?.name == "LEFT") return@synchronized true
+					if (membership?.name != "INVITED") return@synchronized false
+					invokeUnit(room, "leave", emptyArray(), emptyArray())
+					declined = isCurrent()
+					declined
+				} catch (e: InterruptedException) {
+					Thread.currentThread().interrupt()
+					false
+				} catch (e: Exception) {
+					if (isUnauthorized(e)) handleSessionExpired()
+					false
+				} catch (e: LinkageError) {
+					false
+				} finally {
+					closeQuietly(room)
+				}
+			}
+		}
+	}
+
 	override fun prepareLeave(roomId: String): PreparedLeave? {
 		val generation = synchronized(lifecycleLock) { activeGeneration } ?: return null
 		return object : PreparedLeave {
@@ -1025,6 +1789,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 					Thread.currentThread().interrupt()
 					false
 				} catch (e: Exception) {
+					if (isUnauthorized(e)) handleSessionExpired()
 					false
 				} catch (e: LinkageError) {
 					false
@@ -1041,6 +1806,10 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		return try {
 			room = client.javaClass.getMethod("getRoom", String::class.java).invoke(client, roomId)
 				?: throw SnapshotAdapterFailure()
+			val membership = room.javaClass.getMethod("membership").invoke(room) as? Enum<*>
+			if (membership?.name != "JOINED") {
+				return false
+			}
 			if (!unread) {
 				val receiptTypeClass = Class.forName(RECEIPT_TYPE_CLASS_NAME)
 				val readReceiptType = receiptTypeClass.getField("READ_PRIVATE").get(null)
@@ -1053,6 +1822,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			Thread.currentThread().interrupt()
 			false
 		} catch (e: Exception) {
+			if (isUnauthorized(e)) handleSessionExpired()
 			false
 		} catch (e: LinkageError) {
 			false
@@ -1069,6 +1839,10 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		return try {
 			room = client.javaClass.getMethod("getRoom", String::class.java).invoke(client, roomId)
 				?: throw SnapshotAdapterFailure()
+			val membership = room.javaClass.getMethod("membership").invoke(room) as? Enum<*>
+			if (membership?.name != "JOINED") {
+				return false
+			}
 			val loadedTimeline =
 				invokeCloseableValue(room, "timeline", emptyArray(), emptyArray(), ::closeQuietly)
 			timeline = loadedTimeline
@@ -1090,6 +1864,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			Thread.currentThread().interrupt()
 			false
 		} catch (e: Exception) {
+			if (isUnauthorized(e)) handleSessionExpired()
 			false
 		} catch (e: LinkageError) {
 			false
@@ -1156,6 +1931,12 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 				client.javaClass.getMethod("getRoom", String::class.java).invoke(client, roomId)
 					?: throw SnapshotAdapterFailure()
 			room = loadedRoom
+			val membership = loadedRoom.javaClass.getMethod("membership").invoke(loadedRoom) as? Enum<*>
+			if (membership?.name != "JOINED") {
+				closeQuietly(loadedRoom)
+				inFlightReactions.remove(flightKey)
+				return false
+			}
 			val loadedTimeline =
 				invokeCloseableValue(loadedRoom, "timeline", emptyArray(), emptyArray(), ::closeQuietly)
 			timeline = loadedTimeline
@@ -1340,11 +2121,17 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 				val loadedRoom = existingRoom ?: (
 					client.javaClass.getMethod("getRoom", String::class.java).invoke(client, roomId)
 						?: throw SnapshotAdapterFailure()
-				)
+					)
+				val membership = loadedRoom.javaClass.getMethod("membership").invoke(loadedRoom) as? Enum<*>
+				if (membership?.name != "JOINED") {
+					closeQuietly(loadedRoom)
+					inFlightReactions.remove(flightKey)
+					return null
+				}
 				roomRef.set(loadedRoom)
 				val loadedTimeline = existingTimeline ?: (
 					invokeCloseableValue(loadedRoom, "timeline", emptyArray(), emptyArray(), ::closeQuietly)
-				)
+					)
 				timelineRef.set(loadedTimeline)
 
 				val eventIdClass = Class.forName(EVENT_ID_CLASS_NAME)
@@ -1516,6 +2303,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			Thread.currentThread().interrupt()
 			false
 		} catch (e: Exception) {
+			if (isUnauthorized(e)) handleSessionExpired()
 			false
 		} catch (e: LinkageError) {
 			false
@@ -1591,7 +2379,8 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 				return null
 			}
 			val result = try {
-				Result.success(reduceTimelineDiffs(diffs).mapNotNull(::toMessageSnapshot))
+				val rawSnapshots = reduceTimelineDiffs(diffs).mapNotNull(::toMessageSnapshot)
+				Result.success(applyReceiptStates(rawSnapshots))
 			} catch (e: Exception) {
 				Result.failure(e)
 			} catch (e: LinkageError) {
@@ -1618,6 +2407,28 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 		}
 	}
 
+	private fun applyReceiptStates(
+		snapshots: List<MatrixMessageSnapshot>,
+	): List<MatrixMessageSnapshot> {
+		if (snapshots.isEmpty()) return emptyList()
+		val latestPeerReadIndex = snapshots.indexOfLast { it.hasPeerReceipt }
+		if (latestPeerReadIndex == -1) {
+			return snapshots
+		}
+		return snapshots.mapIndexed { index, snapshot ->
+			if (snapshot.isOutgoing) {
+				val state = if (index <= latestPeerReadIndex) {
+					ConnectorMessageReceiptState.READ
+				} else {
+					ConnectorMessageReceiptState.UNREAD
+				}
+				snapshot.copy(receiptState = state)
+			} else {
+				snapshot
+			}
+		}
+	}
+
 	private fun deduplicateSnapshots(
 		snapshots: List<MatrixMessageSnapshot>,
 	): List<MatrixMessageSnapshot> {
@@ -1631,13 +2442,23 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 				mergeSnapshots(existing, snapshot)
 			}
 		}
-		return deduplicated.values.toList()
+		return applyReceiptStates(deduplicated.values.toList())
 	}
 
 	private fun mergeSnapshots(
 		first: MatrixMessageSnapshot,
 		second: MatrixMessageSnapshot,
 	): MatrixMessageSnapshot {
+		val hasPeerReceipt = first.hasPeerReceipt || second.hasPeerReceipt
+		val receiptState = when {
+			second.receiptState == ConnectorMessageReceiptState.READ ||
+				first.receiptState == ConnectorMessageReceiptState.READ ->
+				ConnectorMessageReceiptState.READ
+			second.receiptState == ConnectorMessageReceiptState.UNREAD ||
+				first.receiptState == ConnectorMessageReceiptState.UNREAD ->
+				ConnectorMessageReceiptState.UNREAD
+			else -> ConnectorMessageReceiptState.UNKNOWN
+		}
 		if (first.type == ConnectorMessageType.DELETED ||
 			second.type == ConnectorMessageType.DELETED
 		) {
@@ -1648,6 +2469,8 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 				isEdited = false,
 				attachment = null,
 				reactions = emptyList(),
+				receiptState = receiptState,
+				hasPeerReceipt = hasPeerReceipt,
 			)
 		}
 		val base = when {
@@ -1665,6 +2488,8 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			reactions = base.reactions,
 			attachment = attachment,
 			isReply = isReply,
+			receiptState = receiptState,
+			hasPeerReceipt = hasPeerReceipt,
 		)
 	}
 
@@ -1838,6 +2663,16 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 
 	private fun cancelTypingSubscriptions(subscriptions: List<TypingSubscription>) {
 		subscriptions.forEach { it.cancel() }
+	}
+
+	private fun detachVerificationSessions(): List<MatrixVerificationSessionHandle> {
+		val detached = activeVerificationSessions.toList()
+		activeVerificationSessions.clear()
+		return detached
+	}
+
+	private fun cancelVerificationSessions(sessions: List<MatrixVerificationSessionHandle>) {
+		sessions.forEach { it.cancel() }
 	}
 
 	@Synchronized
@@ -2022,8 +2857,29 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 				} else {
 					false
 				}
-				ConnectorReactionSummary(key, senders.size, isOwn)
+				val senderIds = senders.take(ConnectorReactionSummary.MAX_SENDERS).mapNotNull { sender ->
+					try {
+						(sender?.javaClass?.getMethod("getSenderId")?.invoke(sender) as? String)
+							?.takeIf { it.isNotBlank() }
+					} catch (ignored: Exception) {
+						null
+					}
+				}
+				ConnectorReactionSummary(key, senders.size, isOwn, senderIds)
 			}
+		}
+	}
+
+	private fun hasPeerReadReceipt(event: Any, currentUserId: String?): Boolean {
+		if (currentUserId.isNullOrBlank()) return false
+		return try {
+			val receipts = event.javaClass.getMethod("getReadReceipts").invoke(event) as? Map<*, *>
+				?: return false
+			receipts.keys.any { key ->
+				key is String && key.isNotBlank() && key != currentUserId
+			}
+		} catch (ignored: Exception) {
+			false
 		}
 	}
 
@@ -2037,6 +2893,12 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			if (content.javaClass.simpleName != "MsgLike") return null
 			val msgLike = content.javaClass.getMethod("getContent").invoke(content)
 			val kind = msgLike.javaClass.getMethod("getKind").invoke(msgLike)
+			val currentUserId = try {
+				loginClient?.let { it.javaClass.getMethod("userId").invoke(it) as? String }
+			} catch (ignored: Exception) {
+				null
+			}
+			val hasPeerReceipt = hasPeerReadReceipt(event, currentUserId)
 			// sdk-android:26.08.05 exposes Redacted as a payload-free singleton.
 			if (kind.javaClass.simpleName == "Redacted") {
 				val timestamp = eventClass.getMethod(TIMESTAMP_GETTER_NAME).invoke(event) as Long
@@ -2047,6 +2909,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 					originServerTimestampSeconds = (timestamp.toULong() / 1_000uL).toLong(),
 					isOutgoing = eventClass.getMethod("isOwn").invoke(event) as Boolean,
 					type = ConnectorMessageType.DELETED,
+					hasPeerReceipt = hasPeerReceipt,
 				)
 			}
 			if (kind.javaClass.simpleName != "Message") return null
@@ -2058,11 +2921,6 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 			// mx007_m3_item2_timeline_scoping.md), so no separate destroy call is needed here,
 			// consistent with message/kind/msgLike/content also being left undestroyed.
 			val inReplyTo = msgLike.javaClass.getMethod("getInReplyTo").invoke(msgLike)
-			val currentUserId = try {
-				loginClient?.let { it.javaClass.getMethod("userId").invoke(it) as? String }
-			} catch (ignored: Exception) {
-				null
-			}
 			val reactions = readReactionSummaries(msgLike, currentUserId)
 			val rawTypeName = messageType.javaClass.simpleName
 			val typeName = if (rawTypeName == "Companion") {
@@ -2086,6 +2944,7 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 				isReply = inReplyTo != null,
 				reactions = reactions,
 				attachment = attachment,
+				hasPeerReceipt = hasPeerReceipt,
 			)
 		} finally {
 			destroyQuietly(event)
@@ -2552,16 +3411,18 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 
 	@Synchronized
 	override fun logout() {
-		val (detached, detachedTyping) = synchronized(lifecycleLock) {
+		val (detached, detachedTyping, detachedVerification) = synchronized(lifecycleLock) {
 			activeGeneration = null
 			typingLanes.clear()
 			val r = detachRoomSubscriptions()
 			val t = detachTypingSubscriptions()
+			val v = detachVerificationSessions()
 			activeStore?.let { sessionFile(it).delete() }
-			Pair(r, t)
+			Triple(r, t, v)
 		}
 		cancelRoomSubscriptions(detached)
 		cancelTypingSubscriptions(detachedTyping)
+		cancelVerificationSessions(detachedVerification)
 		val downloadDirsToClear = synchronized(activeDownloadDirs) {
 			val copy = ArrayList(activeDownloadDirs)
 			activeDownloadDirs.clear()
@@ -2611,13 +3472,14 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 
 	@Synchronized
 	override fun close() {
-		val (detached, detachedTyping) = synchronized(lifecycleLock) {
+		val (detached, detachedTyping, detachedVerification) = synchronized(lifecycleLock) {
 			activeGeneration = null
 			typingLanes.clear()
-			Pair(detachRoomSubscriptions(), detachTypingSubscriptions())
+			Triple(detachRoomSubscriptions(), detachTypingSubscriptions(), detachVerificationSessions())
 		}
 		cancelRoomSubscriptions(detached)
 		cancelTypingSubscriptions(detachedTyping)
+		cancelVerificationSessions(detachedVerification)
 		val downloadDirsToClear = synchronized(activeDownloadDirs) {
 			val copy = ArrayList(activeDownloadDirs)
 			activeDownloadDirs.clear()
@@ -2851,6 +3713,8 @@ class ReflectiveMatrixHomeserverDiscoveryClient(
 
 	private companion object {
 		val ATTACHMENT_TYPE_NAMES = setOf("File", "Image", "Video", "Audio")
+		val EXPIRED_TOKEN_NAMES = setOf("UnknownToken", "MissingToken")
+		val EXPIRED_TOKEN_CODES = setOf("M_UNKNOWN_TOKEN", "M_MISSING_TOKEN")
 		val openedStores = HashSet<String>()
 		const val CLIENT_BUILDER_CLASS_NAME = "org.matrix.rustcomponents.sdk.ClientBuilder"
 		const val SQLITE_STORE_BUILDER_CLASS_NAME = "org.matrix.rustcomponents.sdk.SqliteStoreBuilder"

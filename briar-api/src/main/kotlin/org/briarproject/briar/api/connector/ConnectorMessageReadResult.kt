@@ -4,4 +4,6 @@ sealed class ConnectorMessageReadResult {
 	data class Success(val messages: List<ConnectorMessage>) : ConnectorMessageReadResult()
 
 	object LoadFailed : ConnectorMessageReadResult()
+
+	object SessionExpired : ConnectorMessageReadResult()
 }

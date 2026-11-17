@@ -1,5 +1,6 @@
 package org.briarproject.briar.matrix
 
+import org.briarproject.briar.api.connector.ConnectorRoomNotifications.PreparedNotifications
 import org.briarproject.bramble.api.system.Clock
 import org.briarproject.briar.api.connector.ConnectorAttachmentMetadata
 import org.briarproject.briar.api.connector.ConnectorFileDownloader
@@ -13,9 +14,14 @@ import org.briarproject.briar.api.connector.ConnectorReactionRemover
 import org.briarproject.briar.api.connector.ConnectorReactionSender
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult.LoadFailed
+import org.briarproject.briar.api.connector.ConnectorMessageReadResult.SessionExpired
 import org.briarproject.briar.api.connector.ConnectorMessageReadResult.Success
 import org.briarproject.briar.api.connector.ConnectorMessageType
+import org.briarproject.briar.api.connector.ConnectorNavigationContext
 import org.briarproject.briar.api.connector.ConnectorReadMarker
+import org.briarproject.briar.api.connector.ConnectorReconnectAction
+import org.briarproject.briar.api.connector.ConnectorRoomInvitationDecliner
+import org.briarproject.briar.api.connector.ConnectorRoomInvitationAccepter
 import org.briarproject.briar.api.connector.ConnectorRoomLeaver
 import org.briarproject.briar.api.connector.ConnectorRoomObserver
 import org.briarproject.briar.api.connector.ConnectorSource
@@ -28,6 +34,7 @@ import org.briarproject.briar.api.connector.ConnectorUnreadMarker
 import org.briarproject.briar.api.connector.ConnectorTypingSender
 import org.briarproject.briar.api.connector.ConnectorTypingObserver
 import org.briarproject.briar.api.matrix.MatrixAuthSession
+import org.briarproject.briar.api.matrix.MatrixAuthSession.RecoverableErrorDetail.SESSION_EXPIRED
 import org.briarproject.briar.api.matrix.MatrixAuthState
 import org.briarproject.briar.api.matrix.MatrixConnector
 
@@ -62,7 +69,9 @@ class MatrixRoomConnector @JvmOverloads constructor(
 	private val clock: Clock,
 	private val recentThreadsBudgetMs: Long = DEFAULT_RECENT_THREADS_BUDGET_MS,
 	private val fileDownloadClient: MatrixFileDownloadClient? = null,
+	private val maxInvitations: Int = DEFAULT_INVITATION_LIMIT,
 ) : MatrixConnector,
+	org.briarproject.briar.api.connector.ConnectorRoomNotifications,
 	ConnectorTextSender,
 	ConnectorReplySender,
 	ConnectorImageSender,
@@ -71,6 +80,8 @@ class MatrixRoomConnector @JvmOverloads constructor(
 	ConnectorReadMarker,
 	ConnectorUnreadMarker,
 	ConnectorRoomLeaver,
+	ConnectorRoomInvitationAccepter,
+	ConnectorRoomInvitationDecliner,
 	ConnectorTypingSender,
 	ConnectorMessageDeleter,
 	ConnectorMessageEditor,
@@ -78,12 +89,37 @@ class MatrixRoomConnector @JvmOverloads constructor(
 	ConnectorReactionRemover,
 	ConnectorRoomObserver,
 	ConnectorTypingObserver,
-	ConnectorThumbnailLoader {
+	ConnectorThumbnailLoader,
+	ConnectorReconnectAction {
 	override val source: ConnectorSource = ConnectorSources.MATRIX
 
 	override fun isEnabled(): Boolean = true
 
-	override fun isAuthorized(): Boolean = authSession.getSnapshot().authState == MatrixAuthState.READY
+	override fun isSessionExpired(): Boolean = authSession.getSnapshot().errorDetail == SESSION_EXPIRED
+
+	override fun isAuthorized(): Boolean =
+		!isSessionExpired() && authSession.getSnapshot().authState == MatrixAuthState.READY
+
+	override fun prepareReconnect(
+		navigationContext: ConnectorNavigationContext?,
+	): ConnectorReconnectAction.PreparedReconnect? {
+		if (!isEnabled() || !isSessionExpired()) return null
+		return object : ConnectorReconnectAction.PreparedReconnect {
+			override val navigationContext: ConnectorNavigationContext? = navigationContext
+			override fun isCurrent(): Boolean = isSessionExpired()
+			override fun reconnect(): Boolean = isCurrent()
+		}
+	}
+
+	override fun prepareRoomNotifications(threadId: String): PreparedNotifications? {
+		if (!isAuthorized()) return null
+		val prepared = roomSnapshotClient.prepareRoomNotifications(threadId) ?: return null
+		return object : PreparedNotifications {
+			override fun isCurrent() = isAuthorized() && prepared.isCurrent()
+			override fun readMuted() = if (isCurrent()) prepared.readMuted() else null
+			override fun setMuted(muted: Boolean) = if (isCurrent()) prepared.setMuted(muted) else null
+		}
+	}
 
 	override fun getThreadTopic(threadId: String): String? = if (isAuthorized()) {
 		roomSnapshotClient.getRoomTopic(threadId)
@@ -98,7 +134,15 @@ class MatrixRoomConnector @JvmOverloads constructor(
 		// No bounded SDK refresh exists using the verified sdk-android 26.08.05 call sequence.
 		// Stopping here for scope splitting instead of inventing Fake/V2 Sync APIs.
 		val deadlineMs = clock.currentTimeMillis() + recentThreadsBudgetMs
-		return roomSnapshotClient.getJoinedRooms(limit).map { snapshot ->
+		val joinedSnapshots = roomSnapshotClient.getJoinedRooms(limit)
+		val invitationLimit = minOf(limit.coerceAtLeast(0), maxInvitations)
+		val invitedSnapshots = if (invitationLimit > 0) {
+			roomSnapshotClient.getInvitedRooms(invitationLimit).take(invitationLimit)
+		} else {
+			emptyList()
+		}
+
+		val joinedThreads = joinedSnapshots.map { snapshot ->
 			val latest = if (clock.currentTimeMillis() < deadlineMs) {
 				messageSnapshotClient.getRecentMessages(snapshot.roomId, 1)?.lastOrNull()
 			} else {
@@ -117,13 +161,48 @@ class MatrixRoomConnector @JvmOverloads constructor(
 				unreadCount = snapshot.unreadCount,
 				isMarkedUnread = snapshot.isMarkedUnread,
 				topic = snapshot.topic,
+				isInvited = false,
+				isDirect = snapshot.isDirect,
 			)
 		}
+
+		val invitedThreads = invitedSnapshots.map { snapshot ->
+			ConnectorThread(
+				source = source,
+				threadId = snapshot.roomId,
+				title = snapshot.displayName,
+				latestActivityDateSeconds = 0,
+				latestMessageText = snapshot.topic ?: "",
+				isLatestMessageOutgoing = false,
+				latestMessageType = ConnectorMessageType.TEXT,
+				unreadCount = null,
+				isMarkedUnread = null,
+				topic = snapshot.topic,
+				isInvited = true,
+				isDirect = snapshot.isDirect,
+			)
+		}
+
+		val seen = HashSet<String>()
+		val result = ArrayList<ConnectorThread>()
+		for (thread in joinedThreads) {
+			if (seen.add(thread.threadId)) {
+				result.add(thread)
+			}
+		}
+		for (thread in invitedThreads) {
+			if (seen.add(thread.threadId)) {
+				result.add(thread)
+			}
+		}
+		return result
 	}
 
 	override fun getRecentMessageReadResult(threadId: String, limit: Int): ConnectorMessageReadResult {
+		if (isSessionExpired()) return SessionExpired
 		if (!isAuthorized()) return LoadFailed
-		val snapshots = messageSnapshotClient.getRecentMessages(threadId, limit) ?: return LoadFailed
+		val snapshots = messageSnapshotClient.getRecentMessages(threadId, limit)
+			?: return if (isSessionExpired()) SessionExpired else LoadFailed
 		return Success(
 			snapshots.map { snapshot ->
 				ConnectorMessage(
@@ -141,6 +220,7 @@ class MatrixRoomConnector @JvmOverloads constructor(
 					isReply = snapshot.isReply,
 					reactions = snapshot.reactions,
 					attachment = snapshot.attachment,
+					receiptState = snapshot.receiptState,
 				)
 			},
 		)
@@ -191,6 +271,16 @@ class MatrixRoomConnector @JvmOverloads constructor(
 
 	override fun prepareMarkUnread(threadId: String): ConnectorUnreadMarker.PreparedMarkUnread? =
 		if (isAuthorized()) messageSendClient.prepareMarkUnread(threadId) else null
+
+	override fun prepareAcceptInvitation(
+		threadId: String,
+	): ConnectorRoomInvitationAccepter.PreparedAccept? =
+		if (isAuthorized()) roomSnapshotClient.prepareAcceptInvitation(threadId) else null
+
+	override fun prepareDeclineInvitation(
+		threadId: String,
+	): ConnectorRoomInvitationDecliner.PreparedDecline? =
+		if (isAuthorized()) roomSnapshotClient.prepareDeclineInvitation(threadId) else null
 
 	override fun prepareLeave(threadId: String): ConnectorRoomLeaver.PreparedLeave? =
 		if (isAuthorized()) messageSendClient.prepareLeave(threadId) else null
@@ -262,5 +352,8 @@ class MatrixRoomConnector @JvmOverloads constructor(
 	companion object {
 		/** Overall wall-clock budget for [getRecentThreads]'s per-room preview loop (MX-034). */
 		const val DEFAULT_RECENT_THREADS_BUDGET_MS: Long = 10_000L
+
+		/** Maximum invitations returned alongside joined rooms in [getRecentThreads] (MX-062). */
+		const val DEFAULT_INVITATION_LIMIT: Int = 10
 	}
 }

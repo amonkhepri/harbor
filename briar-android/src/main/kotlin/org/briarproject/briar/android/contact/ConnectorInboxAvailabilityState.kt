@@ -4,6 +4,7 @@ enum class ConnectorInboxAvailabilityState {
 	NONE,
 	LOADING,
 	ACCOUNT_UNAVAILABLE,
+	SESSION_EXPIRED,
 	EMPTY,
 	LOAD_FAILED,
 }

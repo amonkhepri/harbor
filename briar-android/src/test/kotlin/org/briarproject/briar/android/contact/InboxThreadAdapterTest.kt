@@ -2,6 +2,7 @@ package org.briarproject.briar.android.contact
 
 import org.briarproject.bramble.test.TestUtils.getContact
 import org.briarproject.briar.api.client.MessageTracker.GroupCount
+import org.briarproject.briar.api.connector.ConnectorSources
 import org.briarproject.briar.api.connector.ConnectorSource
 import org.briarproject.briar.api.connector.ConnectorMessageType
 import org.briarproject.briar.api.identity.AuthorInfo
@@ -37,6 +38,36 @@ class InboxThreadAdapterTest {
 		assertContentsChanged(item.copy(latestActivityMillis = 2L))
 		assertContentsChanged(item.copy(unreadCount = 2))
 		assertContentsChanged(item.copy(isMarkedUnread = true))
+		assertContentsChanged(item.copy(isInvited = true))
+	}
+
+	@Test
+	fun testConnectorContentsDetectIsInvitedChange() {
+		val item = connectorItem()
+
+		assertEquals(
+			true,
+			callback.areContentsTheSame(item, item.copy(isInvited = false)),
+		)
+		assertEquals(
+			false,
+			callback.areContentsTheSame(item, item.copy(isInvited = true)),
+		)
+	}
+
+	@Test
+	fun testMatrixRoomKindChangesRebindTheSameRow() {
+		for (before in listOf(null, true, false)) {
+			val item = connectorItem().copy(
+				connectorSource = ConnectorSources.MATRIX,
+				isDirect = before,
+			)
+			for (after in listOf(null, true, false)) {
+				val refreshed = item.copy(isDirect = after)
+				assertEquals(true, callback.areItemsTheSame(item, refreshed))
+				assertEquals(before == after, callback.areContentsTheSame(item, refreshed))
+			}
+		}
 	}
 
 	@Test

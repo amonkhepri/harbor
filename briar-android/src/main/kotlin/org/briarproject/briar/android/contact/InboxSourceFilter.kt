@@ -6,6 +6,7 @@ import org.briarproject.briar.android.contact.ConnectorInboxAvailabilityState.EM
 import org.briarproject.briar.android.contact.ConnectorInboxAvailabilityState.LOAD_FAILED
 import org.briarproject.briar.android.contact.ConnectorInboxAvailabilityState.LOADING
 import org.briarproject.briar.android.contact.ConnectorInboxAvailabilityState.NONE
+import org.briarproject.briar.android.contact.ConnectorInboxAvailabilityState.SESSION_EXPIRED
 import org.briarproject.briar.api.connector.ConnectorSources
 
 sealed class InboxSourceFilter {
@@ -14,12 +15,14 @@ sealed class InboxSourceFilter {
 
 	open fun emptyText(state: ConnectorInboxAvailabilityState): Int = when (state) {
 		LOADING -> R.string.connector_inbox_loading
+		SESSION_EXPIRED -> R.string.connector_inbox_session_expired
 		ACCOUNT_UNAVAILABLE -> R.string.connector_inbox_account_unavailable
 		LOAD_FAILED -> R.string.connector_inbox_load_failed
 		EMPTY, NONE -> R.string.connector_inbox_empty
 	}
 
-	open fun emptyAction(state: ConnectorInboxAvailabilityState): Int = 0
+	open fun emptyAction(state: ConnectorInboxAvailabilityState): Int =
+		if (state == SESSION_EXPIRED) R.string.connector_reconnect else 0
 
 	object All : InboxSourceFilter() {
 		override fun matches(item: InboxThreadItem): Boolean = true

@@ -364,6 +364,9 @@ class ConnectorConversationRemoteRefreshTest {
 		assertEquals(0, messageState(activity).messages.size)
 	}
 
+	private fun ConnectorConversationRow.messageItem(): ConnectorConversationMessageItem? =
+		(this as? ConnectorConversationRow.Message)?.item
+
 	private fun awaitAdapterUpdate(
 		adapter: ConnectorConversationAdapter,
 		expectedCount: Int,
@@ -398,12 +401,12 @@ class ConnectorConversationRemoteRefreshTest {
 		val manager = getLayoutManager(activity)
 		val rv = getRecyclerView(activity)
 		val adapter = getAdapter(activity)
-		awaitAdapterUpdate(adapter, 15)
+		awaitAdapterUpdate(adapter, 15 + SEPARATORS)
 		layoutRecyclerView(activity)
 
 		// Scroll to event11 with a specific pixel offset
-		val initialAnchorIndex = adapter.currentList.indexOfFirst { it.connectorMessageId == "\$event11" }
-		assertEquals(1, initialAnchorIndex)
+		val initialAnchorIndex = adapter.currentList.indexOfFirst { it.messageItem()?.connectorMessageId == "\$event11" }
+		assertEquals(1 + SEPARATORS, initialAnchorIndex)
 		val expectedOffset = 0
 		manager.scrollToPositionWithOffset(initialAnchorIndex, expectedOffset)
 		layoutRecyclerView(activity)
@@ -415,7 +418,7 @@ class ConnectorConversationRemoteRefreshTest {
 		assertEquals(expectedOffset, initialView!!.top)
 		assertTrue(rv.canScrollVertically(1))
 
-		val anchorItem = adapter.currentList[initialVisiblePos]
+		val anchorItem = adapter.currentList[initialVisiblePos].messageItem()!!
 		val anchorStableId = anchorItem.stableId
 		assertEquals("\$event11", anchorItem.connectorMessageId)
 
@@ -442,11 +445,11 @@ class ConnectorConversationRemoteRefreshTest {
 		fakeConnector.messages.addAll(page1)
 		sub.onUpdate()
 		drainWork()
-		awaitAdapterUpdate(adapter, 20)
+		awaitAdapterUpdate(adapter, 20 + SEPARATORS)
 		layoutRecyclerView(activity)
 
 		val visiblePos1 = manager.findFirstVisibleItemPosition()
-		val visibleItem1 = adapter.currentList[visiblePos1]
+		val visibleItem1 = adapter.currentList[visiblePos1].messageItem()!!
 		assertEquals("\$event11", visibleItem1.connectorMessageId)
 		assertEquals(anchorStableId, visibleItem1.stableId)
 		assertEquals("Message 11 (updated)", visibleItem1.text)
@@ -468,11 +471,11 @@ class ConnectorConversationRemoteRefreshTest {
 		fakeConnector.messages.addAll(page2)
 		sub.onUpdate()
 		drainWork()
-		awaitAdapterUpdate(adapter, 24)
+		awaitAdapterUpdate(adapter, 24 + SEPARATORS)
 		layoutRecyclerView(activity)
 
 		val visiblePos2 = manager.findFirstVisibleItemPosition()
-		val visibleItem2 = adapter.currentList[visiblePos2]
+		val visibleItem2 = adapter.currentList[visiblePos2].messageItem()!!
 		assertEquals("\$event11", visibleItem2.connectorMessageId)
 		assertEquals(anchorStableId, visibleItem2.stableId)
 		val visibleView2 = manager.findViewByPosition(visiblePos2)
@@ -488,11 +491,11 @@ class ConnectorConversationRemoteRefreshTest {
 		)
 		sub.onUpdate()
 		drainWork()
-		awaitAdapterUpdate(adapter, 26)
+		awaitAdapterUpdate(adapter, 26 + SEPARATORS)
 		layoutRecyclerView(activity)
 
 		val visiblePos3 = manager.findFirstVisibleItemPosition()
-		val visibleItem3 = adapter.currentList[visiblePos3]
+		val visibleItem3 = adapter.currentList[visiblePos3].messageItem()!!
 		assertEquals("\$event11", visibleItem3.connectorMessageId)
 		assertEquals(anchorStableId, visibleItem3.stableId)
 		val visibleView3 = manager.findViewByPosition(visiblePos3)
@@ -1156,5 +1159,10 @@ class ConnectorConversationRemoteRefreshTest {
 
 		destroy(activity)
 		drainWork()
+	}
+
+	private companion object {
+		/** All fixture messages share one local day, so the timeline has exactly one separator (MX-078). */
+		const val SEPARATORS = 1
 	}
 }
